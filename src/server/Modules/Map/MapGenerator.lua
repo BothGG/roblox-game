@@ -20,6 +20,7 @@ local Tags = require(Shared.Game.Tags)
 local Log = require(Shared.Lib.Log)
 
 local Props = require(script.Parent.Props)
+local StudGround = require(script.Parent.StudGround)
 
 local log = Log.new("MapGenerator")
 
@@ -34,6 +35,27 @@ local GATE_WIDTH = 26
 local ROAD_RADIUS = PLOTS.RingRadius - PLOTS.Size / 2 - 16
 local STONE = Color3.fromRGB(150, 140, 130)
 local STONE_DARK = Color3.fromRGB(110, 100, 95)
+local STUDS = MAP.Style ~= "Terrain"
+local PLATFORM = MAP.ArenaRadius + MAP.ArenaPlatform -- outer edge of the arena's ground
+local MOAT_OUTER = PLATFORM + MAP.MoatWidth
+local BRIDGE_WIDTH = 20
+
+-- Classic studded colors (like the reference: bright grass, brown dirt)
+local COLORS = {
+	Grass = Color3.fromRGB(75, 151, 75),
+	FieldGrass = Color3.fromRGB(100, 175, 70),
+	Dirt = Color3.fromRGB(160, 110, 60),
+	DirtDark = Color3.fromRGB(124, 92, 70),
+	Road = Color3.fromRGB(215, 190, 140),
+	Sand = Color3.fromRGB(245, 220, 160),
+	ArenaFloor = Color3.fromRGB(175, 125, 75),
+	Bridge = Color3.fromRGB(140, 95, 55),
+	Wall = Color3.fromRGB(230, 230, 235),
+	Stands = { Color3.fromRGB(40, 110, 220), Color3.fromRGB(230, 60, 60), Color3.fromRGB(250, 200, 50) },
+}
+
+-- What the terrain raycasts may hit (the stud ground is added when it's built).
+local groundFilter: { Instance } = { terrain }
 
 type Context = {
 	Map: Folder,
@@ -91,7 +113,7 @@ end
 local function groundAt(x: number, z: number): Vector3?
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { terrain }
+	params.FilterDescendantsInstances = groundFilter
 	local result = Workspace:Raycast(Vector3.new(x, 200, z), Vector3.new(0, -400, 0), params)
 	if not result or result.Material == Enum.Material.Water then
 		return nil
@@ -160,6 +182,123 @@ local function buildTerrain(ctx: Context)
 	end
 end
 
+-- Classic studded island: grass, dirt food fields, road, beach, and the arena
+-- on its own ground in the middle with a water moat and 4 bridges.
+local function onGatePath(x: number, z: number, halfWidth: number): boolean
+	for _, g in GATE_ANGLES do
+		local dir = polar(g, 1)
+		local along = x * dir.X + z * dir.Z
+		local across = math.abs(x * dir.Z - z * dir.X)
+		if along > 0 and across <= halfWidth then
+			return true
+		end
+	end
+	return false
+end
+
+local function studZone(x: number, z: number): string?
+	local r = math.sqrt(x * x + z * z)
+	if r > MAP.IslandRadius + 22 then
+		return nil -- ocean
+	elseif r > MAP.IslandRadius then
+		return "Sand"
+	elseif r <= PLATFORM then
+		return "ArenaFloor"
+	elseif r <= MOAT_OUTER then
+		return if onGatePath(x, z, BRIDGE_WIDTH / 2) then "Bridge" else nil -- moat
+	elseif math.abs(r - ROAD_RADIUS) <= 8 then
+		return "Road"
+	elseif r < ROAD_RADIUS and onGatePath(x, z, 9) then
+		return "Road"
+	elseif r >= MAP.FieldInner and r <= MAP.FieldOuter then
+		-- Patches of brown dirt (where food grows best) in lighter grass.
+		local n = math.noise(x / 36, z / 36, MAP.Seed % 97 + 0.5)
+		if n > 0.3 then
+			return "DirtDark"
+		elseif n > -0.05 then
+			return "Dirt"
+		end
+		return "FieldGrass"
+	end
+	return "Grass"
+end
+
+local function buildStudIsland(ctx: Context)
+	terrain:Clear()
+	terrain.WaterColor = Color3.fromRGB(40, 150, 220)
+	terrain.WaterTransparency = 0.5
+	terrain.WaterWaveSize = 0.1
+	terrain.WaterReflectance = 0.3
+	terrain:SetMaterialColor(Enum.Material.Sand, COLORS.Sand)
+	local size = (MAP.IslandRadius + 160) * 2
+	terrain:FillBlock(CFrame.new(0, -18, 0), Vector3.new(size, 8, size), Enum.Material.Sand)
+	terrain:FillBlock(CFrame.new(0, -8.5, 0), Vector3.new(size, 11, size), Enum.Material.Water) -- surface at y = -3
+
+	local zones = {
+		Grass = { Color = COLORS.Grass, Top = 0 },
+		FieldGrass = { Color = COLORS.FieldGrass, Top = 0 },
+		Dirt = { Color = COLORS.Dirt, Top = 0 },
+		DirtDark = { Color = COLORS.DirtDark, Top = 0 },
+		Road = { Color = COLORS.Road, Top = 0 },
+		Sand = { Color = COLORS.Sand, Top = -1.5 },
+		ArenaFloor = { Color = COLORS.ArenaFloor, Top = 0 },
+		Bridge = { Color = COLORS.Bridge, Top = 0, Material = Enum.Material.WoodPlanks },
+	}
+	local ground = StudGround.Build(ctx.Map, {
+		Cell = 8,
+		Radius = MAP.IslandRadius + 24,
+		Bottom = -14,
+		SideColor = COLORS.DirtDark,
+		Zones = zones,
+		ZoneAt = studZone,
+	})
+	table.insert(groundFilter, ground)
+
+	-- Bridge rails
+	local rails = folder(ctx.Map, "BridgeRails")
+	for _, g in GATE_ANGLES do
+		local dir = polar(g, 1)
+		local side = dir:Cross(Vector3.yAxis)
+		for _, s in { -1, 1 } do
+			for d = PLATFORM, MOAT_OUTER, MAP.MoatWidth / 2 do
+				local p = dir * d + side * s * (BRIDGE_WIDTH / 2 - 0.5)
+				Props.Part(rails, {
+					Name = "RailPost",
+					Size = Vector3.new(1, 4, 1),
+					CFrame = CFrame.new(p + Vector3.new(0, 2, 0)),
+					Color = COLORS.Bridge,
+					Material = Enum.Material.WoodPlanks,
+				})
+			end
+			local mid = dir * (PLATFORM + MOAT_OUTER) / 2 + side * s * (BRIDGE_WIDTH / 2 - 0.5)
+			Props.Part(rails, {
+				Name = "Rail",
+				Size = Vector3.new(1, 1, MAP.MoatWidth + 2),
+				CFrame = CFrame.lookAt(mid + Vector3.new(0, 3.5, 0), mid + Vector3.new(0, 3.5, 0) + dir),
+				Color = COLORS.Bridge,
+				Material = Enum.Material.WoodPlanks,
+			})
+		end
+	end
+
+	-- Invisible walls at the edge of the world
+	local edge = size / 2
+	for _, info in
+		{
+			{ Vector3.new(0, 100, edge), Vector3.new(size, 200, 2) },
+			{ Vector3.new(0, 100, -edge), Vector3.new(size, 200, 2) },
+			{ Vector3.new(edge, 100, 0), Vector3.new(2, 200, size) },
+			{ Vector3.new(-edge, 100, 0), Vector3.new(2, 200, size) },
+		}
+	do
+		Props.Part(
+			ctx.Map,
+			{ Name = "EdgeWall", Size = info[2], CFrame = CFrame.new(info[1]), Transparency = 1, CanQuery = false }
+		)
+	end
+	log:Info("stud ground:", ground:GetAttribute("Parts"), "parts")
+end
+
 --------------------------------------------------------------------------
 -- Arena
 --------------------------------------------------------------------------
@@ -198,14 +337,16 @@ local function buildArena(ctx: Context)
 	local arena = folder(ctx.Map, "Arena")
 	local R = MAP.ArenaRadius
 
-	-- Floor
-	Props.Column(
-		arena,
-		Vector3.new(0, -0.5, 0),
-		1.2,
-		R * 2,
-		{ Name = "Floor", Color = Color3.fromRGB(225, 200, 150), Material = Enum.Material.Sand }
-	)
+	-- Floor (the stud ground already has a dirt floor here)
+	if not STUDS then
+		Props.Column(
+			arena,
+			Vector3.new(0, -0.5, 0),
+			1.2,
+			R * 2,
+			{ Name = "Floor", Color = Color3.fromRGB(225, 200, 150), Material = Enum.Material.Sand }
+		)
+	end
 	Props.Column(arena, Vector3.new(0, 0.7, 0), 0.1, 30, {
 		Name = "CenterMark",
 		Color = Color3.fromRGB(200, 60, 60),
@@ -214,7 +355,7 @@ local function buildArena(ctx: Context)
 	})
 
 	-- Wall (inner edge at R) and stands behind it
-	ringSegments(arena, R + 2, 3, 10, 0, STONE, Enum.Material.Cobblestone, "Wall")
+	ringSegments(arena, R + 2, 3, 10, 0, if STUDS then COLORS.Wall else STONE, Enum.Material.Cobblestone, "Wall")
 	for step = 1, 3 do
 		ringSegments(
 			arena,
@@ -222,7 +363,7 @@ local function buildArena(ctx: Context)
 			7,
 			3 * step + 7,
 			0,
-			if step % 2 == 0 then STONE_DARK else STONE,
+			if STUDS then COLORS.Stands[step] elseif step % 2 == 0 then STONE_DARK else STONE,
 			Enum.Material.Slate,
 			"Stand"
 		)
@@ -232,11 +373,20 @@ local function buildArena(ctx: Context)
 	for _, angle in GATE_ANGLES do
 		local dir = polar(angle, 1)
 		local gatePos = polar(angle, R + 12)
-		Props.GateArch(arena, CFrame.lookAt(gatePos, gatePos + dir), GATE_WIDTH, STONE_DARK)
+		Props.GateArch(
+			arena,
+			CFrame.lookAt(gatePos, gatePos + dir),
+			GATE_WIDTH,
+			if STUDS then COLORS.Stands[2] else STONE_DARK
+		)
 		for _, side in { -1, 1 } do
 			local side3 = dir:Cross(Vector3.yAxis) * side * (GATE_WIDTH / 2 + 5)
 			Props.Torch(arena, polar(angle, R + 1) + side3)
 		end
+	end
+
+	if STUDS then
+		StudGround.Style(arena)
 	end
 
 	-- Markers
@@ -250,10 +400,10 @@ local function buildArena(ctx: Context)
 		marker(ctx, Tags.Stands, CFrame.lookAt(p, Vector3.new(0, p.Y, 0)), Vector3.new(4, 1, 4))
 	end
 
-	-- Leaderboards facing the fields, next to three of the gates
+	-- Leaderboards facing the fields, next to three of the gates (past the moat)
 	for i, board in { "Trophies", "Biggest", "Rebirths" } do
-		local angle = GATE_ANGLES[i] + 18
-		local p = polar(angle, R + 36)
+		local angle = GATE_ANGLES[i] + (if STUDS then 12 else 18)
+		local p = polar(angle, if STUDS then MOAT_OUTER + 8 else R + 36)
 		local facing = polar(angle, 1)
 		for _, x in { -9, 9 } do
 			Props.Column(
@@ -400,7 +550,11 @@ function MapGenerator.Generate(): Folder
 		Rng = Random.new(MAP.Seed),
 	}
 
-	buildTerrain(ctx)
+	if STUDS then
+		buildStudIsland(ctx)
+	else
+		buildTerrain(ctx)
+	end
 	buildArena(ctx)
 	buildFields(ctx)
 	buildBasesAndDecor(ctx)

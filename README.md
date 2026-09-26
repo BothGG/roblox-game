@@ -48,4 +48,4 @@ in battle: **Click / F = Attack, Q = Special** (or the on-screen buttons on mobi
 - **[docs/MAP_GUIDE.md](docs/MAP_GUIDE.md)**: replacing the generated island with a hand-built map
 - **[docs/LAUNCH.md](docs/LAUNCH.md)**: publishing checklist
 
-`scripts/check.sh` runs formatting, build, type check and **51 unit tests**. CI runs it on every push.
+`scripts/check.sh` runs formatting, build, type check and **53 unit tests**. CI runs it on every push.

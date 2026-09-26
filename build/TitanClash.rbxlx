@@ -494,8 +494,15 @@ local GameConfig = {
 		Seed = 2026, -- change for a different random layout of props/spawns
 		IslandRadius = 330,
 		ArenaRadius = 95,
-		FieldInner = 120, -- food fields ring
-		FieldOuter = 195,
+		FieldInner = 143, -- food fields ring
+		FieldOuter = 197,
+		-- "Studs" = classic Roblox look (Plastic parts with studs, like a baseplate).
+		-- "Terrain" = smooth terrain grass.
+		Style = "Studs",
+		-- The arena stands on its own ground in the middle, with a water moat
+		-- and 4 bridges around it.
+		ArenaPlatform = 30, -- ground around the arena wall (studs past ArenaRadius)
+		MoatWidth = 10,
 	},
 
 	Plots = {
@@ -5674,6 +5681,7 @@ local Tags = require(Shared.Game.Tags)
 local Log = require(Shared.Lib.Log)
 
 local Props = require(script.Parent.Props)
+local StudGround = require(script.Parent.StudGround)
 
 local log = Log.new("MapGenerator")
 
@@ -5688,6 +5696,27 @@ local GATE_WIDTH = 26
 local ROAD_RADIUS = PLOTS.RingRadius - PLOTS.Size / 2 - 16
 local STONE = Color3.fromRGB(150, 140, 130)
 local STONE_DARK = Color3.fromRGB(110, 100, 95)
+local STUDS = MAP.Style ~= "Terrain"
+local PLATFORM = MAP.ArenaRadius + MAP.ArenaPlatform -- outer edge of the arena's ground
+local MOAT_OUTER = PLATFORM + MAP.MoatWidth
+local BRIDGE_WIDTH = 20
+
+-- Classic studded colors (like the reference: bright grass, brown dirt)
+local COLORS = {
+	Grass = Color3.fromRGB(75, 151, 75),
+	FieldGrass = Color3.fromRGB(100, 175, 70),
+	Dirt = Color3.fromRGB(160, 110, 60),
+	DirtDark = Color3.fromRGB(124, 92, 70),
+	Road = Color3.fromRGB(215, 190, 140),
+	Sand = Color3.fromRGB(245, 220, 160),
+	ArenaFloor = Color3.fromRGB(175, 125, 75),
+	Bridge = Color3.fromRGB(140, 95, 55),
+	Wall = Color3.fromRGB(230, 230, 235),
+	Stands = { Color3.fromRGB(40, 110, 220), Color3.fromRGB(230, 60, 60), Color3.fromRGB(250, 200, 50) },
+}
+
+-- What the terrain raycasts may hit (the stud ground is added when it's built).
+local groundFilter: { Instance } = { terrain }
 
 type Context = {
 	Map: Folder,
@@ -5745,7 +5774,7 @@ end
 local function groundAt(x: number, z: number): Vector3?
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { terrain }
+	params.FilterDescendantsInstances = groundFilter
 	local result = Workspace:Raycast(Vector3.new(x, 200, z), Vector3.new(0, -400, 0), params)
 	if not result or result.Material == Enum.Material.Water then
 		return nil
@@ -5814,6 +5843,123 @@ local function buildTerrain(ctx: Context)
 	end
 end
 
+-- Classic studded island: grass, dirt food fields, road, beach, and the arena
+-- on its own ground in the middle with a water moat and 4 bridges.
+local function onGatePath(x: number, z: number, halfWidth: number): boolean
+	for _, g in GATE_ANGLES do
+		local dir = polar(g, 1)
+		local along = x * dir.X + z * dir.Z
+		local across = math.abs(x * dir.Z - z * dir.X)
+		if along > 0 and across <= halfWidth then
+			return true
+		end
+	end
+	return false
+end
+
+local function studZone(x: number, z: number): string?
+	local r = math.sqrt(x * x + z * z)
+	if r > MAP.IslandRadius + 22 then
+		return nil -- ocean
+	elseif r > MAP.IslandRadius then
+		return "Sand"
+	elseif r <= PLATFORM then
+		return "ArenaFloor"
+	elseif r <= MOAT_OUTER then
+		return if onGatePath(x, z, BRIDGE_WIDTH / 2) then "Bridge" else nil -- moat
+	elseif math.abs(r - ROAD_RADIUS) <= 8 then
+		return "Road"
+	elseif r < ROAD_RADIUS and onGatePath(x, z, 9) then
+		return "Road"
+	elseif r >= MAP.FieldInner and r <= MAP.FieldOuter then
+		-- Patches of brown dirt (where food grows best) in lighter grass.
+		local n = math.noise(x / 36, z / 36, MAP.Seed % 97 + 0.5)
+		if n > 0.3 then
+			return "DirtDark"
+		elseif n > -0.05 then
+			return "Dirt"
+		end
+		return "FieldGrass"
+	end
+	return "Grass"
+end
+
+local function buildStudIsland(ctx: Context)
+	terrain:Clear()
+	terrain.WaterColor = Color3.fromRGB(40, 150, 220)
+	terrain.WaterTransparency = 0.5
+	terrain.WaterWaveSize = 0.1
+	terrain.WaterReflectance = 0.3
+	terrain:SetMaterialColor(Enum.Material.Sand, COLORS.Sand)
+	local size = (MAP.IslandRadius + 160) * 2
+	terrain:FillBlock(CFrame.new(0, -18, 0), Vector3.new(size, 8, size), Enum.Material.Sand)
+	terrain:FillBlock(CFrame.new(0, -8.5, 0), Vector3.new(size, 11, size), Enum.Material.Water) -- surface at y = -3
+
+	local zones = {
+		Grass = { Color = COLORS.Grass, Top = 0 },
+		FieldGrass = { Color = COLORS.FieldGrass, Top = 0 },
+		Dirt = { Color = COLORS.Dirt, Top = 0 },
+		DirtDark = { Color = COLORS.DirtDark, Top = 0 },
+		Road = { Color = COLORS.Road, Top = 0 },
+		Sand = { Color = COLORS.Sand, Top = -1.5 },
+		ArenaFloor = { Color = COLORS.ArenaFloor, Top = 0 },
+		Bridge = { Color = COLORS.Bridge, Top = 0, Material = Enum.Material.WoodPlanks },
+	}
+	local ground = StudGround.Build(ctx.Map, {
+		Cell = 8,
+		Radius = MAP.IslandRadius + 24,
+		Bottom = -14,
+		SideColor = COLORS.DirtDark,
+		Zones = zones,
+		ZoneAt = studZone,
+	})
+	table.insert(groundFilter, ground)
+
+	-- Bridge rails
+	local rails = folder(ctx.Map, "BridgeRails")
+	for _, g in GATE_ANGLES do
+		local dir = polar(g, 1)
+		local side = dir:Cross(Vector3.yAxis)
+		for _, s in { -1, 1 } do
+			for d = PLATFORM, MOAT_OUTER, MAP.MoatWidth / 2 do
+				local p = dir * d + side * s * (BRIDGE_WIDTH / 2 - 0.5)
+				Props.Part(rails, {
+					Name = "RailPost",
+					Size = Vector3.new(1, 4, 1),
+					CFrame = CFrame.new(p + Vector3.new(0, 2, 0)),
+					Color = COLORS.Bridge,
+					Material = Enum.Material.WoodPlanks,
+				})
+			end
+			local mid = dir * (PLATFORM + MOAT_OUTER) / 2 + side * s * (BRIDGE_WIDTH / 2 - 0.5)
+			Props.Part(rails, {
+				Name = "Rail",
+				Size = Vector3.new(1, 1, MAP.MoatWidth + 2),
+				CFrame = CFrame.lookAt(mid + Vector3.new(0, 3.5, 0), mid + Vector3.new(0, 3.5, 0) + dir),
+				Color = COLORS.Bridge,
+				Material = Enum.Material.WoodPlanks,
+			})
+		end
+	end
+
+	-- Invisible walls at the edge of the world
+	local edge = size / 2
+	for _, info in
+		{
+			{ Vector3.new(0, 100, edge), Vector3.new(size, 200, 2) },
+			{ Vector3.new(0, 100, -edge), Vector3.new(size, 200, 2) },
+			{ Vector3.new(edge, 100, 0), Vector3.new(2, 200, size) },
+			{ Vector3.new(-edge, 100, 0), Vector3.new(2, 200, size) },
+		}
+	do
+		Props.Part(
+			ctx.Map,
+			{ Name = "EdgeWall", Size = info[2], CFrame = CFrame.new(info[1]), Transparency = 1, CanQuery = false }
+		)
+	end
+	log:Info("stud ground:", ground:GetAttribute("Parts"), "parts")
+end
+
 --------------------------------------------------------------------------
 -- Arena
 --------------------------------------------------------------------------
@@ -5852,14 +5998,16 @@ local function buildArena(ctx: Context)
 	local arena = folder(ctx.Map, "Arena")
 	local R = MAP.ArenaRadius
 
-	-- Floor
-	Props.Column(
-		arena,
-		Vector3.new(0, -0.5, 0),
-		1.2,
-		R * 2,
-		{ Name = "Floor", Color = Color3.fromRGB(225, 200, 150), Material = Enum.Material.Sand }
-	)
+	-- Floor (the stud ground already has a dirt floor here)
+	if not STUDS then
+		Props.Column(
+			arena,
+			Vector3.new(0, -0.5, 0),
+			1.2,
+			R * 2,
+			{ Name = "Floor", Color = Color3.fromRGB(225, 200, 150), Material = Enum.Material.Sand }
+		)
+	end
 	Props.Column(arena, Vector3.new(0, 0.7, 0), 0.1, 30, {
 		Name = "CenterMark",
 		Color = Color3.fromRGB(200, 60, 60),
@@ -5868,7 +6016,7 @@ local function buildArena(ctx: Context)
 	})
 
 	-- Wall (inner edge at R) and stands behind it
-	ringSegments(arena, R + 2, 3, 10, 0, STONE, Enum.Material.Cobblestone, "Wall")
+	ringSegments(arena, R + 2, 3, 10, 0, if STUDS then COLORS.Wall else STONE, Enum.Material.Cobblestone, "Wall")
 	for step = 1, 3 do
 		ringSegments(
 			arena,
@@ -5876,7 +6024,7 @@ local function buildArena(ctx: Context)
 			7,
 			3 * step + 7,
 			0,
-			if step % 2 == 0 then STONE_DARK else STONE,
+			if STUDS then COLORS.Stands[step] elseif step % 2 == 0 then STONE_DARK else STONE,
 			Enum.Material.Slate,
 			"Stand"
 		)
@@ -5886,11 +6034,20 @@ local function buildArena(ctx: Context)
 	for _, angle in GATE_ANGLES do
 		local dir = polar(angle, 1)
 		local gatePos = polar(angle, R + 12)
-		Props.GateArch(arena, CFrame.lookAt(gatePos, gatePos + dir), GATE_WIDTH, STONE_DARK)
+		Props.GateArch(
+			arena,
+			CFrame.lookAt(gatePos, gatePos + dir),
+			GATE_WIDTH,
+			if STUDS then COLORS.Stands[2] else STONE_DARK
+		)
 		for _, side in { -1, 1 } do
 			local side3 = dir:Cross(Vector3.yAxis) * side * (GATE_WIDTH / 2 + 5)
 			Props.Torch(arena, polar(angle, R + 1) + side3)
 		end
+	end
+
+	if STUDS then
+		StudGround.Style(arena)
 	end
 
 	-- Markers
@@ -5904,10 +6061,10 @@ local function buildArena(ctx: Context)
 		marker(ctx, Tags.Stands, CFrame.lookAt(p, Vector3.new(0, p.Y, 0)), Vector3.new(4, 1, 4))
 	end
 
-	-- Leaderboards facing the fields, next to three of the gates
+	-- Leaderboards facing the fields, next to three of the gates (past the moat)
 	for i, board in { "Trophies", "Biggest", "Rebirths" } do
-		local angle = GATE_ANGLES[i] + 18
-		local p = polar(angle, R + 36)
+		local angle = GATE_ANGLES[i] + (if STUDS then 12 else 18)
+		local p = polar(angle, if STUDS then MOAT_OUTER + 8 else R + 36)
 		local facing = polar(angle, 1)
 		for _, x in { -9, 9 } do
 			Props.Column(
@@ -6054,7 +6211,11 @@ function MapGenerator.Generate(): Folder
 		Rng = Random.new(MAP.Seed),
 	}
 
-	buildTerrain(ctx)
+	if STUDS then
+		buildStudIsland(ctx)
+	else
+		buildTerrain(ctx)
+	end
 	buildArena(ctx)
 	buildFields(ctx)
 	buildBasesAndDecor(ctx)
@@ -6462,17 +6623,182 @@ return Props
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="55">
+            <Properties>
+              <string name="Name">StudGround</string>
+              <string name="Source"><![CDATA[--[[
+	StudGround: ground made of Parts in the classic Roblox look: bright
+	Plastic colors, Studs on top and Inlets on the sides (like a Lego
+	baseplate), instead of smooth Terrain.
+
+	The ground is a grid of Cell x Cell squares. ZoneAt(x, z) names the zone
+	of each square (nil = nothing there, e.g. water). Squares next to each
+	other in a row with the same zone are merged into one long part, so a
+	whole island is only a few hundred parts.
+
+	  StudGround.Build(parent, {
+		Cell = 8, Radius = 360, Bottom = -14, SideColor = dirtColor,
+		Zones = { Grass = { Color = green, Top = 0 }, Sand = { Color = sand, Top = -1.5 } },
+		ZoneAt = function(x, z) return "Grass" end,
+	  }) -> Folder
+
+	StudGround.Style(instance) gives existing parts the same look (used for
+	bases, arena walls and stands).
+]]
+
+local StudGround = {}
+
+export type Zone = { Color: Color3, Top: number, Material: Enum.Material? }
+export type Options = {
+	Cell: number,
+	Radius: number,
+	Bottom: number,
+	SideColor: Color3,
+	Zones: { [string]: Zone },
+	ZoneAt: (x: number, z: number) -> string?,
+}
+
+local SIDES = { "LeftSurface", "RightSurface", "FrontSurface", "BackSurface" }
+
+local function stud(part: BasePart, sides: Enum.SurfaceType)
+	part.Material = Enum.Material.Plastic
+	part.TopSurface = Enum.SurfaceType.Studs
+	part.BottomSurface = Enum.SurfaceType.Inlet
+	for _, side in SIDES do
+		(part :: any)[side] = sides
+	end
+end
+
+-- Classic look for parts that are already built (skips glass/neon/effects).
+local KEEP = {
+	[Enum.Material.Neon] = true,
+	[Enum.Material.Glass] = true,
+	[Enum.Material.ForceField] = true,
+	[Enum.Material.Wood] = true,
+	[Enum.Material.WoodPlanks] = true,
+}
+function StudGround.Style(root: Instance)
+	local parts = if root:IsA("BasePart") then { root } else root:GetDescendants()
+	for _, d in parts do
+		if
+			d:IsA("Part")
+			and d.Shape == Enum.PartType.Block
+			and not KEEP[d.Material]
+			and d.Transparency < 0.5
+			and d:GetAttribute("Paint") == nil
+		then
+			stud(d, Enum.SurfaceType.Inlet)
+		end
+	end
+end
+
+local function newPart(parent: Instance, name: string, size: Vector3, position: Vector3, color: Color3): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.Size = size
+	p.Position = position
+	p.Color = color
+	p.Parent = parent
+	return p
+end
+
+function StudGround.Build(parent: Instance, opts: Options): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = "Ground"
+	local cell = opts.Cell
+	local count = math.ceil(opts.Radius * 2 / cell)
+	local origin = -count * cell / 2
+	local parts = 0
+
+	for row = 0, count - 1 do
+		local z = origin + (row + 0.5) * cell
+		-- Collect runs of equal zones in this row.
+		local runs = {}
+		local current: { Zone: string, From: number, To: number }? = nil
+		for column = 0, count - 1 do
+			local x = origin + (column + 0.5) * cell
+			local zone = opts.ZoneAt(x, z)
+			if zone and not opts.Zones[zone] then
+				zone = nil
+			end
+			if current and current.Zone == zone and current.To == column - 1 then
+				current.To = column
+			else
+				if current then
+					table.insert(runs, current)
+				end
+				current = if zone then { Zone = zone, From = column, To = column } else nil
+			end
+		end
+		if current then
+			table.insert(runs, current)
+		end
+
+		-- One dirt body under each stretch of touching runs, one colored top per run.
+		local i = 1
+		while i <= #runs do
+			local j = i
+			local lowest = opts.Zones[runs[i].Zone].Top
+			while j < #runs and runs[j + 1].From == runs[j].To + 1 do
+				j += 1
+				lowest = math.min(lowest, opts.Zones[runs[j].Zone].Top)
+			end
+			local bodyTop = lowest - 2
+			local fromX = origin + runs[i].From * cell
+			local toX = origin + (runs[j].To + 1) * cell
+			if bodyTop > opts.Bottom then
+				local body = newPart(
+					folder,
+					"Dirt",
+					Vector3.new(toX - fromX, bodyTop - opts.Bottom, cell),
+					Vector3.new((fromX + toX) / 2, (bodyTop + opts.Bottom) / 2, z),
+					opts.SideColor
+				)
+				stud(body, Enum.SurfaceType.Inlet)
+				parts += 1
+			end
+			for k = i, j do
+				local run = runs[k]
+				local zone = opts.Zones[run.Zone]
+				local x0 = origin + run.From * cell
+				local x1 = origin + (run.To + 1) * cell
+				local top = newPart(
+					folder,
+					run.Zone,
+					Vector3.new(x1 - x0, zone.Top - bodyTop, cell),
+					Vector3.new((x0 + x1) / 2, (zone.Top + bodyTop) / 2, z),
+					zone.Color
+				)
+				stud(top, Enum.SurfaceType.Inlet)
+				if zone.Material then
+					top.Material = zone.Material
+				end
+				parts += 1
+			end
+			i = j + 1
+		end
+	end
+	folder:SetAttribute("Parts", parts)
+	folder.Parent = parent
+	return folder
+end
+
+return StudGround
+]]></string>
+            </Properties>
+          </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="55">
+      <Item class="Folder" referent="56">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="Folder" referent="56">
+        <Item class="Folder" referent="57">
           <Properties>
             <string name="Name">Base</string>
           </Properties>
-          <Item class="ModuleScript" referent="57">
+          <Item class="ModuleScript" referent="58">
             <Properties>
               <string name="Name">BaseService</string>
               <string name="Source"><![CDATA[--[[
@@ -6495,6 +6821,8 @@ local GameConfig = require(Shared.Config.GameConfig)
 local Rules = require(Shared.Game.Rules)
 local Log = require(Shared.Lib.Log)
 local Net = require(Shared.Net)
+
+local StudGround = require(game:GetService("ServerScriptService"):WaitForChild("Server").Modules.Map.StudGround)
 
 local log = Log.new("BaseService")
 
@@ -6803,6 +7131,9 @@ function BaseService:_build(parent: Instance, index: number, anchorCf: CFrame): 
 	local creatures = Instance.new("Folder")
 	creatures.Name = "Titans"
 	creatures.Parent = model
+	if GameConfig.Map.Style ~= "Terrain" then
+		StudGround.Style(model) -- classic studded look, like the island
+	end
 	model.Parent = parent
 
 	local plot: Plot = {
@@ -6928,7 +7259,7 @@ return BaseService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="58">
+          <Item class="ModuleScript" referent="59">
             <Properties>
               <string name="Name">CreatureService</string>
               <string name="Source"><![CDATA[--[[
@@ -7508,11 +7839,11 @@ return CreatureService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="59">
+        <Item class="Folder" referent="60">
           <Properties>
             <string name="Name">Battle</string>
           </Properties>
-          <Item class="ModuleScript" referent="60">
+          <Item class="ModuleScript" referent="61">
             <Properties>
               <string name="Name">BattleService</string>
               <string name="Source"><![CDATA[--[[
@@ -8603,11 +8934,11 @@ return BattleService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="61">
+        <Item class="Folder" referent="62">
           <Properties>
             <string name="Name">Core</string>
           </Properties>
-          <Item class="ModuleScript" referent="62">
+          <Item class="ModuleScript" referent="63">
             <Properties>
               <string name="Name">AdminService</string>
               <string name="Source"><![CDATA[--[[
@@ -8757,7 +9088,7 @@ return AdminService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="63">
+          <Item class="ModuleScript" referent="64">
             <Properties>
               <string name="Name">DataService</string>
               <string name="Source"><![CDATA[--[[
@@ -8975,7 +9306,7 @@ return DataService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="64">
+          <Item class="ModuleScript" referent="65">
             <Properties>
               <string name="Name">FxService</string>
               <string name="Source"><![CDATA[--[[
@@ -9018,7 +9349,7 @@ return FxService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="65">
+          <Item class="ModuleScript" referent="66">
             <Properties>
               <string name="Name">SettingsService</string>
               <string name="Source"><![CDATA[--[[
@@ -9056,11 +9387,11 @@ return SettingsService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="66">
+        <Item class="Folder" referent="67">
           <Properties>
             <string name="Name">Economy</string>
           </Properties>
-          <Item class="ModuleScript" referent="67">
+          <Item class="ModuleScript" referent="68">
             <Properties>
               <string name="Name">EggService</string>
               <string name="Source"><![CDATA[--[[
@@ -9185,7 +9516,7 @@ return EggService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="68">
+          <Item class="ModuleScript" referent="69">
             <Properties>
               <string name="Name">RebirthService</string>
               <string name="Source"><![CDATA[--[[
@@ -9268,11 +9599,11 @@ return RebirthService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="69">
+        <Item class="Folder" referent="70">
           <Properties>
             <string name="Name">Events</string>
           </Properties>
-          <Item class="ModuleScript" referent="70">
+          <Item class="ModuleScript" referent="71">
             <Properties>
               <string name="Name">EventService</string>
               <string name="Source"><![CDATA[--[[
@@ -9423,11 +9754,11 @@ return EventService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="71">
+        <Item class="Folder" referent="72">
           <Properties>
             <string name="Name">Food</string>
           </Properties>
-          <Item class="ModuleScript" referent="72">
+          <Item class="ModuleScript" referent="73">
             <Properties>
               <string name="Name">FoodService</string>
               <string name="Source"><![CDATA[--[[
@@ -9782,7 +10113,7 @@ return FoodService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="73">
+          <Item class="ModuleScript" referent="74">
             <Properties>
               <string name="Name">StealService</string>
               <string name="Source"><![CDATA[--[[
@@ -10092,11 +10423,11 @@ return StealService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="74">
+        <Item class="Folder" referent="75">
           <Properties>
             <string name="Name">Progress</string>
           </Properties>
-          <Item class="ModuleScript" referent="75">
+          <Item class="ModuleScript" referent="76">
             <Properties>
               <string name="Name">CodeService</string>
               <string name="Source"><![CDATA[--[[
@@ -10145,7 +10476,7 @@ return CodeService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="76">
+          <Item class="ModuleScript" referent="77">
             <Properties>
               <string name="Name">DailyRewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -10194,7 +10525,7 @@ return DailyRewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="77">
+          <Item class="ModuleScript" referent="78">
             <Properties>
               <string name="Name">IndexService</string>
               <string name="Source"><![CDATA[--[[
@@ -10244,7 +10575,7 @@ return IndexService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="78">
+          <Item class="ModuleScript" referent="79">
             <Properties>
               <string name="Name">OfflineService</string>
               <string name="Source"><![CDATA[--[[
@@ -10295,7 +10626,7 @@ return OfflineService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="79">
+          <Item class="ModuleScript" referent="80">
             <Properties>
               <string name="Name">QuestService</string>
               <string name="Source"><![CDATA[--[[
@@ -10399,7 +10730,7 @@ return QuestService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="80">
+          <Item class="ModuleScript" referent="81">
             <Properties>
               <string name="Name">RewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -10469,7 +10800,7 @@ return RewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="81">
+          <Item class="ModuleScript" referent="82">
             <Properties>
               <string name="Name">TutorialService</string>
               <string name="Source"><![CDATA[--[[
@@ -10544,11 +10875,11 @@ return TutorialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="82">
+        <Item class="Folder" referent="83">
           <Properties>
             <string name="Name">Social</string>
           </Properties>
-          <Item class="ModuleScript" referent="83">
+          <Item class="ModuleScript" referent="84">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -10736,7 +11067,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="84">
+          <Item class="ModuleScript" referent="85">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -10935,7 +11266,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="85">
+          <Item class="ModuleScript" referent="86">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -11111,11 +11442,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="86">
+        <Item class="Folder" referent="87">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="87">
+          <Item class="ModuleScript" referent="88">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -11253,11 +11584,11 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="88">
+        <Item class="Folder" referent="89">
           <Properties>
             <string name="Name">Wild</string>
           </Properties>
-          <Item class="ModuleScript" referent="89">
+          <Item class="ModuleScript" referent="90">
             <Properties>
               <string name="Name">WildService</string>
               <string name="Source"><![CDATA[--[[
@@ -11364,14 +11695,7 @@ end
 --------------------------------------------------------------------------
 
 local function groundAt(position: Vector3): Vector3?
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { Workspace.Terrain }
-	local hit = Workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -160, 0), params)
-	if hit and hit.Material ~= Enum.Material.Water then
-		return hit.Position
-	end
-	return nil
+	return Map:GroundAt(position)
 end
 
 local function displayName(creatureId: string, mutation: string?): string
@@ -11674,11 +11998,11 @@ return WildService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="90">
+        <Item class="Folder" referent="91">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="91">
+          <Item class="ModuleScript" referent="92">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -11697,6 +12021,7 @@ return WildService
 	  MapService.Leaderboards -> { BasePart }
 	  MapService:RandomMeteorPoint() -> Vector3
 	  MapService:IsInArena(position) -> boolean
+	  MapService:GroundAt(position) -> Vector3? (nil over water)
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -11862,11 +12187,24 @@ function MapService:RandomMeteorPoint(): Vector3
 	local r = math.sqrt(inner * inner + math.random() * (outer * outer - inner * inner))
 	local a = math.random() * math.pi * 2
 	local point = center + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
+	return self:GroundAt(point) or point
+end
+
+-- Ground surface (terrain or the stud ground) below a point, or nil over water.
+function MapService:GroundAt(point: Vector3): Vector3?
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { Workspace.Terrain }
+	local filter: { Instance } = { Workspace.Terrain }
+	local ground = self.Map and self.Map:FindFirstChild("Ground")
+	if ground then
+		table.insert(filter, ground)
+	end
+	params.FilterDescendantsInstances = filter
 	local hit = Workspace:Raycast(point + Vector3.new(0, 300, 0), Vector3.new(0, -600, 0), params)
-	return if hit then hit.Position else point
+	if not hit or hit.Material == Enum.Material.Water then
+		return nil
+	end
+	return hit.Position
 end
 
 return MapService
@@ -11877,23 +12215,23 @@ return MapService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="92">
+  <Item class="StarterPlayer" referent="93">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="93">
+    <Item class="StarterPlayerScripts" referent="94">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="94">
+      <Item class="Folder" referent="95">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="95">
+        <Item class="Folder" referent="96">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="96">
+          <Item class="ModuleScript" referent="97">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -12006,7 +12344,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="97">
+          <Item class="ModuleScript" referent="98">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -12109,7 +12447,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="98">
+          <Item class="ModuleScript" referent="99">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -12160,7 +12498,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="99">
+          <Item class="ModuleScript" referent="100">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -12214,7 +12552,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="100">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -12300,7 +12638,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -12363,7 +12701,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="103">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -12390,7 +12728,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="103">
+          <Item class="ModuleScript" referent="104">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -12555,7 +12893,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="104">
+          <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -12673,7 +13011,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="105">
+          <Item class="ModuleScript" referent="106">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -12743,7 +13081,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="106">
+        <Item class="LocalScript" referent="107">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -12760,11 +13098,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="107">
+        <Item class="Folder" referent="108">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="108">
+          <Item class="ModuleScript" referent="109">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -12799,11 +13137,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="109">
+        <Item class="Folder" referent="110">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="110">
+          <Item class="ModuleScript" referent="111">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -13022,7 +13360,7 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="111">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
@@ -13175,7 +13513,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="112">
+          <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -13578,11 +13916,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="113">
+          <Item class="Folder" referent="114">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="114">
+            <Item class="ModuleScript" referent="115">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -13660,7 +13998,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="115">
+            <Item class="ModuleScript" referent="116">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -13887,7 +14225,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="116">
+            <Item class="ModuleScript" referent="117">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13974,7 +14312,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="117">
+            <Item class="ModuleScript" referent="118">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14067,7 +14405,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="118">
+            <Item class="ModuleScript" referent="119">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14154,7 +14492,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="119">
+            <Item class="ModuleScript" referent="120">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14283,7 +14621,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="120">
+            <Item class="ModuleScript" referent="121">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14361,7 +14699,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="121">
+            <Item class="ModuleScript" referent="122">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14427,7 +14765,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="122">
+            <Item class="ModuleScript" referent="123">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -14538,7 +14876,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="123">
+            <Item class="ModuleScript" referent="124">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -14662,7 +15000,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="124">
+            <Item class="ModuleScript" referent="125">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -14820,7 +15158,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="125">
+          <Item class="ModuleScript" referent="126">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -15054,7 +15392,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="126">
+          <Item class="ModuleScript" referent="127">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -15241,7 +15579,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="127">
+          <Item class="ModuleScript" referent="128">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -15377,7 +15715,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="128">
+          <Item class="ModuleScript" referent="129">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -15508,7 +15846,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="129">
+  <Item class="Workspace" referent="130">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

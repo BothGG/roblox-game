@@ -19,6 +19,8 @@ local Rules = require(Shared.Game.Rules)
 local Log = require(Shared.Lib.Log)
 local Net = require(Shared.Net)
 
+local StudGround = require(game:GetService("ServerScriptService"):WaitForChild("Server").Modules.Map.StudGround)
+
 local log = Log.new("BaseService")
 
 export type Plot = {
@@ -326,6 +328,9 @@ function BaseService:_build(parent: Instance, index: number, anchorCf: CFrame): 
 	local creatures = Instance.new("Folder")
 	creatures.Name = "Titans"
 	creatures.Parent = model
+	if GameConfig.Map.Style ~= "Terrain" then
+		StudGround.Style(model) -- classic studded look, like the island
+	end
 	model.Parent = parent
 
 	local plot: Plot = {

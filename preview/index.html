@@ -245,7 +245,7 @@
     Winged: { id: "Breath", name: "Fire Breath", mult: 1.4, cd: 6, shape: "Cone", rangeMult: 2.2, delay: 0.2 },
   };
   const BATTLE = { attackCd: 0.7, range: 8, maxSpeed: 34, duration: 90, countdown: 3 };
-  const MAP = { island: 330, arena: 95, fieldIn: 120, fieldOut: 195, plotRing: 262, plotSize: 74, plots: 12 };
+  const MAP = { island: 330, arena: 95, fieldIn: 143, fieldOut: 197, plotRing: 262, plotSize: 74, plots: 12 };
   const ROAD = MAP.plotRing - MAP.plotSize / 2 - 16;
   const SCALE_PER_LEVEL = 0.12;
 
@@ -1143,12 +1143,13 @@
     const buckets = new Map();
     const remove = [];
     root.traverse((o) => {
-      if (!o.isMesh || o.userData.paint !== undefined || o.userData.glow || o.material.map) return;
+      if (!o.isMesh || o.userData.paint !== undefined || o.userData.glow || (o.material.map && !o.material.userData.worldUV)) return;
       let ancestor = o.parent, dynamic = false;
       while (ancestor && ancestor !== root) { if (ancestor.userData.dynamic) dynamic = true; ancestor = ancestor.parent; }
       if (dynamic) return;
       const g = o.geometry.clone();
       g.applyMatrix4(o.matrixWorld);
+      if (o.material.userData.worldUV) worldUV(g);
       const key = o.material.uuid + (o.castShadow ? "s" : "n");
       if (!buckets.has(key)) buckets.set(key, { material: o.material, cast: o.castShadow, geos: [] });
       buckets.get(key).geos.push(g.index ? g : g);
@@ -1179,23 +1180,136 @@
     return b;
   }
 
-  disc(world, 3200, -0.6, rgb(40, 150, 200), { shadows: false });
-  disc(world, MAP.island + 22, -0.2, rgb(240, 215, 150));
-  disc(world, MAP.island, 0, rgb(110, 185, 85));
-  const field = new THREE.RingGeometry(MAP.fieldIn, MAP.fieldOut, 96); field.rotateX(-Math.PI / 2);
-  addMesh(world, field, T(0, 0.03, 0), mat(rgb(95, 170, 75)), false).receiveShadow = true;
-  const road = new THREE.RingGeometry(ROAD - 8, ROAD + 8, 96); road.rotateX(-Math.PI / 2);
-  addMesh(world, road, T(0, 0.05, 0), mat(rgb(165, 130, 90)), false).receiveShadow = true;
-  for (const g of GATES) {
-    const len = ROAD - MAP.arena, mid = polar(g, (ROAD + MAP.arena) / 2);
-    box(world, 18, 0.3, len, mul(T(mid.x, 0.08, mid.z), R(0, Math.atan2(mid.x, mid.z), 0)), rgb(165, 130, 90), { shadows: false });
+  // ---- Classic studded ground (port of Modules/Map/StudGround.lua) ------
+  // Canvas textures: round studs on top, inlet panels on the sides. They are
+  // grey so one texture works for every color (the color multiplies it).
+  const STUD_TEX = (() => {
+    const c = document.createElement("canvas"); c.width = c.height = 128; const g = c.getContext("2d");
+    g.fillStyle = "#d8d8d8"; g.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+      const cx = x * 32 + 16, cy = y * 32 + 16;
+      g.fillStyle = "rgba(0,0,0,0.28)"; g.beginPath(); g.arc(cx + 1.5, cy + 2.5, 10.5, 0, Math.PI * 2); g.fill(); // shadow
+      const gr = g.createLinearGradient(cx - 10, cy - 10, cx + 10, cy + 10);
+      gr.addColorStop(0, "#ffffff"); gr.addColorStop(1, "#c4c4c4");
+      g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, 10, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = "rgba(0,0,0,0.18)"; g.lineWidth = 1.5; g.stroke();
+    }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t;
+  })();
+  const INLET_TEX = (() => {
+    const c = document.createElement("canvas"); c.width = c.height = 128; const g = c.getContext("2d");
+    g.fillStyle = "#d4d4d4"; g.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) {
+      const px = x * 64 + 10, py = y * 64 + 10;
+      g.strokeStyle = "rgba(0,0,0,0.32)"; g.lineWidth = 4; g.strokeRect(px, py, 44, 44); // inset panel
+      g.strokeStyle = "rgba(255,255,255,0.45)"; g.lineWidth = 2; g.strokeRect(px + 3, py + 3, 44, 44);
+      g.fillStyle = "rgba(0,0,0,0.3)"; g.fillRect(px + 18, py + 30, 8, 14); // the little notch
+    }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t;
+  })();
+  const studMats = new Map();
+  function studMat(color, kind) {
+    const key = color + kind;
+    if (!studMats.has(key)) {
+      const m = new THREE.MeshLambertMaterial({ color, map: kind === "inlet" ? INLET_TEX : STUD_TEX });
+      m.userData.worldUV = true; m.userData.shared = true;
+      studMats.set(key, m);
+    }
+    return studMats.get(key);
+  }
+  // UVs from world position so the stud texture tiles evenly on any size (1 stud = 1 unit, 4 per tile).
+  function worldUV(geo) {
+    const pos = geo.attributes.position, nor = geo.attributes.normal, uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i), nx = Math.abs(nor.getX(i)), ny = Math.abs(nor.getY(i));
+      const [u, v] = ny > 0.5 ? [x, z] : nx > 0.5 ? [z, y] : [x, y];
+      uv[i * 2] = u / 4; uv[i * 2 + 1] = v / 4;
+    }
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   }
 
-  // Arena: floor, wall, stands, gates, torches
-  cylY(world, 1.2, MAP.arena, { x: 0, y: -0.5, z: 0 }, rgb(225, 200, 150), { seg: 64 });
-  cylY(world, 0.1, 22, { x: 0, y: 0.7, z: 0 }, rgb(205, 180, 135), { seg: 48 });
-  cylY(world, 0.12, 16, { x: 0, y: 0.7, z: 0 }, rgb(225, 200, 150), { seg: 48 });
-  cylY(world, 0.14, 3, { x: 0, y: 0.7, z: 0 }, rgb(200, 70, 60), { seg: 24 });
+  // Island layout (same zones as studZone() in MapGenerator.lua)
+  const PLATFORM = MAP.arena + 30, MOAT_OUTER = PLATFORM + 10, BRIDGE = 20;
+  const Z = {
+    Grass: { color: rgb(75, 151, 75), top: 0 }, FieldGrass: { color: rgb(100, 175, 70), top: 0 },
+    Dirt: { color: rgb(160, 110, 60), top: 0 }, DirtDark: { color: rgb(124, 92, 70), top: 0 },
+    Road: { color: rgb(215, 190, 140), top: 0 }, Sand: { color: rgb(245, 220, 160), top: -1.5 },
+    ArenaFloor: { color: rgb(175, 125, 75), top: 0 }, Bridge: { color: rgb(140, 95, 55), top: 0 },
+    Emblem: { color: rgb(230, 60, 60), top: 0 }, EmblemRing: { color: rgb(250, 200, 50), top: 0 },
+  };
+  const SIDE_DIRT = rgb(124, 92, 70);
+  function onGatePath(x, z, half) {
+    return GATES.some((g) => { const dx = Math.cos(rad(g)), dz = Math.sin(rad(g)); return x * dx + z * dz > 0 && Math.abs(x * dz - z * dx) <= half; });
+  }
+  // Smooth value noise for the dirt patches
+  const hash2 = (x, z) => { const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; return s - Math.floor(s); };
+  function noise2(x, z) {
+    const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi, sx = xf * xf * (3 - 2 * xf), sz = zf * zf * (3 - 2 * zf);
+    const a = hash2(xi, zi), b = hash2(xi + 1, zi), c = hash2(xi, zi + 1), d = hash2(xi + 1, zi + 1);
+    return (a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz) * 2 - 1;
+  }
+  function studZone(x, z) {
+    const r = Math.hypot(x, z);
+    if (r > MAP.island + 22) return null;
+    if (r > MAP.island) return "Sand";
+    if (r < 12) return "Emblem";
+    if (r < 20) return "EmblemRing";
+    if (r <= PLATFORM) return "ArenaFloor";
+    if (r <= MOAT_OUTER) return onGatePath(x, z, BRIDGE / 2) ? "Bridge" : null;
+    if (Math.abs(r - ROAD) <= 8) return "Road";
+    if (r < ROAD && onGatePath(x, z, 9)) return "Road";
+    if (r >= MAP.fieldIn && r <= MAP.fieldOut) { const n = noise2(x / 36, z / 36); return n > 0.3 ? "DirtDark" : n > -0.05 ? "Dirt" : "FieldGrass"; }
+    return "Grass";
+  }
+  (function buildStudGround() {
+    const CELL = 8, count = Math.ceil((MAP.island + 24) * 2 / CELL), origin = -count * CELL / 2, BOTTOM = -14;
+    const grid = []; for (let r = 0; r < count; r++) { grid.push([]); for (let c = 0; c < count; c++) grid[r].push(studZone(origin + (c + 0.5) * CELL, origin + (r + 0.5) * CELL)); }
+    const topOf = (r, c) => (r < 0 || c < 0 || r >= count || c >= count || !grid[r][c] ? BOTTOM : Z[grid[r][c]].top);
+    const buckets = new Map(); // key -> { color, kind, pos: [], nor: [] }
+    const quad = (color, kind, p, n) => { const k = color + kind; if (!buckets.has(k)) buckets.set(k, { color, kind, pos: [], nor: [] }); const b = buckets.get(k); for (const i of [0, 1, 2, 0, 2, 3]) { b.pos.push(...p[i]); b.nor.push(...n); } };
+    for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) {
+      const zn = grid[r][c]; if (!zn) continue;
+      const x0 = origin + c * CELL, x1 = x0 + CELL, z0 = origin + r * CELL, z1 = z0 + CELL, top = Z[zn].top, color = Z[zn].color;
+      quad(color, "studs", [[x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0]], [0, 1, 0]);
+      // Sides where the neighbour is lower (edge of the island, moat, beach step)
+      for (const [dr, dc, n] of [[0, 1, [1, 0, 0]], [0, -1, [-1, 0, 0]], [1, 0, [0, 0, 1]], [-1, 0, [0, 0, -1]]]) {
+        const low = topOf(r + dr, c + dc); if (low >= top) continue;
+        const lip = Math.max(low, top - 2); // a strip of the top color, then dirt below
+        const face = (y0, y1) => {
+          if (n[0] === 1) return [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]];
+          if (n[0] === -1) return [[x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]];
+          if (n[2] === 1) return [[x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [x0, y0, z1]];
+          return [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]];
+        };
+        quad(color, "inlet", face(lip, top), n);
+        if (lip > low) quad(SIDE_DIRT, "inlet", face(low, lip), n);
+      }
+    }
+    for (const b of buckets.values()) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(b.pos, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(b.nor, 3));
+      worldUV(geo);
+      const mesh = new THREE.Mesh(geo, studMat(b.color, b.kind));
+      mesh.receiveShadow = true; mesh.castShadow = b.kind === "inlet";
+      scene.add(mesh);
+    }
+  })();
+  // Ocean + sea floor
+  const ocean = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshLambertMaterial({ color: rgb(40, 150, 220), transparent: true, opacity: 0.82 }));
+  ocean.rotation.x = -Math.PI / 2; ocean.position.y = -3; ocean.receiveShadow = true; scene.add(ocean);
+  disc(scene, 3000, -14, rgb(215, 195, 140), { shadows: false });
+  // Bridge rails
+  for (const g of GATES) {
+    const dir = polar(g, 1), side = new THREE.Vector3(-dir.z, 0, dir.x);
+    for (const s of [-1, 1]) {
+      for (let d = PLATFORM; d <= MOAT_OUTER; d += 5) { const p = dir.clone().multiplyScalar(d).addScaledVector(side, s * (BRIDGE / 2 - 0.5)); box(world, 1, 4, 1, T(p.x, 2, p.z), rgb(140, 95, 55)); }
+      const mid = dir.clone().multiplyScalar((PLATFORM + MOAT_OUTER) / 2).addScaledVector(side, s * (BRIDGE / 2 - 0.5));
+      box(world, 1, 1, MOAT_OUTER - PLATFORM + 2, mul(T(mid.x, 3.5, mid.z), R(0, Math.atan2(dir.x, dir.z), 0)), rgb(140, 95, 55));
+    }
+  }
+
+  // Arena: wall, stands (team colors), gates, torches
   function ringSegments(radius, depth, height, color) {
     const count = Math.floor(2 * Math.PI * radius / 8), segLen = 2 * Math.PI * radius / count + 0.4;
     const gapDeg = 180 / Math.PI * (13 / radius) + 1;
@@ -1206,12 +1320,13 @@
       box(world, segLen, height, depth, mul(T(p.x, p.y, p.z), R(0, Math.atan2(-p.x, -p.z), 0)), color);
     }
   }
-  ringSegments(MAP.arena + 2, 3, 10, STONE);
-  for (let s = 1; s <= 3; s++) ringSegments(MAP.arena + 3.5 + s * 7, 7, 3 * s + 7, s % 2 === 0 ? STONE_DARK : STONE);
+  const STANDS = [rgb(40, 110, 220), rgb(230, 60, 60), rgb(250, 200, 50)];
+  ringSegments(MAP.arena + 2, 3, 10, rgb(230, 230, 235));
+  for (let s = 1; s <= 3; s++) ringSegments(MAP.arena + 3.5 + s * 7, 7, 3 * s + 7, STANDS[s - 1]);
   for (const g of GATES) {
     const p = polar(g, MAP.arena + 12), yaw = Math.atan2(p.x, p.z);
-    for (const x of [-14.5, 14.5]) box(world, 3, 18, 3, mul(T(p.x, 0, p.z), R(0, yaw, 0), T(x, 9, 0)), STONE_DARK);
-    box(world, 32, 3, 3.5, mul(T(p.x, 0, p.z), R(0, yaw, 0), T(0, 19.5, 0)), STONE_DARK);
+    for (const x of [-14.5, 14.5]) box(world, 3, 18, 3, mul(T(p.x, 0, p.z), R(0, yaw, 0), T(x, 9, 0)), rgb(230, 60, 60));
+    box(world, 32, 3, 3.5, mul(T(p.x, 0, p.z), R(0, yaw, 0), T(0, 19.5, 0)), rgb(230, 60, 60));
     for (const side of [-1, 1]) {
       const tp = polar(g, MAP.arena + 1).add(new THREE.Vector3(-Math.sin(rad(g)), 0, Math.cos(rad(g))).multiplyScalar(side * 18));
       cylY(world, 9, 0.45, { x: tp.x, y: 0, z: tp.z }, rgb(90, 70, 50), { seg: 8 });
@@ -1223,7 +1338,7 @@
     ["🦖 Biggest Titan", ["Ava_Clash  Lv.88", "Noor  Lv.71", "TitanMika  Lv.64", "Leo  Lv.40", "You  Lv.30"]],
     ["🌟 Most Rebirths", ["RexLord  12", "TitanMika  9", "Ava_Clash  7", "Noor  4", "Tobi  2"]]];
   boards.forEach((b, i) => {
-    const deg = GATES[i] + 18, p = polar(deg, MAP.arena + 36), yaw = Math.atan2(p.x, p.z);
+    const deg = GATES[i] + 12, p = polar(deg, MOAT_OUTER + 8), yaw = Math.atan2(p.x, p.z);
     for (const x of [-9, 9]) { const q = new THREE.Vector3(x, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).add(p); cylY(world, 16, 0.6, { x: q.x, y: 0, z: q.z }, STONE_DARK, { seg: 8 }); }
     const m = mul(T(p.x, 10, p.z), R(0, yaw, 0));
     box(world, 20, 13, 1, m, rgb(35, 38, 55));
@@ -1344,6 +1459,13 @@
     kj.group.add(crown);
   }
   crownFor(bases[4].titans[0]); // Ava's Lv.88 Hydra is the Titan King
+  // Classic Roblox look: every static block gets studs on top and inlets on the sides.
+  world.traverse((o) => {
+    if (!o.isMesh || o.userData.paint !== undefined || o.userData.glow || !o.geometry || o.geometry.type !== "BoxGeometry") return;
+    const m = o.material; if (!m || m.map || m.type !== "MeshLambertMaterial" || (m.emissive && m.emissive.getHex())) return;
+    const tall = o.geometry.parameters.height > Math.max(o.geometry.parameters.width, o.geometry.parameters.depth) * 0.6;
+    o.material = studMat(m.color.getHex(), tall ? "inlet" : "studs");
+  });
   if (THREE.BufferGeometryUtils) mergeStatic(world);
   // =====================================================================
   // GAME: find titans -> collect food -> tame & feed -> fight
@@ -1430,6 +1552,7 @@
   placePlayer(yourEntrance(), new THREE.Vector3(0, 0, 0));
 
   function groundHeight(p) {
+    if (Math.hypot(p.x, p.z) > MAP.island) return -1.5;
     for (const b of bases) {
       const l = b.group.worldToLocal(p.clone());
       if (Math.abs(l.x) < MAP.plotSize / 2 && Math.abs(l.z) < MAP.plotSize / 2) return 1;
@@ -1440,12 +1563,12 @@
   function collide(p) {
     const r = Math.hypot(p.x, p.z);
     if (r > MAP.island - 4) { p.x *= (MAP.island - 4) / r; p.z *= (MAP.island - 4) / r; }
-    const inner = MAP.arena - 2, outer = MAP.arena + 26;
-    if (r > inner && r < outer) {
-      const deg = (Math.atan2(p.z, p.x) * 180 / Math.PI + 360) % 360;
-      if (!nearGate(deg, 180 / Math.PI * (9 / r))) {
-        const to = r - inner < outer - r ? inner : outer;
-        p.x *= to / r; p.z *= to / r;
+    // Arena wall + stands (open at the 4 gates), then the moat (open at the 4 bridges)
+    for (const [inner, outer, half] of [[MAP.arena - 2, MAP.arena + 26, 9], [PLATFORM - 1, MOAT_OUTER + 1, BRIDGE / 2 - 2]]) {
+      const rr = Math.hypot(p.x, p.z);
+      if (rr > inner && rr < outer && !onGatePath(p.x, p.z, half)) {
+        const to = rr - inner < outer - rr ? inner : outer;
+        p.x *= to / rr; p.z *= to / rr;
       }
     }
   }
@@ -1584,7 +1707,7 @@
       } else if (t > w.idleUntil && !(interaction && interaction.wild === w && holdStart)) {
         const a = Math.random() * Math.PI * 2, d = 28 * Math.sqrt(Math.random());
         const to = w.home.clone().add(new THREE.Vector3(Math.cos(a) * d, 0, Math.sin(a) * d));
-        const r = Math.hypot(to.x, to.z); if (r < MAP.fieldIn - 10 || r > MAP.fieldOut + 20) { w.idleUntil = t + 1; continue; }
+        const r = Math.hypot(to.x, to.z); if (r < MAP.fieldIn - 4 || r > MAP.fieldOut + 16) { w.idleUntil = t + 1; continue; }
         w.from.copy(g.position).setY(0); w.to.copy(to); w.t0 = t; w.dur = Math.max(0.5, w.from.distanceTo(to) / 7);
         g.rotation.y = Math.atan2(-(to.x - w.from.x), -(to.z - w.from.z));
       }
@@ -2169,7 +2292,7 @@
   frame();
   loadingEl.classList.add("done");
   // Handy for poking at the preview from the browser console.
-  window.__titanClash = { state, wilds, foods, player, yourBase, spawnWild, startMatch, feed, placePlayer, snapCamera, Presets };
+  window.__titanClash = { state, wilds, foods, player, yourBase, spawnWild, startMatch, feed, placePlayer, snapCamera, Presets, camera, controls };
 })();
 </script>
 

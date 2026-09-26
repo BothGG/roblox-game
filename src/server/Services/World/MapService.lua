@@ -14,6 +14,7 @@
 	  MapService.Leaderboards -> { BasePart }
 	  MapService:RandomMeteorPoint() -> Vector3
 	  MapService:IsInArena(position) -> boolean
+	  MapService:GroundAt(position) -> Vector3? (nil over water)
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -179,11 +180,24 @@ function MapService:RandomMeteorPoint(): Vector3
 	local r = math.sqrt(inner * inner + math.random() * (outer * outer - inner * inner))
 	local a = math.random() * math.pi * 2
 	local point = center + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
+	return self:GroundAt(point) or point
+end
+
+-- Ground surface (terrain or the stud ground) below a point, or nil over water.
+function MapService:GroundAt(point: Vector3): Vector3?
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { Workspace.Terrain }
+	local filter: { Instance } = { Workspace.Terrain }
+	local ground = self.Map and self.Map:FindFirstChild("Ground")
+	if ground then
+		table.insert(filter, ground)
+	end
+	params.FilterDescendantsInstances = filter
 	local hit = Workspace:Raycast(point + Vector3.new(0, 300, 0), Vector3.new(0, -600, 0), params)
-	return if hit then hit.Position else point
+	if not hit or hit.Material == Enum.Material.Water then
+		return nil
+	end
+	return hit.Position
 end
 
 return MapService

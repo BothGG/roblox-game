@@ -20,7 +20,7 @@ src/
   server/                      → ServerScriptService.Server
     Main.server.lua            boot + player lifecycle
     Data/                      Schema (versions/migrations), SessionStore (session locking)
-    Modules/                   CreatureBuilder FoodBuilder GameEvents Map/MapGenerator Map/Props
+    Modules/                   CreatureBuilder FoodBuilder GameEvents Map/MapGenerator Map/Props Map/StudGround
     Services/
       Core/     DataService FxService SettingsService AdminService
       World/    MapService

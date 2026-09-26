@@ -30,6 +30,18 @@ invisible: `Transparency = 1`, `CanCollide = false`, `Anchored = true`.
 | `Leaderboard` | A flat board (front face readable). | `Board` = `Trophies` / `Biggest` / `Rebirths` |
 | `HubSpawn` | Where players first appear (a SpawnLocation). | — |
 
+## Look: classic studs or smooth terrain
+
+`GameConfig.Map.Style = "Studs"` (default) builds the island from Plastic parts with **studs on top
+and inlets on the sides**, the classic Roblox look (`Modules/Map/StudGround.lua`): bright green
+grass, brown dirt patches in the food fields, a tan road, and the **arena on its own ground in the
+middle** with a water moat and 4 wooden bridges. Bases get the same studded style.
+`"Terrain"` uses smooth Roblox terrain instead. Colors are in `COLORS` at the top of
+`MapGenerator.lua`; moat size is `Map.ArenaPlatform` / `Map.MoatWidth`.
+
+For a hand-built map in the same style: select your parts → set **Material = Plastic**,
+**TopSurface = Studs**, side surfaces **Inlet**.
+
 ## Rules of thumb
 
 - Keep the arena flat and walled (fighters leaving `Radius` get pulled back in).

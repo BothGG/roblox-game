@@ -47,8 +47,15 @@ local GameConfig = {
 		Seed = 2026, -- change for a different random layout of props/spawns
 		IslandRadius = 330,
 		ArenaRadius = 95,
-		FieldInner = 120, -- food fields ring
-		FieldOuter = 195,
+		FieldInner = 143, -- food fields ring
+		FieldOuter = 197,
+		-- "Studs" = classic Roblox look (Plastic parts with studs, like a baseplate).
+		-- "Terrain" = smooth terrain grass.
+		Style = "Studs",
+		-- The arena stands on its own ground in the middle, with a water moat
+		-- and 4 bridges around it.
+		ArenaPlatform = 30, -- ground around the arena wall (studs past ArenaRadius)
+		MoatWidth = 10,
 	},
 
 	Plots = {

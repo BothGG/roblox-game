@@ -102,14 +102,7 @@ end
 --------------------------------------------------------------------------
 
 local function groundAt(position: Vector3): Vector3?
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { Workspace.Terrain }
-	local hit = Workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -160, 0), params)
-	if hit and hit.Material ~= Enum.Material.Water then
-		return hit.Position
-	end
-	return nil
+	return Map:GroundAt(position)
 end
 
 local function displayName(creatureId: string, mutation: string?): string
