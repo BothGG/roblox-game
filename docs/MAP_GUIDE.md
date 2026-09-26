@@ -25,6 +25,7 @@ invisible: `Transparency = 1`, `CanCollide = false`, `Anchored = true`.
 | `ArenaSpawn` | Where fighters start (at least 2; 12 for full Titan Clashes), facing the center. | — |
 | `Stands` | Where spectators are moved during a match. | — |
 | `FoodSpawn` | Where food grows (~1.5 studs above ground). 40–80 total. | — |
+| `WildSpawn` | Where wild titans appear; they wander ~28 studs around it. 10–20 total, spread out. Optional (falls back to `FoodSpawn`). | — |
 | `MeteorZone` | Where Meteor Feast food lands: a ring around the part. | `Radius`, `InnerRadius` |
 | `Leaderboard` | A flat board (front face readable). | `Board` = `Trophies` / `Biggest` / `Rebirths` |
 | `HubSpawn` | Where players first appear (a SpawnLocation). | — |

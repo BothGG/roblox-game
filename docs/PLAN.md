@@ -1,7 +1,9 @@
 # Titan Clash: Full Game Plan (v1.0)
 
-> **One sentence:** Raise giant titans by grabbing and **stealing food**, then **pilot your titan
-> into the arena** and fight other players' titans, like a monster movie.
+> **One sentence:** **Find** wild titans, grab and **steal food** to tame and **feed** them, then
+> **pilot your titan into the arena** and fight other players' titans, like a monster movie.
+
+The three things that matter most: **1) find titans · 2) find food & feed · 3) compete.**
 
 This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md) (code),
 [MAP_GUIDE.md](MAP_GUIDE.md) (map contract), [LAUNCH.md](LAUNCH.md) (publishing checklist).
@@ -10,10 +12,15 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
 
 ## 1. Pillars
 
-1. **Steal & feed:** food is scarce; the fastest way to grow is taking it from other bases.
-2. **Big = strong (and visible):** every level makes your titan physically bigger and stronger.
-3. **Fight like the movies:** you *become* your titan in the arena: walk, punch, special moves.
-4. **Server drama:** 6–12 players on one island, so everyone sees who steals, who wins, who's King.
+1. **Find titans:** wild titans roam the fields. Rare ones shine a light beam into the sky and the
+   whole server races to tame them first.
+2. **Steal & feed:** food is scarce; you need it to tame titans and to grow them. The fastest way
+   to get it is taking it from other bases.
+3. **Big = strong (and visible):** every level makes your titan physically bigger and stronger.
+4. **Fight like the movies:** you *become* your titan in the arena: walk, punch, special moves.
+5. **Effects sell it:** every action has a layered effect (charge-up → flash + shockwave + sparks →
+   aftermath) and rare titans glow (ground ring, sparkles, sky beam). See §12.
+6. **Server drama:** 6–12 players on one island, so everyone sees who steals, who wins, who's King.
 
 ## 2. Server & map
 
@@ -35,13 +42,15 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
 | Area | What happens there |
 |---|---|
 | **Base** (1 per player) | Your titans stand in pens. Food storage crate (can be robbed). Lock bubble. Name sign. |
-| **Food fields** | Food grows at spawn points and regrows. Meteors land here during Meteor Feast. |
+| **Food fields** | Food grows at spawn points and regrows. **Wild titans roam here.** Meteors land here during Meteor Feast. |
 | **Arena** | Duels and Titan Clash. Stands around it for spectators. Leaderboards at the entrances. |
 
 ## 3. Core loop
 
 ```
- grab food in the fields ─┐
+ FIND a wild titan in the fields ─► hold E, feed it food ─► TAMED (joins your base)
+                                                   ▲
+ grab food in the fields ─┐                        │ (food is used for both)
  steal food from bases ───┼─► feed titans ─► level up (bigger + stronger)
  win food in battles ─────┘         │
                                     ▼
@@ -52,7 +61,23 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
 
 ## 4. Titans
 
-- **Get them:** starter titan (Rex), eggs (Basic / Great / Titan Egg), random mutations.
+- **Get them:** starter titan (Rex), **taming wild titans** (main way), eggs (Basic / Great / Titan
+  Egg), random mutations.
+- **Wild titans** (`Services/Wild/WildService.lua`): up to 8 roam the fields at once. Odds, tame
+  time, food cost and success chance per rarity are in `Config/Rarities.lua`:
+
+| Rarity | Spawn weight | Hold time | Food | Chance |
+|---|---|---|---|---|
+| Common | 60 | 1 s | 1 | 100 % |
+| Rare | 26 | 2 s | 2 | 85 % |
+| Epic | 10 | 3 s | 4 | 70 % |
+| Legendary | 3 | 4.5 s | 6 | 55 % |
+| Mythic | 0.8 | 6 s | 10 | 40 % |
+| Secret | 0.2 | 8 s | 15 | 30 % |
+
+  Favorite food gives +20 % chance. If it fails, the food is eaten and the titan runs away.
+  Legendary+ and mutated wild titans are announced to the server with a sky beam.
+  **Wild Rush** event: rare ones 3× more likely and a crowd of titans appears.
 - **Pens:** 3 at start, +1 per rebirth, +2 with the Extra Pens pass, max 8.
 - **Active titan:** the one you fight with. Choose it from the Titans menu or the "Choose" prompt.
 - **Stats** (pure formulas in `shared/Game/Battle.lua`, tested):

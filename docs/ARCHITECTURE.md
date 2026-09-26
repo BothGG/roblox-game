@@ -15,7 +15,7 @@ src/
       Rules  CreatureMath  Battle  Progress  ConfigValidator  Tags
     Lib/                       Loader Signal Trove Log Guard Rng Format WeightedRandom
     Net/                       typed networking (Remotes.lua = every remote)
-    Fx/                        effects: Primitives, Presets, Auras, Textures
+    Fx/                        effects: Primitives, Presets, Auras, Textures, RarityTag
     Types.lua                  shared type definitions
   server/                      → ServerScriptService.Server
     Main.server.lua            boot + player lifecycle
@@ -26,6 +26,7 @@ src/
       World/    MapService
       Base/     BaseService CreatureService
       Food/     FoodService StealService
+      Wild/     WildService (wild titans: spawn, roam, tame)
       Battle/   BattleService
       Economy/  EggService RebirthService
       Social/   KingService SocialService LeaderboardService
@@ -36,7 +37,7 @@ src/
   client/                      → StarterPlayerScripts.Client
     Main.client.lua            boots controllers
     State/ClientState.lua      latest server snapshot (Signal)
-    Controllers/               State UI Fx Prompt Battle BaseAnim Food Tutorial Music
+    Controllers/               State UI Fx Prompt Battle BaseAnim Food Wild Tutorial Music
     UI/                        Theme Hud Window Popups Toasts BattleHud HatchReveal
       Pages/                   Eggs Food Titans Battle Quests Daily Index Store Rebirth Settings Admin
 tests/                         unit tests (run without Studio)
@@ -84,6 +85,7 @@ return MyService
 | 30 | KingService | biggest titan → crown + bonus |
 | 35 | StealService | steal / take back / guards |
 | 38 | BattleService | duels, Titan Clash, practice bots, piloting, hits, rewards |
+| 40 | WildService | wild titans: spawn (rarity odds), roam, hold-to-tame with food, announcements |
 | 40–60 | Egg, Rebirth, Event | eggs (with luck), rebirth, event rotation |
 | 45 | RewardService | the one place rewards are given |
 | 70–79 | Quest, DailyReward, Offline, Index, Code, Store, Social, Leaderboard, Settings, Tutorial | progress & social systems |
@@ -133,9 +135,18 @@ Server: `Net.On(name, handler)` (types + rate limit checked first), `Net.Fire`, 
 
 | Layer | What |
 |---|---|
-| `Primitives.lua` | Burst, Ring, Pillar, Light, FloatText, Sound, Highlight, Shake, Flash, Vignette, Confetti, Pop, Bounce, Knockback |
-| `Presets.lua` | Feed, LevelUp, Mutation, Spawn, Pickup, Steal*, Deposit, GuardKnock, Sell, Meteor*, NewKing, Rebirth, HatchReveal, **TitanAttack, Hit, KO, Victory, Launch**, Reward, Lock, Poof |
-| `Auras.lua` | effects that stay on titans/food |
+| `Primitives.lua` | Burst, Ring, Pillar, Light, FloatText, Sound, Highlight · **Glow, Shockwave, Sparks, ChargeUp, Slash, Beam, Chunks** · Shake, Flash, Vignette, Confetti, Pop, FovPunch, Bounce, Knockback |
+| `Presets.lua` | Feed, LevelUp, Mutation, Spawn, Income, **WildSpawn, TameStart, TameSuccess, TameFail**, Pickup, Steal*, Deposit, GuardKnock, Sell, Meteor*, NewKing, Rebirth, HatchReveal, **TitanAttack, Hit, KO, Victory, Launch**, Reward, Lock, Poof |
+| `Auras.lua` | effects that stay on titans: rarity tiers (ring → sparkles → light → sky beam → outline → vortex) and mutation particles |
+| `RarityTag.lua` | shiny rarity badge on name tags (moving shine / rainbow) |
+| `Textures.lua` | particle textures (built-in Roblox ones by default; swap for Creator Store ones) |
+
+**The recipe every preset follows:** anticipation (ChargeUp) → impact (Glow + Shockwave + Sparks)
+→ aftermath (Burst / smoke / Chunks / FloatText) → only for you: Shake / FovPunch / Flash.
+`Lighting` has Bloom with a low threshold (MapService), so Neon parts and effects glow.
+
+**Make effects look even better:** the cheapest big upgrade is swapping `Textures.lua` for nicer
+textures from the Creator Store (search "sparkle", "shockwave", "slash"). Every effect uses them.
 
 New effect: add `function Presets.MyEffect(p, P) ... end`, then
 `FxService:PlayAll("MyEffect", { Position = pos, Owner = player.UserId })`.
