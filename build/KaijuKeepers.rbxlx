@@ -1,0 +1,5488 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="Folder" referent="2">
+        <Properties>
+          <string name="Name">Config</string>
+        </Properties>
+        <Item class="ModuleScript" referent="3">
+          <Properties>
+            <string name="Name">Creatures</string>
+            <string name="Source"><![CDATA[--[[
+	Every kaiju species. To add a new one:
+	  1. Copy an entry below and give it a new key (the key is its Id).
+	  2. Add it to an egg in Eggs.lua so players can hatch it.
+	That's it. The placeholder model is generated from Style + colors.
+	To use your own model instead, see docs/ARCHITECTURE.md.
+
+	Style:  "Biped" | "Quad" | "Blob" | "Winged"
+	Traits (all optional):
+	  Growth = 0.25  -> grows 25% faster
+	  Income = 0.5   -> +50% income
+	  Guard  = 0.12  -> chance per second to knock thieves out of your base
+	  Forage = 0.25  -> 25% chance to get double food from wild pickups
+	  Speed  = 4     -> +4 walk speed while carrying stolen food
+	Extra looks (optional): Heads = 3, Horn = true, Tentacles = true
+]]
+
+local function rgb(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+
+local Creatures = {
+	Gloop = {
+		Name = "Gloop",
+		Rarity = "Common",
+		BaseIncome = 3,
+		Style = "Blob",
+		BodyColor = rgb(120, 220, 90),
+		AccentColor = rgb(70, 160, 55),
+		Traits = {},
+		Description = "A wobbly slime that eats anything.",
+	},
+	Rex = {
+		Name = "Rex",
+		Rarity = "Common",
+		BaseIncome = 5,
+		Style = "Biped",
+		BodyColor = rgb(90, 170, 90),
+		AccentColor = rgb(230, 200, 120),
+		Traits = { Growth = 0.25 },
+		Description = "A baby dino that grows fast.",
+	},
+	Shellback = {
+		Name = "Shellback",
+		Rarity = "Common",
+		BaseIncome = 4,
+		Style = "Quad",
+		BodyColor = rgb(110, 180, 140),
+		AccentColor = rgb(120, 85, 50),
+		Traits = { Income = 0.5 },
+		Description = "Slow, but earns lots of money.",
+	},
+	Rhinobug = {
+		Name = "Rhinobug",
+		Rarity = "Rare",
+		BaseIncome = 12,
+		Style = "Quad",
+		Horn = true,
+		BodyColor = rgb(60, 90, 200),
+		AccentColor = rgb(230, 230, 255),
+		Traits = {},
+		Description = "A giant beetle with a shiny horn.",
+	},
+	Kong = {
+		Name = "Kong",
+		Rarity = "Rare",
+		BaseIncome = 10,
+		Style = "Biped",
+		BodyColor = rgb(80, 60, 50),
+		AccentColor = rgb(170, 140, 120),
+		Traits = { Guard = 0.12 },
+		Description = "Guards your food and smacks thieves.",
+	},
+	Kraken = {
+		Name = "Kraken",
+		Rarity = "Epic",
+		BaseIncome = 30,
+		Style = "Blob",
+		Tentacles = true,
+		BodyColor = rgb(200, 70, 120),
+		AccentColor = rgb(255, 160, 190),
+		Traits = { Forage = 0.25 },
+		Description = "Its tentacles grab extra food.",
+	},
+	Drake = {
+		Name = "Drake",
+		Rarity = "Epic",
+		BaseIncome = 35,
+		Style = "Winged",
+		BodyColor = rgb(200, 50, 40),
+		AccentColor = rgb(255, 190, 60),
+		Traits = { Speed = 4 },
+		Description = "Makes you faster when you steal.",
+	},
+	Phoenix = {
+		Name = "Phoenix",
+		Rarity = "Legendary",
+		BaseIncome = 90,
+		Style = "Winged",
+		BodyColor = rgb(255, 130, 20),
+		AccentColor = rgb(255, 230, 80),
+		Traits = { Growth = 0.5 },
+		Description = "Born from fire. Grows very fast.",
+	},
+	Hydra = {
+		Name = "Hydra",
+		Rarity = "Mythic",
+		BaseIncome = 250,
+		Style = "Quad",
+		Heads = 3,
+		BodyColor = rgb(40, 110, 90),
+		AccentColor = rgb(160, 255, 200),
+		Traits = { Guard = 0.2, Income = 0.25 },
+		Description = "Three heads, three times the trouble.",
+	},
+	Voidmaw = {
+		Name = "Voidmaw",
+		Rarity = "Secret",
+		BaseIncome = 1000,
+		Style = "Biped",
+		Horn = true,
+		BodyColor = rgb(25, 20, 40),
+		AccentColor = rgb(140, 60, 255),
+		Traits = { Guard = 0.2, Growth = 0.5, Income = 0.5 },
+		Description = "Nobody knows where it came from.",
+	},
+}
+
+for id, def in Creatures do
+	def.Id = id
+end
+
+return Creatures
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="4">
+          <Properties>
+            <string name="Name">Eggs</string>
+            <string name="Source"><![CDATA[--[[
+	Eggs are how players get new kaiju. Odds are weights, not percents
+	(the UI converts them to percents).
+]]
+
+local Eggs = {
+	BasicEgg = {
+		Name = "Basic Egg",
+		Price = 100,
+		Color = Color3.fromRGB(240, 235, 220),
+		Odds = {
+			{ Creature = "Gloop", Weight = 40 },
+			{ Creature = "Rex", Weight = 35 },
+			{ Creature = "Shellback", Weight = 20 },
+			{ Creature = "Rhinobug", Weight = 4.5 },
+			{ Creature = "Kong", Weight = 0.5 },
+		},
+	},
+	GreatEgg = {
+		Name = "Great Egg",
+		Price = 3000,
+		Color = Color3.fromRGB(90, 160, 255),
+		Odds = {
+			{ Creature = "Shellback", Weight = 30 },
+			{ Creature = "Rhinobug", Weight = 30 },
+			{ Creature = "Kong", Weight = 25 },
+			{ Creature = "Kraken", Weight = 10 },
+			{ Creature = "Drake", Weight = 5 },
+		},
+	},
+	KaijuEgg = {
+		Name = "Kaiju Egg",
+		Price = 100000,
+		Color = Color3.fromRGB(255, 80, 120),
+		Odds = {
+			{ Creature = "Kraken", Weight = 40 },
+			{ Creature = "Drake", Weight = 35 },
+			{ Creature = "Phoenix", Weight = 20 },
+			{ Creature = "Hydra", Weight = 4.9 },
+			{ Creature = "Voidmaw", Weight = 0.1 },
+		},
+	},
+}
+
+Eggs.Order = { "BasicEgg", "GreatEgg", "KaijuEgg" }
+
+return Eggs
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="5">
+          <Properties>
+            <string name="Name">Foods</string>
+            <string name="Source"><![CDATA[--[[
+	Every food. Growth = XP given when fed.
+	Price = cost in the food shop (nil = can't be bought, only found or stolen).
+	WildWeight = how often it spawns in the middle (bigger = more common).
+	Mutation = chance to mutate the kaiju that eats it.
+]]
+
+local function rgb(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+
+local Foods = {
+	Meat = {
+		Name = "Meat",
+		Rarity = "Common",
+		Growth = 10,
+		Price = 25,
+		WildWeight = 50,
+		Color = rgb(190, 90, 70),
+	},
+	GoldenApple = {
+		Name = "Golden Apple",
+		Rarity = "Rare",
+		Growth = 35,
+		Price = 400,
+		WildWeight = 18,
+		Color = rgb(255, 210, 60),
+	},
+	FirePepper = {
+		Name = "Fire Pepper",
+		Rarity = "Epic",
+		Growth = 20,
+		Price = 2500,
+		WildWeight = 8,
+		Color = rgb(255, 70, 30),
+		Mutation = { Id = "Lava", Chance = 0.08 },
+	},
+	CrystalFruit = {
+		Name = "Crystal Fruit",
+		Rarity = "Epic",
+		Growth = 20,
+		Price = 4000,
+		WildWeight = 6,
+		Color = rgb(120, 230, 255),
+		Mutation = { Id = "Crystal", Chance = 0.08 },
+	},
+	ShadowShroom = {
+		Name = "Shadow Shroom",
+		Rarity = "Legendary",
+		Growth = 30,
+		WildWeight = 3,
+		Color = rgb(120, 50, 200),
+		Mutation = { Id = "Shadow", Chance = 0.07 },
+	},
+	StarFood = {
+		Name = "Star Food",
+		Rarity = "Mythic",
+		Growth = 250,
+		WildWeight = 1,
+		Color = rgb(255, 255, 150),
+		Mutation = { Id = "Golden", Chance = 0.05 },
+		Announce = true,
+	},
+}
+
+-- Display order in menus
+Foods.Order = { "Meat", "GoldenApple", "FirePepper", "CrystalFruit", "ShadowShroom", "StarFood" }
+
+return Foods
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="6">
+          <Properties>
+            <string name="Name">GameConfig</string>
+            <string name="Source"><![CDATA[--[[
+	GameConfig: every balance number for the game lives here.
+	Change numbers here instead of inside scripts.
+]]
+
+local GameConfig = {
+	-- Display names. Rename the game or the creatures in one place.
+	GameName = "Kaiju Keepers",
+	CreatureName = "Kaiju",
+	CreatureNamePlural = "Kaiju",
+
+	-- Starting state for a new player (and after a rebirth)
+	StartingCash = 150,
+	StartingFood = { Meat = 5 },
+	StarterCreature = "Rex",
+
+	-- Pen / storage
+	StartingSlots = 3,
+	MaxSlots = 12,
+	SlotsPerRebirth = 1,
+	StorageCap = 50,
+	StorageCapPerRebirth = 10,
+
+	-- Growth
+	MaxLevel = 100,
+	ScalePerLevel = 0.12, -- Lv 100 = ~13x bigger than Lv 1
+	IncomePerLevel = 0.25, -- each level adds +25% of base income
+	SellSeconds = 40, -- selling gives this many seconds of the kaiju's income
+
+	-- Hatching
+	HatchMutationChance = 0.03,
+	RainbowHatchChance = 0.002,
+
+	-- Rebirth
+	RebirthBaseCost = 250000,
+	RebirthCostGrowth = 4,
+	RebirthIncomeBonus = 0.5, -- +50% income per rebirth
+
+	-- Kaiju King (biggest kaiju on the server)
+	KingIncomeBonus = 0.5,
+	KingMinLevel = 5,
+	KingCheckInterval = 3,
+
+	-- World layout
+	Plots = {
+		Count = 8, -- set the place's Max Players to this number
+		Radius = 190,
+		Size = 90,
+	},
+
+	WildFood = {
+		Max = 25,
+		Interval = 3,
+		AreaRadius = 100,
+	},
+
+	Steal = {
+		HoldTime = 1.5,
+		CarryWalkSpeed = 11,
+		NormalWalkSpeed = 16,
+		DepositDistance = 12,
+		LockDuration = 30,
+		LockCooldown = 90,
+		JoinProtection = 60,
+		GuardCheckInterval = 1,
+		MaxGuardChance = 0.6,
+	},
+
+	Events = {
+		FirstDelay = 180,
+		Interval = 420,
+		MeteorFoodCount = 30,
+		BloodMoonDuration = 90,
+		BloodMoonGrowthMult = 2,
+	},
+
+	Data = {
+		StoreName = "KaijuKeepers_v1",
+		AutosaveInterval = 120,
+	},
+
+	-- Removes the default "Baseplate" part so the generated map is used.
+	ReplaceBaseplate = true,
+}
+
+return GameConfig
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="7">
+          <Properties>
+            <string name="Name">Mutations</string>
+            <string name="Source"><![CDATA[--[[
+	Mutations change how a kaiju looks and multiply its income.
+	Fx = the effect preset attached to the kaiju (see Fx/Presets.lua "Aura" section).
+]]
+
+local function rgb(r, g, b)
+	return Color3.fromRGB(r, g, b)
+end
+
+local Mutations = {
+	Lava = {
+		Name = "Lava",
+		IncomeMult = 2,
+		Color = rgb(255, 90, 20),
+		AccentColor = rgb(60, 20, 10),
+		Material = Enum.Material.CrackedLava,
+		Aura = { Color = rgb(255, 120, 30), Light = true, Particles = "Embers" },
+	},
+	Crystal = {
+		Name = "Crystal",
+		IncomeMult = 2.5,
+		Color = rgb(140, 230, 255),
+		AccentColor = rgb(230, 250, 255),
+		Material = Enum.Material.Glass,
+		Transparency = 0.15,
+		Aura = { Color = rgb(150, 240, 255), Light = true, Particles = "Sparkles" },
+	},
+	Shadow = {
+		Name = "Shadow",
+		IncomeMult = 3,
+		Color = rgb(30, 20, 45),
+		AccentColor = rgb(150, 70, 255),
+		Material = Enum.Material.SmoothPlastic,
+		Aura = { Color = rgb(150, 70, 255), Light = false, Particles = "Smoke" },
+	},
+	Golden = {
+		Name = "Golden",
+		IncomeMult = 5,
+		Color = rgb(255, 200, 40),
+		AccentColor = rgb(255, 240, 150),
+		Material = Enum.Material.Foil,
+		Aura = { Color = rgb(255, 220, 80), Light = true, Particles = "Sparkles" },
+	},
+	Rainbow = {
+		Name = "Rainbow",
+		IncomeMult = 10,
+		Color = rgb(255, 0, 0),
+		AccentColor = rgb(255, 255, 255),
+		Material = Enum.Material.Neon,
+		Aura = { Color = rgb(255, 255, 255), Light = true, Particles = "Sparkles" },
+		Animated = true, -- the client cycles its colors
+	},
+}
+
+-- Mutations a kaiju can randomly hatch with (weights)
+Mutations.HatchPool = {
+	{ Id = "Lava", Weight = 45 },
+	{ Id = "Crystal", Weight = 35 },
+	{ Id = "Shadow", Weight = 20 },
+}
+
+return Mutations
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="8">
+          <Properties>
+            <string name="Name">Rarities</string>
+            <string name="Source"><![CDATA[local Rarities = {
+	Common = { Order = 1, Color = Color3.fromRGB(200, 200, 200) },
+	Rare = { Order = 2, Color = Color3.fromRGB(70, 150, 255) },
+	Epic = { Order = 3, Color = Color3.fromRGB(175, 90, 255) },
+	Legendary = { Order = 4, Color = Color3.fromRGB(255, 175, 0) },
+	Mythic = { Order = 5, Color = Color3.fromRGB(255, 60, 95) },
+	Secret = { Order = 6, Color = Color3.fromRGB(20, 255, 200) },
+}
+
+return Rarities
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="9">
+          <Properties>
+            <string name="Name">Sounds</string>
+            <string name="Source"><![CDATA[--[[
+	Sound ids used by effects. The defaults are sounds built into Roblox.
+	Replace them with your own ids from the Creator Store
+	(e.g. "rbxassetid://1234567890") to make the game sound better.
+	Leave a value as "" to disable that sound.
+]]
+
+return {
+	Pop = "rbxasset://sounds/electronicpingshort.wav",
+	LevelUp = "rbxasset://sounds/electronicpingshort.wav",
+	Coin = "rbxasset://sounds/electronicpingshort.wav",
+	Whoosh = "rbxasset://sounds/swordlunge.wav",
+	Impact = "rbxasset://sounds/collide.wav",
+	Alarm = "",
+	Hatch = "rbxasset://sounds/electronicpingshort.wav",
+	Fanfare = "",
+}
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">CreatureMath</string>
+          <string name="Source"><![CDATA[--[[
+	All growth / income formulas, shared by the server (real values)
+	and the client (numbers shown in the UI), so they always match.
+]]
+
+local Config = script.Parent.Config
+local GameConfig = require(Config.GameConfig)
+local Creatures = require(Config.Creatures)
+local Mutations = require(Config.Mutations)
+
+local CreatureMath = {}
+
+export type CreatureData = {
+	Id: string,
+	Level: number,
+	Xp: number,
+	Mutation: string?,
+}
+
+function CreatureMath.XpToNext(level: number): number
+	return math.floor(20 * level ^ 1.35)
+end
+
+function CreatureMath.Scale(level: number): number
+	return 1 + (level - 1) * GameConfig.ScalePerLevel
+end
+
+function CreatureMath.Trait(creature: CreatureData, trait: string): number
+	local def = Creatures[creature.Id]
+	return def and def.Traits[trait] or 0
+end
+
+-- Income per second before player bonuses (rebirth, king)
+function CreatureMath.BaseIncome(creature: CreatureData): number
+	local def = Creatures[creature.Id]
+	if not def then
+		return 0
+	end
+	local mutation = creature.Mutation and Mutations[creature.Mutation]
+	local mutationMult = mutation and mutation.IncomeMult or 1
+	return def.BaseIncome
+		* (1 + (creature.Level - 1) * GameConfig.IncomePerLevel)
+		* mutationMult
+		* (1 + CreatureMath.Trait(creature, "Income"))
+end
+
+function CreatureMath.PlayerMultiplier(rebirths: number, isKing: boolean?): number
+	local mult = 1 + rebirths * GameConfig.RebirthIncomeBonus
+	if isKing then
+		mult *= 1 + GameConfig.KingIncomeBonus
+	end
+	return mult
+end
+
+function CreatureMath.GuardChance(creature: CreatureData): number
+	local guard = CreatureMath.Trait(creature, "Guard")
+	if guard <= 0 then
+		return 0
+	end
+	return guard * (1 + creature.Level / 50)
+end
+
+function CreatureMath.SellPrice(creature: CreatureData, rebirths: number): number
+	return math.floor(CreatureMath.BaseIncome(creature) * GameConfig.SellSeconds * CreatureMath.PlayerMultiplier(rebirths))
+end
+
+function CreatureMath.RebirthCost(rebirths: number): number
+	return GameConfig.RebirthBaseCost * GameConfig.RebirthCostGrowth ^ rebirths
+end
+
+function CreatureMath.MaxSlots(rebirths: number): number
+	return math.min(GameConfig.MaxSlots, GameConfig.StartingSlots + rebirths * GameConfig.SlotsPerRebirth)
+end
+
+function CreatureMath.StorageCap(rebirths: number): number
+	return GameConfig.StorageCap + rebirths * GameConfig.StorageCapPerRebirth
+end
+
+function CreatureMath.Count(tbl: { [any]: any }): number
+	local n = 0
+	for _ in tbl do
+		n += 1
+	end
+	return n
+end
+
+function CreatureMath.CountFood(food: { [string]: number }): number
+	local n = 0
+	for _, count in food do
+		n += count
+	end
+	return n
+end
+
+function CreatureMath.DisplayName(creature: CreatureData): string
+	local def = Creatures[creature.Id]
+	local name = def and def.Name or creature.Id
+	if creature.Mutation and Mutations[creature.Mutation] then
+		return Mutations[creature.Mutation].Name .. " " .. name
+	end
+	return name
+end
+
+local TRAIT_TEXT = {
+	Growth = function(v)
+		return string.format("+%d%% growth", math.round(v * 100))
+	end,
+	Income = function(v)
+		return string.format("+%d%% income", math.round(v * 100))
+	end,
+	Guard = function()
+		return "Guards your food"
+	end,
+	Forage = function(v)
+		return string.format("%d%% double food", math.round(v * 100))
+	end,
+	Speed = function(v)
+		return string.format("+%d steal speed", v)
+	end,
+}
+
+function CreatureMath.DescribeTraits(creatureId: string): string
+	local def = Creatures[creatureId]
+	if not def then
+		return ""
+	end
+	local parts = {}
+	for trait, value in def.Traits do
+		local fn = TRAIT_TEXT[trait]
+		if fn then
+			table.insert(parts, fn(value))
+		end
+	end
+	table.sort(parts)
+	return table.concat(parts, " • ")
+end
+
+return CreatureMath
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">Fx</string>
+          <string name="Source"><![CDATA[--[[
+	Fx: the client-side effect player.
+
+	  Fx.Play("LevelUp", { Position = pos, Level = 12 })
+
+	Presets (named effects) live in Fx/Presets.lua.
+	Building blocks (burst, ring, shake, ...) live in Fx/Primitives.lua.
+	Persistent auras on kaiju live in Fx/Auras.lua (used by the server).
+
+	From the server, don't call this directly. Use FxService:
+	  FxService:PlayAll("LevelUp", params)
+	  FxService:PlayFor(player, "StealAlert", params)
+]]
+
+local RunService = game:GetService("RunService")
+
+local Fx = {}
+
+local Presets
+local Primitives
+
+local function load()
+	if not Presets then
+		Primitives = require(script.Primitives)
+		Presets = require(script.Presets)
+		Fx.Primitives = Primitives
+	end
+end
+
+function Fx.Play(name: string, params: { [string]: any }?)
+	if RunService:IsServer() then
+		warn("[Fx] Fx.Play is client-only. Use FxService on the server.")
+		return
+	end
+	load()
+	local preset = Presets[name]
+	if not preset then
+		warn("[Fx] Unknown effect preset:", name)
+		return
+	end
+	task.spawn(function()
+		local ok, err = pcall(preset, params or {}, Primitives)
+		if not ok then
+			warn("[Fx] Preset", name, "failed:", err)
+		end
+	end)
+end
+
+-- Add or override a preset at runtime (e.g. from a new feature module).
+function Fx.Register(name: string, preset: (params: any, P: any) -> ())
+	load()
+	Presets[name] = preset
+end
+
+if RunService:IsClient() then
+	load()
+end
+
+return Fx
+]]></string>
+        </Properties>
+        <Item class="ModuleScript" referent="12">
+          <Properties>
+            <string name="Name">Auras</string>
+            <string name="Source"><![CDATA[--[[
+	Auras: effects that stay attached to a kaiju (mutation glow, rare sparkle).
+	Used by the server when it builds a kaiju model, so every player sees them.
+
+	Add a new particle style: add a function to PARTICLES below and use its
+	name in Config/Mutations.lua  (Aura = { Particles = "YourStyle" }).
+]]
+
+local Textures = require(script.Parent.Textures)
+
+local Auras = {}
+
+local function emitter(parent: Instance, color: Color3): ParticleEmitter
+	local e = Instance.new("ParticleEmitter")
+	e.Name = "Aura"
+	e.Color = ColorSequence.new(color)
+	e.LightEmission = 1
+	e.Rotation = NumberRange.new(0, 360)
+	e.RotSpeed = NumberRange.new(-90, 90)
+	e.Parent = parent
+	return e
+end
+
+local PARTICLES = {
+	Embers = function(parent: Instance, color: Color3)
+		local e = emitter(parent, color)
+		e.Texture = Textures.Sparkle
+		e.Rate = 10
+		e.Lifetime = NumberRange.new(1.2, 2.2)
+		e.Speed = NumberRange.new(1, 3)
+		e.Acceleration = Vector3.new(0, 4, 0)
+		e.SpreadAngle = Vector2.new(60, 60)
+		e.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.4),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+	end,
+	Sparkles = function(parent: Instance, color: Color3)
+		local e = emitter(parent, color)
+		e.Texture = Textures.Sparkle
+		e.Rate = 6
+		e.Lifetime = NumberRange.new(1, 2)
+		e.Speed = NumberRange.new(0.5, 1.5)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(0.5, 0.6),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+	end,
+	Smoke = function(parent: Instance, color: Color3)
+		local e = emitter(parent, color)
+		e.Texture = Textures.Smoke
+		e.LightEmission = 0
+		e.Rate = 5
+		e.Lifetime = NumberRange.new(2, 3)
+		e.Speed = NumberRange.new(0.5, 1.5)
+		e.Acceleration = Vector3.new(0, 1, 0)
+		e.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.3, 0.5),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		e.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1.5),
+			NumberSequenceKeypoint.new(1, 3),
+		})
+	end,
+}
+
+export type AuraDef = {
+	Color: Color3,
+	Light: boolean?,
+	Particles: string?,
+}
+
+-- Adds the aura to a part (usually the kaiju's body). Call before scaling
+-- the model, so Model:ScaleTo scales the particles and light with it.
+function Auras.Apply(part: BasePart, aura: AuraDef)
+	if aura.Particles and PARTICLES[aura.Particles] then
+		PARTICLES[aura.Particles](part, aura.Color)
+	end
+	if aura.Light then
+		local light = Instance.new("PointLight")
+		light.Name = "AuraLight"
+		light.Color = aura.Color
+		light.Brightness = 1.5
+		light.Range = 10
+		light.Parent = part
+	end
+end
+
+-- Subtle sparkle for Legendary+ kaiju so rare ones stand out.
+function Auras.RarityGlow(part: BasePart, color: Color3)
+	Auras.Apply(part, { Color = color, Light = true, Particles = "Sparkles" })
+end
+
+return Auras
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="13">
+          <Properties>
+            <string name="Name">Presets</string>
+            <string name="Source"><![CDATA[--[[
+	Presets: named effects built from Primitives.
+
+	Each preset is  function(params, P)  where P = Primitives.
+	The server plays one with  FxService:PlayAll("Name", params).
+
+	To add a new effect: copy a preset, rename it, and mix primitives.
+	Keep far-away effects cheap: check P.Distance(position) first.
+]]
+
+local GOLD = Color3.fromRGB(255, 210, 60)
+local RED = Color3.fromRGB(255, 60, 60)
+local WHITE = Color3.new(1, 1, 1)
+local FAR = 250 -- skip world effects farther than this from the camera
+
+local Presets = {}
+
+-- Kaiju eats food.
+function Presets.Feed(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position, { Color = p.Color, Count = 12, Speed = 12, Size = 0.6 })
+	P.Sound("Pop", p.Position, 0.5, 1 + math.random() * 0.2)
+	if P.IsMe(p.Owner) then
+		local text = if p.Xp then "+" .. tostring(p.Xp) .. " XP" else "+XP"
+		P.FloatText(p.Position, text, { Color = p.Color, Size = 1.6 })
+	end
+end
+
+-- Kaiju levels up (and grows).
+function Presets.LevelUp(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	local ground = p.Ground or p.Position
+	P.Ring(ground, { Color = GOLD, Radius = 10 + (p.Size or 0), Duration = 0.6 })
+	P.Burst(p.Position, { Color = GOLD, Count = 30, Speed = 30, Size = 0.9 })
+	P.Light(p.Position, { Color = GOLD, Brightness = 6, Range = 25 })
+	if p.Model then
+		P.Highlight(p.Model, { Color = GOLD, Duration = 0.5 })
+	end
+	P.Sound("LevelUp", p.Position, 0.7, 1.2)
+	if P.IsMe(p.Owner) then
+		P.FloatText(p.Position + Vector3.new(0, 2, 0), "LEVEL " .. tostring(p.Level) .. "!", { Color = GOLD, Size = 3 })
+		P.Shake(0.15, 0.25)
+	end
+end
+
+-- Kaiju mutates (big moment!).
+function Presets.Mutation(p, P)
+	local color = p.Color or WHITE
+	if P.Distance(p.Position) <= FAR then
+		local ground = p.Ground or p.Position
+		P.Pillar(ground, { Color = color, Height = 80, Width = 10, Duration = 1.5 })
+		P.Ring(ground, { Color = color, Radius = 25, Duration = 0.8 })
+		task.delay(0.15, function()
+			P.Ring(ground, { Color = WHITE, Radius = 18, Duration = 0.6 })
+		end)
+		P.Burst(p.Position, { Color = color, Count = 60, Speed = 40, Size = 1.2, Lifetime = 1.2 })
+		P.Light(p.Position, { Color = color, Brightness = 10, Range = 40, Duration = 1 })
+		if p.Model then
+			P.Highlight(p.Model, { Color = color, Duration = 1.2 })
+		end
+		P.Sound("Fanfare", p.Position, 0.8)
+	end
+	if P.IsMe(p.Owner) then
+		P.Flash(color, 0.6, 0.2)
+		P.Shake(0.4, 0.5)
+		P.FloatText(p.Position + Vector3.new(0, 4, 0), string.upper(p.Name or "MUTATION") .. "!", { Color = color, Size = 4, Duration = 2 })
+	end
+end
+
+-- A new kaiju appears in the pen.
+function Presets.Spawn(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	local color = p.Color or WHITE
+	P.Ring(p.Position, { Color = color, Radius = 10, Duration = 0.5 })
+	P.Burst(p.Position + Vector3.new(0, 2, 0), { Color = color, Count = 25, Speed = 18 })
+	if p.Rare then
+		P.Pillar(p.Position, { Color = color, Height = 50, Width = 6 })
+	end
+end
+
+-- Picked up wild food.
+function Presets.Pickup(p, P)
+	P.Burst(p.Position, { Color = p.Color, Count = 10, Speed = 10, Size = 0.5 })
+	P.Sound("Pop", p.Position, 0.5, 1.4)
+	if p.Text then
+		P.FloatText(p.Position, p.Text, { Color = p.Color, Size = 1.5 })
+	end
+end
+
+-- Someone starts stealing from a food storage.
+function Presets.StealStart(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position, { Color = RED, Count = 15, Speed = 15 })
+	P.Ring(p.Position, { Color = RED, Radius = 8, Duration = 0.4 })
+end
+
+-- Shown only to the player being stolen from.
+function Presets.StealAlert(_p, P)
+	P.Vignette(RED, 1.5)
+	P.Sound("Alarm", nil, 0.6)
+end
+
+-- Thief made it home with the food.
+function Presets.Deposit(p, P)
+	P.Burst(p.Position, { Color = p.Color, Count = 25, Speed = 20 })
+	P.Ring(p.Position, { Color = p.Color, Radius = 8 })
+	if P.IsMe(p.Owner) then
+		P.FloatText(p.Position, "STOLEN!", { Color = p.Color, Size = 2.5 })
+		P.Sound("Coin", nil, 0.6)
+	end
+end
+
+-- A guard kaiju knocks a thief away.
+function Presets.GuardKnock(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Ring(p.Position, { Color = WHITE, Radius = 14, Duration = 0.4 })
+	P.Burst(p.Position, { Color = WHITE, Count = 20, Speed = 35 })
+	P.Sound("Impact", p.Position, 0.8)
+	if P.IsMe(p.Target) then
+		P.Shake(0.6, 0.4)
+		P.Flash(WHITE, 0.25, 0.4)
+		if p.Velocity then
+			P.Knockback(p.Velocity)
+		end
+	end
+end
+
+-- Food taken back from a thief.
+function Presets.TakeBack(p, P)
+	P.Burst(p.Position, { Color = Color3.fromRGB(90, 220, 120), Count = 20, Speed = 20 })
+	P.Sound("Pop", p.Position, 0.6, 0.9)
+end
+
+-- Sold a kaiju.
+function Presets.Sell(p, P)
+	P.Burst(p.Position, { Color = GOLD, Count = 40, Speed = 25, Size = 0.8 })
+	P.Ring(p.Ground or p.Position, { Color = GOLD, Radius = 10 })
+	if P.IsMe(p.Owner) then
+		P.FloatText(p.Position, "+" .. (p.Text or ""), { Color = GOLD, Size = 2.5 })
+		P.Sound("Coin", nil, 0.7)
+	end
+end
+
+-- Meteor lands (Meteor Feast event).
+function Presets.MeteorImpact(p, P)
+	local distance = P.Distance(p.Position)
+	if distance > FAR * 1.5 then
+		return
+	end
+	P.Ring(p.Position, { Color = Color3.fromRGB(255, 140, 40), Radius = 16, Duration = 0.5 })
+	P.Burst(p.Position, { Color = p.Color, Count = 25, Speed = 30, Size = 1 })
+	P.Burst(p.Position, { Color = Color3.fromRGB(80, 80, 80), Count = 10, Speed = 10, Size = 3, Lifetime = 1.5, Gravity = 5, LightEmission = 0 })
+	P.Light(p.Position, { Color = Color3.fromRGB(255, 150, 50), Brightness = 8, Range = 30 })
+	P.Sound("Impact", p.Position, 0.7, 0.8 + math.random() * 0.3)
+	if distance < 80 then
+		P.Shake(0.3 * (1 - distance / 80), 0.3)
+	end
+end
+
+-- Meteor streak while falling (attached by the server as a trail).
+function Presets.MeteorWarning(p, P)
+	P.Ring(p.Position, { Color = RED, Radius = 5, Duration = 1.2, Thickness = 0.15 })
+end
+
+-- A new Kaiju King is crowned.
+function Presets.NewKing(p, P)
+	if p.Position and P.Distance(p.Position) <= FAR * 2 then
+		P.Pillar(p.Position, { Color = GOLD, Height = 150, Width = 14, Duration = 2 })
+		P.Ring(p.Position, { Color = GOLD, Radius = 40, Duration = 1 })
+		P.Burst(p.Position + Vector3.new(0, 10, 0), { Color = GOLD, Count = 60, Speed = 40, Size = 1.5 })
+	end
+	if P.IsMe(p.Owner) then
+		P.Confetti(80, { GOLD, WHITE, Color3.fromRGB(255, 170, 0) })
+		P.Flash(GOLD, 0.6, 0.3)
+	end
+end
+
+-- Player rebirths.
+function Presets.Rebirth(p, P)
+	if p.Position and P.Distance(p.Position) <= FAR then
+		P.Pillar(p.Position, { Color = Color3.fromRGB(180, 120, 255), Height = 120, Width = 12, Duration = 2 })
+		P.Ring(p.Position, { Color = Color3.fromRGB(180, 120, 255), Radius = 30, Duration = 0.8 })
+	end
+	if P.IsMe(p.Owner) then
+		P.Flash(WHITE, 1, 0)
+		P.Shake(0.8, 0.8)
+		P.Confetti(100)
+	end
+end
+
+-- Egg hatch reveal (played by the hatch UI).
+function Presets.HatchReveal(p, P)
+	P.Flash(p.Color or WHITE, 0.5, 0.1)
+	P.Sound("Hatch", nil, 0.8)
+	if p.RarityOrder and p.RarityOrder >= 4 then
+		P.Confetti(80)
+		P.Shake(0.3, 0.4)
+	end
+end
+
+-- Storage lock turned on.
+function Presets.Lock(p, P)
+	P.Ring(p.Position, { Color = Color3.fromRGB(90, 170, 255), Radius = 12, Duration = 0.5 })
+	P.Burst(p.Position, { Color = Color3.fromRGB(90, 170, 255), Count = 15 })
+end
+
+return Presets
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">Primitives</string>
+            <string name="Source"><![CDATA[--[[
+	Primitives: small, reusable effect building blocks (client only).
+	Presets combine these into named effects.
+
+	World effects:  Burst, Ring, Pillar, Light, FloatText, Sound, Highlight
+	Screen effects: Shake, Flash, Vignette, Confetti, Pop
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local Workspace = game:GetService("Workspace")
+
+local Textures = require(script.Parent.Textures)
+local Sounds = require(script.Parent.Parent.Config.Sounds)
+
+local player = Players.LocalPlayer
+
+local Primitives = {}
+
+local FONT = Enum.Font.FredokaOne
+
+local function tween(instance: Instance, time: number, props: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
+	local t = TweenService:Create(
+		instance,
+		TweenInfo.new(time, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out),
+		props
+	)
+	t:Play()
+	return t
+end
+Primitives.Tween = tween
+
+local fxFolder: Folder? = nil
+local function getFolder(): Folder
+	if not fxFolder or not fxFolder.Parent then
+		local folder = Instance.new("Folder")
+		folder.Name = "LocalFx"
+		folder.Parent = Workspace
+		fxFolder = folder
+	end
+	return fxFolder :: Folder
+end
+
+local function holderPart(position: Vector3, size: Vector3?): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Transparency = 1
+	p.Size = size or Vector3.one
+	p.CFrame = CFrame.new(position)
+	p.Parent = getFolder()
+	return p
+end
+
+local overlayGui: ScreenGui? = nil
+local function getOverlay(): ScreenGui
+	if not overlayGui or not overlayGui.Parent then
+		local gui = Instance.new("ScreenGui")
+		gui.Name = "FxOverlay"
+		gui.IgnoreGuiInset = true
+		gui.ResetOnSpawn = false
+		gui.DisplayOrder = 100
+		gui.Parent = player:WaitForChild("PlayerGui")
+		overlayGui = gui
+	end
+	return overlayGui :: ScreenGui
+end
+
+local function toSequence(color: Color3 | ColorSequence): ColorSequence
+	if typeof(color) == "ColorSequence" then
+		return color
+	end
+	return ColorSequence.new(color :: Color3)
+end
+
+-- Distance from the camera, used by presets to skip far-away effects.
+function Primitives.Distance(position: Vector3): number
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return 0
+	end
+	return (camera.CFrame.Position - position).Magnitude
+end
+
+function Primitives.IsMe(userId: number?): boolean
+	return userId == player.UserId
+end
+
+--------------------------------------------------------------------------
+-- World effects
+--------------------------------------------------------------------------
+
+export type BurstOptions = {
+	Color: (Color3 | ColorSequence)?,
+	Count: number?,
+	Speed: number?,
+	Size: number?,
+	Lifetime: number?,
+	Gravity: number?,
+	Spread: number?,
+	Texture: string?,
+	LightEmission: number?,
+}
+
+-- A one-shot explosion of particles.
+function Primitives.Burst(position: Vector3, opts: BurstOptions?)
+	local o: BurstOptions = opts or {}
+	local lifetime = o.Lifetime or 0.8
+	local speed = o.Speed or 20
+	local size = o.Size or 0.7
+	local holder = holderPart(position)
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = o.Texture or Textures.Sparkle
+	e.Color = toSequence(o.Color or Color3.new(1, 1, 1))
+	e.LightEmission = o.LightEmission or 1
+	e.Speed = NumberRange.new(speed * 0.5, speed)
+	e.SpreadAngle = Vector2.new(o.Spread or 180, o.Spread or 180)
+	e.Lifetime = NumberRange.new(lifetime * 0.6, lifetime)
+	e.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, size),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	e.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.7, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	e.Drag = 3
+	e.Acceleration = Vector3.new(0, o.Gravity or -15, 0)
+	e.Rotation = NumberRange.new(0, 360)
+	e.RotSpeed = NumberRange.new(-180, 180)
+	e.Rate = 0
+	e.Parent = holder
+	e:Emit(o.Count or 20)
+	Debris:AddItem(holder, lifetime + 1)
+end
+
+-- A flat shockwave that expands outward and fades.
+function Primitives.Ring(position: Vector3, opts: { Color: Color3?, Radius: number?, Duration: number?, Thickness: number? }?)
+	local o = opts or {}
+	local radius = o.Radius or 12
+	local duration = o.Duration or 0.5
+	local thickness = o.Thickness or 0.3
+	local ring = holderPart(position)
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Material = Enum.Material.Neon
+	ring.Color = o.Color or Color3.new(1, 1, 1)
+	ring.Transparency = 0.2
+	ring.Size = Vector3.new(thickness, 1, 1)
+	ring.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+	tween(ring, duration, { Size = Vector3.new(thickness, radius * 2, radius * 2), Transparency = 1 })
+	Debris:AddItem(ring, duration + 0.1)
+end
+
+-- A vertical beam of light (great for rare hatches, new king, mutations).
+function Primitives.Pillar(position: Vector3, opts: { Color: Color3?, Height: number?, Width: number?, Duration: number? }?)
+	local o = opts or {}
+	local height = o.Height or 60
+	local width = o.Width or 6
+	local duration = o.Duration or 1.2
+	local pillar = holderPart(position + Vector3.new(0, height / 2, 0))
+	pillar.Shape = Enum.PartType.Cylinder
+	pillar.Material = Enum.Material.Neon
+	pillar.Color = o.Color or Color3.new(1, 1, 1)
+	pillar.Transparency = 0.3
+	pillar.Size = Vector3.new(height, width, width)
+	pillar.CFrame = CFrame.new(position + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	tween(pillar, duration, { Size = Vector3.new(height, 0.1, 0.1), Transparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	Debris:AddItem(pillar, duration + 0.1)
+end
+
+-- A short flash of light that lights up nearby objects.
+function Primitives.Light(position: Vector3, opts: { Color: Color3?, Brightness: number?, Range: number?, Duration: number? }?)
+	local o = opts or {}
+	local holder = holderPart(position)
+	local light = Instance.new("PointLight")
+	light.Color = o.Color or Color3.new(1, 1, 1)
+	light.Brightness = o.Brightness or 5
+	light.Range = o.Range or 20
+	light.Shadows = false
+	light.Parent = holder
+	local duration = o.Duration or 0.6
+	tween(light, duration, { Brightness = 0 })
+	Debris:AddItem(holder, duration + 0.1)
+end
+
+-- Text that pops up and floats away ("+XP", "LEVEL 10!", "+$500").
+function Primitives.FloatText(position: Vector3, text: string, opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number? }?)
+	local o = opts or {}
+	local size = o.Size or 2.5
+	local duration = o.Duration or 1.2
+	local holder = holderPart(position)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromScale(size * 5, size)
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.MaxDistance = 250
+	gui.Parent = holder
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = FONT
+	label.TextScaled = true
+	label.Text = text
+	label.TextColor3 = o.Color or Color3.new(1, 1, 1)
+	label.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Parent = label
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0
+	scale.Parent = label
+	tween(scale, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
+	tween(gui, duration, { StudsOffset = Vector3.new(0, o.Rise or 5, 0) })
+	task.delay(duration * 0.6, function()
+		tween(label, duration * 0.4, { TextTransparency = 1 })
+		tween(stroke, duration * 0.4, { Transparency = 1 })
+	end)
+	Debris:AddItem(holder, duration + 0.2)
+end
+
+-- Plays a sound. `sound` is a key from Config/Sounds.lua or a raw sound id.
+-- With a position it is 3D, otherwise it plays for this player only.
+function Primitives.Sound(sound: string, position: Vector3?, volume: number?, pitch: number?)
+	local id = Sounds[sound] or sound
+	if id == nil or id == "" then
+		return
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = volume or 0.6
+	s.PlaybackSpeed = pitch or 1
+	if position then
+		local holder = holderPart(position)
+		s.RollOffMaxDistance = 200
+		s.Parent = holder
+		s:Play()
+		Debris:AddItem(holder, 6)
+	else
+		SoundService:PlayLocalSound(s)
+		s:Destroy()
+	end
+end
+
+-- Briefly makes a model glow.
+function Primitives.Highlight(model: Instance, opts: { Color: Color3?, Duration: number? }?)
+	local o = opts or {}
+	local duration = o.Duration or 0.6
+	local h = Instance.new("Highlight")
+	h.FillColor = o.Color or Color3.new(1, 1, 1)
+	h.OutlineColor = Color3.new(1, 1, 1)
+	h.FillTransparency = 0.2
+	h.OutlineTransparency = 0
+	h.DepthMode = Enum.HighlightDepthMode.Occluded
+	h.Parent = model
+	tween(h, duration, { FillTransparency = 1, OutlineTransparency = 1 })
+	Debris:AddItem(h, duration + 0.1)
+end
+
+--------------------------------------------------------------------------
+-- Screen effects
+--------------------------------------------------------------------------
+
+local shakeStrength = 0
+local shakeEnd = 0
+local shakeDuration = 1
+local shakeConnection: RBXScriptConnection? = nil
+
+-- Camera shake. Stronger shakes override weaker ones.
+function Primitives.Shake(intensity: number, duration: number?)
+	local now = os.clock()
+	local remaining = math.max(0, shakeEnd - now)
+	if intensity < shakeStrength and remaining > 0 then
+		return
+	end
+	shakeStrength = intensity
+	shakeDuration = duration or 0.4
+	shakeEnd = now + shakeDuration
+	if shakeConnection then
+		return
+	end
+	shakeConnection = RunService.RenderStepped:Connect(function()
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local left = shakeEnd - os.clock()
+		if left <= 0 or not humanoid then
+			if humanoid then
+				humanoid.CameraOffset = Vector3.zero
+			end
+			shakeStrength = 0
+			if shakeConnection then
+				shakeConnection:Disconnect()
+				shakeConnection = nil
+			end
+			return
+		end
+		local falloff = left / shakeDuration
+		local s = shakeStrength * falloff
+		humanoid.CameraOffset = Vector3.new((math.random() * 2 - 1) * s, (math.random() * 2 - 1) * s, 0)
+	end)
+end
+
+-- Full-screen color flash.
+function Primitives.Flash(color: Color3?, duration: number?, startTransparency: number?)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BorderSizePixel = 0
+	frame.BackgroundColor3 = color or Color3.new(1, 1, 1)
+	frame.BackgroundTransparency = startTransparency or 0.3
+	frame.ZIndex = 50
+	frame.Parent = getOverlay()
+	local d = duration or 0.4
+	tween(frame, d, { BackgroundTransparency = 1 })
+	Debris:AddItem(frame, d + 0.1)
+end
+
+-- Colored glow around the screen edges (e.g. red when someone steals from you).
+function Primitives.Vignette(color: Color3?, duration: number?)
+	local group = Instance.new("CanvasGroup")
+	group.Size = UDim2.fromScale(1, 1)
+	group.BackgroundTransparency = 1
+	group.GroupTransparency = 1
+	group.ZIndex = 40
+	group.Parent = getOverlay()
+	local edges = {
+		{ UDim2.fromScale(1, 0.25), UDim2.fromScale(0, 0), 90 },
+		{ UDim2.fromScale(1, 0.25), UDim2.fromScale(0, 0.75), -90 },
+		{ UDim2.fromScale(0.2, 1), UDim2.fromScale(0, 0), 0 },
+		{ UDim2.fromScale(0.2, 1), UDim2.fromScale(0.8, 0), 180 },
+	}
+	for _, edge in edges do
+		local f = Instance.new("Frame")
+		f.Size = edge[1]
+		f.Position = edge[2]
+		f.BorderSizePixel = 0
+		f.BackgroundColor3 = color or Color3.fromRGB(255, 40, 40)
+		f.Parent = group
+		local g = Instance.new("UIGradient")
+		g.Rotation = edge[3]
+		g.Transparency = NumberSequence.new(0, 1)
+		g.Parent = f
+	end
+	local d = duration or 1.2
+	tween(group, d * 0.2, { GroupTransparency = 0.2 })
+	task.delay(d * 0.4, function()
+		tween(group, d * 0.6, { GroupTransparency = 1 })
+	end)
+	Debris:AddItem(group, d + 0.1)
+end
+
+-- Confetti falling over the screen (celebrations).
+function Primitives.Confetti(count: number?, colors: { Color3 }?)
+	local palette = colors
+		or {
+			Color3.fromRGB(255, 80, 80),
+			Color3.fromRGB(255, 210, 60),
+			Color3.fromRGB(80, 220, 120),
+			Color3.fromRGB(80, 160, 255),
+			Color3.fromRGB(200, 100, 255),
+		}
+	local overlay = getOverlay()
+	for _ = 1, count or 60 do
+		local f = Instance.new("Frame")
+		f.Size = UDim2.fromOffset(math.random(8, 14), math.random(14, 22))
+		f.AnchorPoint = Vector2.new(0.5, 0.5)
+		f.Position = UDim2.new(math.random(), 0, -0.05, 0)
+		f.Rotation = math.random(0, 360)
+		f.BorderSizePixel = 0
+		f.BackgroundColor3 = palette[math.random(1, #palette)]
+		f.ZIndex = 45
+		f.Parent = overlay
+		local duration = 1.5 + math.random() * 1.5
+		tween(f, duration, {
+			Position = UDim2.new(f.Position.X.Scale + (math.random() - 0.5) * 0.3, 0, 1.1, 0),
+			Rotation = f.Rotation + math.random(-540, 540),
+		}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		Debris:AddItem(f, duration + 0.1)
+	end
+end
+
+-- Launches the local player's character (used for knockbacks, since each
+-- client controls its own character's physics).
+function Primitives.Knockback(velocity: Vector3)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if humanoid and root then
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		root.AssemblyLinearVelocity = velocity
+	end
+end
+
+-- Bouncy "pop" on a UI element (buttons, counters).
+function Primitives.Pop(gui: GuiObject, amount: number?)
+	local scale = gui:FindFirstChild("PopScale") :: UIScale?
+	if not scale then
+		local s = Instance.new("UIScale")
+		s.Name = "PopScale"
+		s.Parent = gui
+		scale = s
+	end
+	local s = scale :: UIScale
+	s.Scale = 1 + (amount or 0.2)
+	tween(s, 0.35, { Scale = 1 }, Enum.EasingStyle.Back)
+end
+
+return Primitives
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
+            <string name="Name">Textures</string>
+            <string name="Source"><![CDATA[--[[
+	Particle textures used by effects. The defaults are textures built into
+	Roblox. Swap in nicer ones from the Creator Store ("rbxassetid://...")
+	and every effect that uses them updates automatically.
+]]
+
+return {
+	Sparkle = "rbxasset://textures/particles/sparkles_main.dds",
+	Fire = "rbxasset://textures/particles/fire_main.dds",
+	Smoke = "rbxasset://textures/particles/smoke_main.dds",
+	Star = "rbxasset://textures/particles/sparkles_main.dds",
+}
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="ModuleScript" referent="16">
+        <Properties>
+          <string name="Name">Net</string>
+          <string name="Source"><![CDATA[--[[
+	Net: one place that lists every RemoteEvent.
+	The server creates them; the client waits for them.
+
+	Add a new remote: put its name in REMOTES, then use Net.Get("Name").
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local REMOTES = {
+	-- server -> client
+	"DataUpdate", -- full player snapshot for the UI
+	"Notify", -- small toast message
+	"Announce", -- big banner for everyone
+	"Fx", -- play an effect preset
+	"Hatched", -- egg reveal
+	-- client -> server
+	"BuyEgg",
+	"BuyFood",
+	"SelectFood",
+	"LockStorage",
+	"Rebirth",
+}
+
+local Net = {}
+
+local folder: Folder
+if RunService:IsServer() then
+	folder = Instance.new("Folder")
+	folder.Name = "Remotes"
+	for _, name in REMOTES do
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+	end
+	folder.Parent = ReplicatedStorage
+else
+	folder = ReplicatedStorage:WaitForChild("Remotes") :: Folder
+end
+
+function Net.Get(name: string): RemoteEvent
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+-- Server-side spam protection. Returns true if the call is allowed.
+local lastCalls: { [Player]: { [string]: number } } = {}
+
+function Net.Throttle(player: Player, key: string, cooldown: number): boolean
+	local calls = lastCalls[player]
+	if not calls then
+		calls = {}
+		lastCalls[player] = calls
+	end
+	local now = os.clock()
+	if calls[key] and now - calls[key] < cooldown then
+		return false
+	end
+	calls[key] = now
+	return true
+end
+
+-- Sends a toast to one player.
+function Net.Notify(player: Player, text: string, color: Color3?)
+	Net.Get("Notify"):FireClient(player, { Text = text, Color = color })
+end
+
+function Net.NotifyAll(text: string, color: Color3?)
+	Net.Get("Notify"):FireAllClients({ Text = text, Color = color })
+end
+
+function Net.Announce(title: string, text: string, color: Color3?)
+	Net.Get("Announce"):FireAllClients({ Title = title, Text = text, Color = color })
+end
+
+if RunService:IsServer() then
+	Players.PlayerRemoving:Connect(function(player)
+		lastCalls[player] = nil
+	end)
+end
+
+return Net
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="17">
+        <Properties>
+          <string name="Name">Util</string>
+        </Properties>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">Format</string>
+            <string name="Source"><![CDATA[local Format = {}
+
+local SUFFIXES = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc" }
+
+-- 1234 -> "1.23K", 5000000 -> "5M"
+function Format.Number(n: number): string
+	n = n or 0
+	if n < 1000 then
+		return tostring(math.floor(n))
+	end
+	local i = 1
+	-- 999.5 so that values which round up (999999 -> "1000K") use the next suffix
+	while n >= 999.5 and i < #SUFFIXES do
+		n /= 1000
+		i += 1
+	end
+	local s
+	if n >= 100 then
+		s = string.format("%.0f", n)
+	elseif n >= 10 then
+		s = string.format("%.1f", n)
+	else
+		s = string.format("%.2f", n)
+	end
+	if string.find(s, "%.") then
+		s = (string.gsub(s, "0+$", ""))
+		s = (string.gsub(s, "%.$", ""))
+	end
+	return s .. SUFFIXES[i]
+end
+
+function Format.Money(n: number): string
+	return "$" .. Format.Number(n)
+end
+
+function Format.Time(seconds: number): string
+	seconds = math.max(0, math.floor(seconds))
+	local m = seconds // 60
+	local s = seconds % 60
+	if m > 0 then
+		return string.format("%d:%02d", m, s)
+	end
+	return s .. "s"
+end
+
+function Format.Percent(p: number): string
+	if p >= 0.1 then
+		return string.format("%.0f%%", p * 100)
+	end
+	return string.format("%.2f%%", p * 100)
+end
+
+return Format
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
+          <Properties>
+            <string name="Name">WeightedRandom</string>
+            <string name="Source"><![CDATA[local WeightedRandom = {}
+
+-- Picks one entry from a list. getWeight(entry) returns that entry's weight.
+function WeightedRandom.Pick<T>(entries: { T }, getWeight: (T) -> number): T?
+	local total = 0
+	for _, entry in entries do
+		total += getWeight(entry)
+	end
+	if total <= 0 then
+		return nil
+	end
+	local roll = math.random() * total
+	for _, entry in entries do
+		roll -= getWeight(entry)
+		if roll <= 0 then
+			return entry
+		end
+	end
+	return entries[#entries]
+end
+
+return WeightedRandom
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="20">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="21">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="Script" referent="22">
+        <Properties>
+          <string name="Name">Main</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[--[[
+	Server entry point. Loads every service, then handles players.
+
+	Service pattern (see docs/ARCHITECTURE.md):
+	  Service:Init(services)  -- grab other services, no yielding
+	  Service:Start()         -- start loops / connect remotes
+	  Service:OnPlayerReady(player) / :OnPlayerRemoving(player)  -- optional
+]]
+
+local Players = game:GetService("Players")
+
+local ServicesFolder = script.Parent:WaitForChild("Services")
+
+-- Order matters: services start in this order.
+local ORDER = {
+	"DataService",
+	"FxService",
+	"WorldService",
+	"FoodService",
+	"CreatureService",
+	"KingService",
+	"StealService",
+	"EggService",
+	"RebirthService",
+	"EventService",
+}
+
+local services = {}
+for _, name in ORDER do
+	services[name] = require(ServicesFolder:WaitForChild(name))
+end
+for _, name in ORDER do
+	local service = services[name]
+	if service.Init then
+		service:Init(services)
+	end
+end
+for _, name in ORDER do
+	local service = services[name]
+	if service.Start then
+		service:Start()
+	end
+end
+
+local function onPlayerAdded(player: Player)
+	local data = services.DataService:Load(player)
+	if not data or not player.Parent then
+		return
+	end
+	local plot = services.WorldService:Assign(player)
+	if not plot then
+		player:Kick("This server is full. Please join another one!")
+		return
+	end
+	for _, name in ORDER do
+		local service = services[name]
+		if service.OnPlayerReady then
+			service:OnPlayerReady(player)
+		end
+	end
+	services.DataService:Changed(player)
+end
+
+local function onPlayerRemoving(player: Player)
+	if not services.DataService:Get(player) then
+		return
+	end
+	-- Reverse order, DataService last so it saves the final state.
+	for i = #ORDER, 1, -1 do
+		local service = services[ORDER[i]]
+		if service.OnPlayerRemoving and service ~= services.DataService then
+			service:OnPlayerRemoving(player)
+		end
+	end
+	services.WorldService:Release(player)
+	services.DataService:Release(player)
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+for _, player in Players:GetPlayers() do
+	task.spawn(onPlayerAdded, player)
+end
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="23">
+        <Properties>
+          <string name="Name">Modules</string>
+        </Properties>
+        <Item class="ModuleScript" referent="24">
+          <Properties>
+            <string name="Name">CreatureBuilder</string>
+            <string name="Source"><![CDATA[--[[
+	CreatureBuilder: makes the 3D model for a kaiju.
+
+	If ServerStorage has a folder "CreatureModels" with a Model named after
+	the kaiju's Id (e.g. "Rex"), that model is used. Otherwise a placeholder
+	is built from parts using the Style and colors in Config/Creatures.lua.
+
+	Custom model rules: set a PrimaryPart at the FEET, facing -Z (forward).
+	Give parts an attribute Paint = "Body" or "Accent" so mutations recolor
+	them correctly (parts without it count as "Body").
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Auras = require(Shared.Fx.Auras)
+
+local CreatureBuilder = {}
+
+local WHITE = Color3.new(1, 1, 1)
+local BLACK = Color3.new(0.05, 0.05, 0.05)
+
+local function part(model: Model, paint: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Name = paint
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Shape = shape or Enum.PartType.Block
+	p.Material = Enum.Material.SmoothPlastic
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanTouch = false
+	p.CanQuery = false
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p:SetAttribute("Paint", paint)
+	p.Parent = model
+	return p
+end
+
+local function eyes(model: Model, headCf: CFrame, headSize: Vector3)
+	local eyeSize = math.min(headSize.X, headSize.Y) * 0.35
+	for _, side in { -1, 1 } do
+		local eyeCf = headCf * CFrame.new(side * headSize.X * 0.25, headSize.Y * 0.12, -headSize.Z / 2)
+		part(model, "Eye", Vector3.one * eyeSize, eyeCf, WHITE, Enum.PartType.Ball)
+		part(model, "Eye", Vector3.one * eyeSize * 0.5, eyeCf * CFrame.new(0, 0, -eyeSize * 0.3), BLACK, Enum.PartType.Ball)
+	end
+end
+
+local function spikes(model: Model, fromY: number, z: number, count: number, color: Color3)
+	for i = 0, count - 1 do
+		part(model, "Accent", Vector3.new(0.7, 0.7, 0.7), CFrame.new(0, fromY - i * 1.1, z) * CFrame.Angles(math.rad(45), 0, 0), color)
+	end
+end
+
+local function quadBody(model: Model, def, body: Color3, accent: Color3, scaleBody: number)
+	local s = scaleBody
+	part(model, "Body", Vector3.new(3, 2.4, 5) * s, CFrame.new(0, 2.6 * s, 0), body)
+	for _, x in { -1.1, 1.1 } do
+		for _, z in { -1.7, 1.7 } do
+			part(model, "Accent", Vector3.new(0.9, 1.6, 0.9) * s, CFrame.new(x * s, 0.8 * s, z * s), accent)
+		end
+	end
+	part(model, "Body", Vector3.new(0.6, 0.6, 1.8) * s, CFrame.new(0, 2.8 * s, 3.2 * s) * CFrame.Angles(math.rad(-20), 0, 0), body)
+	local heads = def.Heads or 1
+	for h = 1, heads do
+		local x = (h - (heads + 1) / 2) * 1.8 * s
+		local headSize = Vector3.new(1.8, 1.6, 1.8) * s
+		local headCf = CFrame.new(x, 3.4 * s + (heads > 1 and 0.8 or 0), -3.1 * s)
+		if heads > 1 then
+			part(model, "Body", Vector3.new(0.7, 1.6, 0.7) * s, CFrame.new(x * 0.7, 3.2 * s, -2.6 * s), body)
+		end
+		part(model, "Body", headSize, headCf, body)
+		eyes(model, headCf, headSize)
+		if def.Horn then
+			part(model, "Accent", Vector3.new(0.5, 1.6, 0.5) * s, headCf * CFrame.new(0, headSize.Y * 0.6, -headSize.Z * 0.3) * CFrame.Angles(math.rad(-25), 0, 0), accent)
+		end
+	end
+end
+
+local BUILDERS = {}
+
+function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
+	for _, side in { -1, 1 } do
+		part(model, "Accent", Vector3.new(1.2, 2.4, 1.2), CFrame.new(side * 0.9, 1.2, 0), accent)
+		part(model, "Body", Vector3.new(0.9, 2.2, 0.9), CFrame.new(side * 2.05, 4.2, -0.3) * CFrame.Angles(math.rad(-20), 0, 0), body)
+	end
+	part(model, "Body", Vector3.new(3.2, 3.2, 2.4), CFrame.new(0, 4, 0), body)
+	part(model, "Accent", Vector3.new(2.2, 2.2, 0.2), CFrame.new(0, 3.8, -1.25), accent)
+	local headSize = Vector3.new(2.6, 2.2, 2.4)
+	local headCf = CFrame.new(0, 6.7, -0.4)
+	part(model, "Body", headSize, headCf, body)
+	part(model, "Body", Vector3.new(1.6, 1, 1), headCf * CFrame.new(0, -0.4, -1.5), body)
+	eyes(model, headCf, headSize)
+	part(model, "Body", Vector3.new(1, 1, 2.4), CFrame.new(0, 2.6, 1.9) * CFrame.Angles(math.rad(25), 0, 0), body)
+	spikes(model, 5.4, 1.25, 3, accent)
+	if def.Horn then
+		part(model, "Accent", Vector3.new(0.5, 1.4, 0.5), headCf * CFrame.new(-0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(20)), accent)
+		part(model, "Accent", Vector3.new(0.5, 1.4, 0.5), headCf * CFrame.new(0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(-20)), accent)
+	end
+end
+
+function BUILDERS.Quad(model: Model, def, body: Color3, accent: Color3)
+	quadBody(model, def, body, accent, 1)
+	-- shell / back plate
+	part(model, "Accent", Vector3.new(2.6, 0.8, 4), CFrame.new(0, 4.1, 0), accent)
+end
+
+function BUILDERS.Blob(model: Model, def, body: Color3, accent: Color3)
+	local bodySize = Vector3.new(5, 5, 5)
+	local bodyCf = CFrame.new(0, 2.5, 0)
+	part(model, "Body", bodySize, bodyCf, body, Enum.PartType.Ball)
+	part(model, "Accent", Vector3.new(3, 3, 3), CFrame.new(0, 4.2, 0.4), accent, Enum.PartType.Ball)
+	eyes(model, CFrame.new(0, 3, 0.2), bodySize)
+	if def.Tentacles then
+		for i = 1, 6 do
+			local angle = (i / 6) * math.pi * 2
+			part(
+				model,
+				"Accent",
+				Vector3.new(3.2, 0.8, 0.8),
+				CFrame.new(math.cos(angle) * 2.8, 0.4, math.sin(angle) * 2.8) * CFrame.Angles(0, -angle, 0),
+				accent,
+				Enum.PartType.Cylinder
+			)
+		end
+	end
+end
+
+function BUILDERS.Winged(model: Model, def, body: Color3, accent: Color3)
+	quadBody(model, def, body, accent, 0.9)
+	for _, side in { -1, 1 } do
+		part(model, "Accent", Vector3.new(4.5, 0.3, 2.8), CFrame.new(side * 3.4, 4, 0.2) * CFrame.Angles(0, 0, math.rad(side * 25)), accent)
+	end
+	spikes(model, 4.2, 1.8, 2, accent)
+end
+
+local function buildPlaceholder(def): Model
+	local model = Instance.new("Model")
+	local root = part(model, "Root", Vector3.new(1, 1, 1), CFrame.new(0, 0.5, 0), WHITE)
+	root.Name = "Root"
+	root.Transparency = 1
+	root:SetAttribute("Paint", nil)
+	-- Pivot at the feet so scaling grows the kaiju upward.
+	root.PivotOffset = CFrame.new(0, -0.5, 0)
+	model.PrimaryPart = root
+	local builder = BUILDERS[def.Style] or BUILDERS.Biped
+	builder(model, def, def.BodyColor, def.AccentColor)
+	return model
+end
+
+local function buildCustom(id: string): Model?
+	local folder = ServerStorage:FindFirstChild("CreatureModels")
+	local template = folder and folder:FindFirstChild(id)
+	if not (template and template:IsA("Model") and template.PrimaryPart) then
+		return nil
+	end
+	local model = template:Clone()
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+			d.CanTouch = false
+		end
+	end
+	return model
+end
+
+-- The biggest body part (auras are attached to it).
+local function mainPart(model: Model): BasePart
+	local best: BasePart = model.PrimaryPart :: BasePart
+	local bestVolume = 0
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d ~= model.PrimaryPart and (d:GetAttribute("Paint") or "Body") == "Body" then
+			local volume = d.Size.X * d.Size.Y * d.Size.Z
+			if volume > bestVolume then
+				best, bestVolume = d, volume
+			end
+		end
+	end
+	return best
+end
+
+local function applyMutation(model: Model, mutationId: string)
+	local mutation = Mutations[mutationId]
+	if not mutation then
+		return
+	end
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") and d ~= model.PrimaryPart then
+			local paint = d:GetAttribute("Paint") or "Body"
+			if paint == "Body" then
+				d.Color = mutation.Color
+				d.Material = mutation.Material
+				d.Transparency = mutation.Transparency or d.Transparency
+			elseif paint == "Accent" then
+				d.Color = mutation.AccentColor
+				d.Material = mutation.Material
+			end
+		end
+	end
+	if mutation.Aura then
+		Auras.Apply(mainPart(model), mutation.Aura)
+	end
+	if mutation.Animated then
+		CollectionService:AddTag(model, "AnimatedMutation")
+	end
+end
+
+-- Builds a kaiju model at scale 1 (not parented, not positioned).
+function CreatureBuilder.Build(creature): Model
+	local def = Creatures[creature.Id]
+	local model = buildCustom(creature.Id) or buildPlaceholder(def)
+	if creature.Mutation then
+		applyMutation(model, creature.Mutation)
+	elseif def and Rarities[def.Rarity].Order >= Rarities.Legendary.Order then
+		Auras.RarityGlow(mainPart(model), Rarities[def.Rarity].Color)
+	end
+	model:SetAttribute("CreatureId", creature.Id)
+	model:SetAttribute("Mutation", creature.Mutation)
+	return model
+end
+
+return CreatureBuilder
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="Folder" referent="25">
+        <Properties>
+          <string name="Name">Services</string>
+        </Properties>
+        <Item class="ModuleScript" referent="26">
+          <Properties>
+            <string name="Name">CreatureService</string>
+            <string name="Source"><![CDATA[--[[
+	CreatureService: owns the kaiju in each player's pen.
+	Feeding, growing, mutating, selling, income and the 3D models.
+
+	  CreatureService:Add(player, creatureId, mutation?) -> uid?
+	  CreatureService:Feed(player, uid)
+	  CreatureService:Sell(player, uid)
+	  CreatureService:GetModel(player, uid)
+	  CreatureService:GetIncome(player)
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Creatures = require(Shared.Config.Creatures)
+local Foods = require(Shared.Config.Foods)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local CreatureMath = require(Shared.CreatureMath)
+local Format = require(Shared.Util.Format)
+local Net = require(Shared.Net)
+
+local CreatureBuilder = require(script.Parent.Parent.Modules.CreatureBuilder)
+
+local CreatureService = {
+	Models = {} :: { [Player]: { [string]: Model } },
+}
+
+local Data, World, Fx, Food, King
+
+function CreatureService:Init(services)
+	Data = services.DataService
+	World = services.WorldService
+	Fx = services.FxService
+	Food = services.FoodService
+	King = services.KingService
+
+	Data:AddSnapshotHook(function(player, snapshot)
+		snapshot.Income = player:GetAttribute("Income") or 0
+		snapshot.IsKing = player:GetAttribute("IsKing") == true
+	end)
+end
+
+function CreatureService:Start()
+	-- Income tick
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for player, profile in Data.Profiles do
+				local income = self:GetIncome(player)
+				profile.Data.Cash += income
+				player:SetAttribute("Income", income)
+				self:_updateLeaderstats(player)
+				Data:Changed(player)
+			end
+		end
+	end)
+end
+
+function CreatureService:OnPlayerReady(player: Player)
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+	local biggest = Instance.new("IntValue")
+	biggest.Name = "Biggest Lv"
+	biggest.Parent = leaderstats
+	local cash = Instance.new("StringValue")
+	cash.Name = "Cash"
+	cash.Parent = leaderstats
+	local rebirths = Instance.new("IntValue")
+	rebirths.Name = "Rebirths"
+	rebirths.Parent = leaderstats
+	leaderstats.Parent = player
+
+	player:SetAttribute("SelectedFood", "Meat")
+	self.Models[player] = {}
+	local data = Data:Get(player)
+	for uid in data.Creatures do
+		self:_spawnModel(player, uid)
+	end
+	self:_layout(player)
+	self:_updateLeaderstats(player)
+end
+
+function CreatureService:OnPlayerRemoving(player: Player)
+	local models = self.Models[player]
+	if models then
+		for _, model in models do
+			model:Destroy()
+		end
+	end
+	self.Models[player] = nil
+end
+
+function CreatureService:_updateLeaderstats(player: Player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local data = Data:Get(player)
+	if not leaderstats or not data then
+		return
+	end
+	local biggest = 0
+	for _, creature in data.Creatures do
+		biggest = math.max(biggest, creature.Level)
+	end
+	(leaderstats:FindFirstChild("Biggest Lv") :: IntValue).Value = biggest;
+	(leaderstats:FindFirstChild("Cash") :: StringValue).Value = Format.Money(data.Cash);
+	(leaderstats:FindFirstChild("Rebirths") :: IntValue).Value = data.Rebirths
+end
+
+function CreatureService:GetIncome(player: Player): number
+	local data = Data:Get(player)
+	if not data then
+		return 0
+	end
+	local mult = CreatureMath.PlayerMultiplier(data.Rebirths, player:GetAttribute("IsKing") == true)
+	local total = 0
+	for _, creature in data.Creatures do
+		total += CreatureMath.BaseIncome(creature)
+	end
+	return total * mult
+end
+
+function CreatureService:GetModel(player: Player, uid: string): Model?
+	local models = self.Models[player]
+	return models and models[uid]
+end
+
+--------------------------------------------------------------------------
+-- Models
+--------------------------------------------------------------------------
+
+local function sortedUids(creatures): { string }
+	local uids = {}
+	for uid in creatures do
+		table.insert(uids, uid)
+	end
+	table.sort(uids, function(a, b)
+		return (tonumber(a) or 0) < (tonumber(b) or 0)
+	end)
+	return uids
+end
+
+-- Top-center of a model, used for effects and the name tag.
+function CreatureService:TopOf(model: Model): Vector3
+	return model:GetPivot().Position + Vector3.new(0, model:GetExtentsSize().Y, 0)
+end
+
+function CreatureService:_spawnModel(player: Player, uid: string)
+	local data = Data:Get(player)
+	local plot = World:GetPlot(player)
+	local creature = data.Creatures[uid]
+	if not plot or not creature then
+		return
+	end
+	local model = CreatureBuilder.Build(creature)
+	model.Name = uid
+	model:SetAttribute("OwnerUserId", player.UserId)
+	model:SetAttribute("Uid", uid)
+	model.Parent = plot.CreatureFolder
+	self.Models[player][uid] = model
+
+	local root = model.PrimaryPart :: BasePart
+
+	local tag = Instance.new("BillboardGui")
+	tag.Name = "Tag"
+	tag.Size = UDim2.fromOffset(200, 70)
+	tag.LightInfluence = 0
+	tag.MaxDistance = 150
+	tag.Adornee = root
+	tag.Parent = root
+	local function line(name: string, y: number, height: number)
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.Size = UDim2.new(1, 0, height, 0)
+		label.Position = UDim2.fromScale(0, y)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.FredokaOne
+		label.TextScaled = true
+		label.TextColor3 = Color3.new(1, 1, 1)
+		label.Parent = tag
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Parent = label
+		return label
+	end
+	line("NameLabel", 0, 0.4)
+	line("InfoLabel", 0.4, 0.3)
+	local bar = Instance.new("Frame")
+	bar.Name = "XpBar"
+	bar.Size = UDim2.new(0.7, 0, 0.12, 0)
+	bar.Position = UDim2.fromScale(0.15, 0.78)
+	bar.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+	bar.BorderSizePixel = 0
+	bar.Parent = tag
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = bar
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.BackgroundColor3 = Color3.fromRGB(110, 230, 120)
+	fill.BorderSizePixel = 0
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.Parent = bar
+	corner:Clone().Parent = fill
+
+	local feed = Instance.new("ProximityPrompt")
+	feed.Name = "FeedPrompt"
+	feed.ActionText = "Feed"
+	feed.KeyboardKeyCode = Enum.KeyCode.E
+	feed.HoldDuration = 0
+	feed.RequiresLineOfSight = false
+	feed:SetAttribute("OnlyUserId", player.UserId)
+	feed.Parent = root
+	feed.Triggered:Connect(function(who)
+		if who == player then
+			self:Feed(player, uid)
+		end
+	end)
+
+	local sell = Instance.new("ProximityPrompt")
+	sell.Name = "SellPrompt"
+	sell.ActionText = "Sell"
+	sell.KeyboardKeyCode = Enum.KeyCode.F
+	sell.GamepadKeyCode = Enum.KeyCode.ButtonY
+	sell.HoldDuration = 1.5
+	sell.RequiresLineOfSight = false
+	sell:SetAttribute("OnlyUserId", player.UserId)
+	sell.Parent = root
+	sell.Triggered:Connect(function(who)
+		if who == player then
+			self:Sell(player, uid)
+		end
+	end)
+
+	self:_rescale(player, uid)
+end
+
+function CreatureService:_rescale(player: Player, uid: string)
+	local model = self:GetModel(player, uid)
+	local creature = Data:Get(player).Creatures[uid]
+	if not model or not creature then
+		return
+	end
+	local scale = CreatureMath.Scale(creature.Level)
+	if math.abs(model:GetScale() - scale) > 1e-3 then
+		model:ScaleTo(scale)
+	end
+	local root = model.PrimaryPart :: BasePart
+	local height = model:GetExtentsSize().Y
+	local tag = root:FindFirstChild("Tag") :: BillboardGui
+	tag.StudsOffsetWorldSpace = Vector3.new(0, height + 1.5, 0)
+	for _, name in { "FeedPrompt", "SellPrompt" } do
+		local prompt = root:FindFirstChild(name) :: ProximityPrompt
+		prompt.MaxActivationDistance = 10 + scale * 2
+	end
+	self:_refreshTag(player, uid)
+end
+
+function CreatureService:_refreshTag(player: Player, uid: string)
+	local model = self:GetModel(player, uid)
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	if not model or not creature then
+		return
+	end
+	local def = Creatures[creature.Id]
+	local root = model.PrimaryPart :: BasePart
+	local tag = root:FindFirstChild("Tag") :: BillboardGui
+	local nameLabel = tag:FindFirstChild("NameLabel") :: TextLabel
+	nameLabel.Text = CreatureMath.DisplayName(creature)
+	nameLabel.TextColor3 = if creature.Mutation
+		then Mutations[creature.Mutation].Color
+		else Rarities[def.Rarity].Color
+	local income = CreatureMath.BaseIncome(creature) * CreatureMath.PlayerMultiplier(data.Rebirths, player:GetAttribute("IsKing") == true)
+	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
+	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
+	local fill = tag:FindFirstChild("XpBar"):FindFirstChild("Fill") :: Frame
+	local progress = if creature.Level >= GameConfig.MaxLevel then 1 else creature.Xp / CreatureMath.XpToNext(creature.Level)
+	fill.Size = UDim2.fromScale(math.clamp(progress, 0, 1), 1)
+	local sell = root:FindFirstChild("SellPrompt") :: ProximityPrompt
+	sell.ObjectText = Format.Money(CreatureMath.SellPrice(creature, data.Rebirths))
+	local feed = root:FindFirstChild("FeedPrompt") :: ProximityPrompt
+	feed.ObjectText = CreatureMath.DisplayName(creature)
+end
+
+function CreatureService:_layout(player: Player)
+	local data = Data:Get(player)
+	local plot = World:GetPlot(player)
+	if not data or not plot then
+		return
+	end
+	for i, uid in sortedUids(data.Creatures) do
+		local model = self:GetModel(player, uid)
+		local slot = plot.Slots[i]
+		if model and slot then
+			model:PivotTo(slot)
+		end
+	end
+end
+
+function CreatureService:_rebuild(player: Player, uid: string)
+	local model = self:GetModel(player, uid)
+	if model then
+		model:Destroy()
+		self.Models[player][uid] = nil
+	end
+	self:_spawnModel(player, uid)
+	self:_layout(player)
+end
+
+--------------------------------------------------------------------------
+-- Actions
+--------------------------------------------------------------------------
+
+function CreatureService:Add(player: Player, creatureId: string, mutation: string?): string?
+	local data = Data:Get(player)
+	if not data or not Creatures[creatureId] then
+		return nil
+	end
+	if CreatureMath.Count(data.Creatures) >= CreatureMath.MaxSlots(data.Rebirths) then
+		return nil
+	end
+	local uid = tostring(data.NextUid)
+	data.NextUid += 1
+	data.Creatures[uid] = { Id = creatureId, Level = 1, Xp = 0, Mutation = mutation }
+	data.Index[creatureId] = true
+	if mutation then
+		data.Index[creatureId .. ":" .. mutation] = true
+	end
+	self:_spawnModel(player, uid)
+	self:_layout(player)
+
+	local model = self:GetModel(player, uid)
+	if model then
+		local def = Creatures[creatureId]
+		Fx:PlayAll("Spawn", {
+			Position = model:GetPivot().Position,
+			Color = if mutation then Mutations[mutation].Color else Rarities[def.Rarity].Color,
+			Rare = Rarities[def.Rarity].Order >= Rarities.Epic.Order or mutation ~= nil,
+		})
+	end
+	King:Evaluate()
+	Data:Changed(player)
+	return uid
+end
+
+function CreatureService:RemoveAll(player: Player)
+	local data = Data:Get(player)
+	for _, model in self.Models[player] or {} do
+		model:Destroy()
+	end
+	self.Models[player] = {}
+	data.Creatures = {}
+	King:Evaluate()
+end
+
+function CreatureService:Feed(player: Player, uid: string)
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	if not creature or not Net.Throttle(player, "Feed", 0.15) then
+		return
+	end
+	if creature.Level >= GameConfig.MaxLevel then
+		Net.Notify(player, "This " .. GameConfig.CreatureName .. " is already max level!")
+		return
+	end
+
+	-- Use the selected food, or the first food the player has.
+	local foodId = player:GetAttribute("SelectedFood")
+	if not foodId or (data.Food[foodId] or 0) <= 0 then
+		foodId = nil
+		for _, id in Foods.Order do
+			if (data.Food[id] or 0) > 0 then
+				foodId = id
+				break
+			end
+		end
+	end
+	if not foodId then
+		Net.Notify(player, "No food! Grab some in the middle... or steal some 😈", Color3.fromRGB(255, 170, 60))
+		return
+	end
+	local food = Foods[foodId]
+
+	data.Food[foodId] -= 1
+	data.Stats.FoodEaten += 1
+
+	local growthMult = (1 + CreatureMath.Trait(creature, "Growth")) * (Workspace:GetAttribute("GrowthMult") or 1)
+	local xp = math.floor(food.Growth * growthMult)
+	creature.Xp += xp
+	local leveledUp = false
+	while creature.Level < GameConfig.MaxLevel and creature.Xp >= CreatureMath.XpToNext(creature.Level) do
+		creature.Xp -= CreatureMath.XpToNext(creature.Level)
+		creature.Level += 1
+		leveledUp = true
+	end
+	if creature.Level >= GameConfig.MaxLevel then
+		creature.Xp = 0
+	end
+
+	local mutated = false
+	if food.Mutation then
+		local new = Mutations[food.Mutation.Id]
+		local current = creature.Mutation and Mutations[creature.Mutation]
+		if (not current or new.IncomeMult > current.IncomeMult) and math.random() < food.Mutation.Chance then
+			creature.Mutation = food.Mutation.Id
+			data.Index[creature.Id .. ":" .. creature.Mutation] = true
+			mutated = true
+		end
+	end
+
+	if mutated then
+		self:_rebuild(player, uid)
+	elseif leveledUp then
+		self:_rescale(player, uid)
+	else
+		self:_refreshTag(player, uid)
+	end
+
+	local model = self:GetModel(player, uid)
+	if model then
+		local ground = model:GetPivot().Position
+		local mid = ground + Vector3.new(0, model:GetExtentsSize().Y * 0.6, 0)
+		Fx:PlayAll("Feed", { Position = mid, Color = food.Color, Owner = player.UserId, Xp = xp })
+		if leveledUp then
+			Fx:PlayAll("LevelUp", {
+				Position = mid,
+				Ground = ground,
+				Level = creature.Level,
+				Model = model,
+				Owner = player.UserId,
+				Size = model:GetExtentsSize().X / 2,
+			})
+		end
+		if mutated then
+			local mutation = Mutations[creature.Mutation]
+			Fx:PlayAll("Mutation", {
+				Position = mid,
+				Ground = ground,
+				Color = mutation.Color,
+				Name = mutation.Name,
+				Model = model,
+				Owner = player.UserId,
+			})
+			Net.NotifyAll(
+				string.format("🧬 %s's %s mutated into %s!", player.DisplayName, Creatures[creature.Id].Name, string.upper(mutation.Name)),
+				mutation.Color
+			)
+		end
+	end
+
+	if leveledUp then
+		King:Evaluate()
+	end
+	Food:RefreshStorage(player)
+	Data:Changed(player)
+end
+
+function CreatureService:Sell(player: Player, uid: string)
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	if not creature or not Net.Throttle(player, "Sell", 0.5) then
+		return
+	end
+	local price = CreatureMath.SellPrice(creature, data.Rebirths)
+	local model = self:GetModel(player, uid)
+	if model then
+		Fx:PlayAll("Sell", {
+			Position = self:TopOf(model),
+			Ground = model:GetPivot().Position,
+			Owner = player.UserId,
+			Text = Format.Money(price),
+		})
+		model:Destroy()
+		self.Models[player][uid] = nil
+	end
+	data.Creatures[uid] = nil
+	data.Cash += price
+	self:_layout(player)
+	King:Evaluate()
+	Data:Changed(player)
+end
+
+-- Refresh every name tag (e.g. when income bonuses change).
+function CreatureService:RefreshAllTags(player: Player)
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	for uid in data.Creatures do
+		self:_refreshTag(player, uid)
+	end
+end
+
+return CreatureService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="27">
+          <Properties>
+            <string name="Name">DataService</string>
+            <string name="Source"><![CDATA[--[[
+	DataService: loads, saves and replicates player data.
+
+	  DataService:Get(player)      -> the player's data table (or nil)
+	  DataService:Changed(player)  -> call after changing data; the UI updates
+	  DataService:AddSnapshotHook(fn) -> add extra fields to the UI snapshot
+
+	To add a new saved value: add it to newData() below. Old saves get the
+	default automatically.
+]]
+
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local CreatureMath = require(Shared.CreatureMath)
+local Net = require(Shared.Net)
+
+local DataService = {
+	Profiles = {} :: { [Player]: { Data: any, CanSave: boolean, Key: string } },
+	_pending = {} :: { [Player]: boolean },
+	_hooks = {} :: { (Player, any) -> () },
+}
+
+local function deepCopy(value)
+	if type(value) ~= "table" then
+		return value
+	end
+	local copy = {}
+	for k, v in value do
+		copy[k] = deepCopy(v)
+	end
+	return copy
+end
+DataService.DeepCopy = deepCopy
+
+local function newData()
+	return {
+		Version = 1,
+		Cash = GameConfig.StartingCash,
+		Rebirths = 0,
+		NextUid = 1,
+		Creatures = {}, -- [uid] = { Id, Level, Xp, Mutation }
+		Food = deepCopy(GameConfig.StartingFood),
+		Index = {}, -- ["Rex"] = true, ["Rex:Lava"] = true (collection book)
+		Stats = {
+			StarterGiven = false,
+			Hatched = 0,
+			Steals = 0,
+			Stolen = 0,
+			FoodEaten = 0,
+		},
+	}
+end
+
+-- Fills in missing keys from the template (for old saves).
+-- Only top-level keys and Stats are filled, so empty Food/Creatures stay empty.
+local function reconcile(data)
+	local template = newData()
+	for key, value in template do
+		if data[key] == nil then
+			data[key] = value
+		end
+	end
+	for key, value in template.Stats do
+		if data.Stats[key] == nil then
+			data.Stats[key] = value
+		end
+	end
+end
+
+local store: DataStore? = nil
+do
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore(GameConfig.Data.StoreName)
+	end)
+	if ok then
+		store = result
+	else
+		warn("[DataService] DataStore unavailable, saving disabled:", result)
+	end
+end
+
+function DataService:Init(services)
+	self.Services = services
+end
+
+function DataService:Start()
+	task.spawn(function()
+		while true do
+			task.wait(GameConfig.Data.AutosaveInterval)
+			for player in self.Profiles do
+				task.spawn(self.Save, self, player)
+			end
+		end
+	end)
+
+	game:BindToClose(function()
+		local remaining = 0
+		for player in self.Profiles do
+			remaining += 1
+			task.spawn(function()
+				self:Save(player)
+				remaining -= 1
+			end)
+		end
+		local started = os.clock()
+		while remaining > 0 and os.clock() - started < 25 do
+			task.wait(0.1)
+		end
+	end)
+end
+
+function DataService:Load(player: Player)
+	local key = "Player_" .. player.UserId
+	local data = nil
+	local loaded = false
+	if store then
+		for attempt = 1, 3 do
+			local ok, result = pcall(store.GetAsync, store, key)
+			if ok then
+				data = result
+				loaded = true
+				break
+			end
+			warn("[DataService] Load failed for", player.Name, "attempt", attempt, result)
+			task.wait(attempt)
+		end
+	end
+	if not player.Parent then
+		return nil
+	end
+	if type(data) ~= "table" then
+		data = newData()
+	end
+	reconcile(data)
+	-- Never save over real data that failed to load.
+	self.Profiles[player] = { Data = data, CanSave = loaded, Key = key }
+	if not loaded then
+		task.delay(4, function()
+			if player.Parent then
+				Net.Notify(player, "⚠️ Saving is off right now. Your progress won't be saved.", Color3.fromRGB(255, 170, 60))
+			end
+		end)
+	end
+	return data
+end
+
+function DataService:Get(player: Player)
+	local profile = self.Profiles[player]
+	return profile and profile.Data
+end
+
+function DataService:Save(player: Player)
+	local profile = self.Profiles[player]
+	if not profile or not profile.CanSave or not store then
+		return false
+	end
+	for attempt = 1, 3 do
+		local ok, err = pcall(store.UpdateAsync, store, profile.Key, function()
+			return profile.Data
+		end)
+		if ok then
+			return true
+		end
+		warn("[DataService] Save failed for", player.Name, "attempt", attempt, err)
+		task.wait(attempt)
+	end
+	return false
+end
+
+function DataService:Release(player: Player)
+	self:Save(player)
+	self.Profiles[player] = nil
+	self._pending[player] = nil
+end
+
+function DataService:AddSnapshotHook(hook: (Player, any) -> ())
+	table.insert(self._hooks, hook)
+end
+
+function DataService:BuildSnapshot(player: Player)
+	local data = self:Get(player)
+	local snapshot = {
+		Cash = data.Cash,
+		Rebirths = data.Rebirths,
+		Creatures = data.Creatures,
+		Food = data.Food,
+		IndexCount = CreatureMath.Count(data.Index),
+		Slots = CreatureMath.MaxSlots(data.Rebirths),
+		StorageCap = CreatureMath.StorageCap(data.Rebirths),
+		RebirthCost = CreatureMath.RebirthCost(data.Rebirths),
+		SelectedFood = player:GetAttribute("SelectedFood"),
+	}
+	for _, hook in self._hooks do
+		hook(player, snapshot)
+	end
+	return snapshot
+end
+
+-- Batches changes: many calls in one frame send one update.
+function DataService:Changed(player: Player)
+	if self._pending[player] or not self.Profiles[player] then
+		return
+	end
+	self._pending[player] = true
+	task.defer(function()
+		self._pending[player] = nil
+		if self.Profiles[player] and player.Parent then
+			Net.Get("DataUpdate"):FireClient(player, self:BuildSnapshot(player))
+		end
+	end)
+end
+
+return DataService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="28">
+          <Properties>
+            <string name="Name">EggService</string>
+            <string name="Source"><![CDATA[--[[
+	EggService: buying and hatching eggs, plus the free starter kaiju.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Creatures = require(Shared.Config.Creatures)
+local Eggs = require(Shared.Config.Eggs)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local CreatureMath = require(Shared.CreatureMath)
+local WeightedRandom = require(Shared.Util.WeightedRandom)
+local Net = require(Shared.Net)
+
+local RED = Color3.fromRGB(255, 90, 90)
+
+local EggService = {}
+
+local Data, CreatureService
+
+function EggService:Init(services)
+	Data = services.DataService
+	CreatureService = services.CreatureService
+end
+
+function EggService:Start()
+	Net.Get("BuyEgg").OnServerEvent:Connect(function(player, eggId)
+		self:Buy(player, eggId)
+	end)
+end
+
+function EggService:OnPlayerReady(player: Player)
+	local data = Data:Get(player)
+	if data and not data.Stats.StarterGiven and CreatureMath.Count(data.Creatures) == 0 then
+		data.Stats.StarterGiven = true
+		task.delay(1.5, function()
+			if player.Parent then
+				CreatureService:Add(player, GameConfig.StarterCreature)
+				Net.Notify(player, "🥚 Here's your first " .. GameConfig.CreatureName .. "! Walk up to it and press E to feed it.", Color3.fromRGB(120, 220, 120))
+			end
+		end)
+	end
+end
+
+local function rollMutation(): string?
+	local roll = math.random()
+	if roll < GameConfig.RainbowHatchChance then
+		return "Rainbow"
+	end
+	if roll < GameConfig.HatchMutationChance then
+		local pick = WeightedRandom.Pick(Mutations.HatchPool, function(e)
+			return e.Weight
+		end)
+		return pick and pick.Id
+	end
+	return nil
+end
+
+function EggService:Buy(player: Player, eggId: any)
+	if type(eggId) ~= "string" or not Net.Throttle(player, "BuyEgg", 0.5) then
+		return
+	end
+	local egg = Eggs[eggId]
+	local data = Data:Get(player)
+	if not egg or eggId == "Order" or not data then
+		return
+	end
+	if CreatureMath.Count(data.Creatures) >= CreatureMath.MaxSlots(data.Rebirths) then
+		Net.Notify(player, "Your pen is full! Sell a " .. GameConfig.CreatureName .. " or Rebirth for more slots.", RED)
+		return
+	end
+	if data.Cash < egg.Price then
+		Net.Notify(player, "Not enough cash!", RED)
+		return
+	end
+	local pick = WeightedRandom.Pick(egg.Odds, function(e)
+		return e.Weight
+	end)
+	if not pick then
+		return
+	end
+	data.Cash -= egg.Price
+	local mutation = rollMutation()
+	local uid = CreatureService:Add(player, pick.Creature, mutation)
+	if not uid then
+		data.Cash += egg.Price
+		return
+	end
+	data.Stats.Hatched += 1
+
+	local def = Creatures[pick.Creature]
+	local rarity = Rarities[def.Rarity]
+	Net.Get("Hatched"):FireClient(player, {
+		CreatureId = pick.Creature,
+		Mutation = mutation,
+		EggId = eggId,
+	})
+	if rarity.Order >= Rarities.Legendary.Order or mutation then
+		local name = (if mutation then Mutations[mutation].Name .. " " else "") .. def.Name
+		Net.NotifyAll(string.format("🥚 %s hatched a %s %s!", player.DisplayName, string.upper(def.Rarity), name), rarity.Color)
+	end
+	Data:Changed(player)
+end
+
+return EggService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="29">
+          <Properties>
+            <string name="Name">EventService</string>
+            <string name="Source"><![CDATA[--[[
+	EventService: random server events that keep things fresh.
+
+	Add a new event: write a function in EVENTS below. It runs, and when it
+	returns the event is over. Then the next one is picked after a delay.
+]]
+
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Net = require(Shared.Net)
+
+local EventService = {}
+
+local Food, World
+
+local EVENTS = {}
+
+function EVENTS.MeteorFeast()
+	Net.Announce("☄️ METEOR FEAST", "Food is falling from the sky! Run to the middle!", Color3.fromRGB(255, 150, 50))
+	task.wait(3)
+	Food:MeteorShower(GameConfig.Events.MeteorFoodCount)
+	task.wait(GameConfig.Events.MeteorFoodCount * 0.15 + 3)
+end
+
+function EVENTS.BloodMoon()
+	local duration = GameConfig.Events.BloodMoonDuration
+	Net.Announce(
+		"🩸 BLOOD MOON",
+		"Kaiju grow " .. GameConfig.Events.BloodMoonGrowthMult .. "x faster... but stealing is faster too!",
+		Color3.fromRGB(255, 50, 50)
+	)
+	Workspace:SetAttribute("GrowthMult", GameConfig.Events.BloodMoonGrowthMult)
+	Workspace:SetAttribute("EventEndsAt", Workspace:GetServerTimeNow() + duration)
+
+	local tint = Instance.new("ColorCorrectionEffect")
+	tint.Name = "BloodMoonTint"
+	tint.TintColor = Color3.new(1, 1, 1)
+	tint.Parent = Lighting
+	local info = TweenInfo.new(3)
+	local oldClock = Lighting.ClockTime
+	TweenService:Create(tint, info, { TintColor = Color3.fromRGB(255, 150, 150) }):Play()
+	TweenService:Create(Lighting, info, { ClockTime = 0 }):Play()
+	for _, plot in World.Plots do
+		plot.StealPrompt.HoldDuration = GameConfig.Steal.HoldTime / 2
+	end
+
+	task.wait(duration)
+
+	Workspace:SetAttribute("GrowthMult", nil)
+	TweenService:Create(tint, info, { TintColor = Color3.new(1, 1, 1) }):Play()
+	TweenService:Create(Lighting, info, { ClockTime = oldClock }):Play()
+	for _, plot in World.Plots do
+		plot.StealPrompt.HoldDuration = GameConfig.Steal.HoldTime
+	end
+	Net.Announce("🌅 The Blood Moon is over", "", Color3.fromRGB(255, 200, 150))
+	task.wait(3)
+	tint:Destroy()
+end
+
+function EventService:Init(services)
+	Food = services.FoodService
+	World = services.WorldService
+end
+
+function EventService:Start()
+	task.spawn(function()
+		task.wait(GameConfig.Events.FirstDelay)
+		while true do
+			self:RunRandom()
+			task.wait(GameConfig.Events.Interval)
+		end
+	end)
+end
+
+function EventService:Run(name: string)
+	local event = EVENTS[name]
+	if not event then
+		warn("[EventService] Unknown event", name)
+		return
+	end
+	Workspace:SetAttribute("ActiveEvent", name)
+	local ok, err = pcall(event)
+	if not ok then
+		warn("[EventService] Event", name, "failed:", err)
+	end
+	Workspace:SetAttribute("ActiveEvent", nil)
+	Workspace:SetAttribute("EventEndsAt", nil)
+end
+
+function EventService:RunRandom()
+	local names = {}
+	for name in EVENTS do
+		table.insert(names, name)
+	end
+	self:Run(names[math.random(1, #names)])
+end
+
+return EventService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="30">
+          <Properties>
+            <string name="Name">FoodService</string>
+            <string name="Source"><![CDATA[--[[
+	FoodService: wild food in the middle, the food shop, the food storage
+	(the crate on each plot) and the storage lock.
+
+	  FoodService:Give(player, foodId, amount) -> given amount
+	  FoodService:RefreshStorage(player)
+	  FoodService:MeteorShower(count)
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Foods = require(Shared.Config.Foods)
+local Rarities = require(Shared.Config.Rarities)
+local CreatureMath = require(Shared.CreatureMath)
+local WeightedRandom = require(Shared.Util.WeightedRandom)
+local Format = require(Shared.Util.Format)
+local Net = require(Shared.Net)
+local Auras = require(Shared.Fx.Auras)
+
+local FoodService = {
+	_wildFolder = nil :: Folder?,
+	_lockCooldown = {} :: { [Player]: number },
+}
+
+local Data, World, Fx
+
+local function now(): number
+	return Workspace:GetServerTimeNow()
+end
+
+function FoodService:Init(services)
+	Data = services.DataService
+	World = services.WorldService
+	Fx = services.FxService
+
+	Data:AddSnapshotHook(function(player, snapshot)
+		local plot = World:GetPlot(player)
+		snapshot.LockedUntil = plot and plot.Model:GetAttribute("LockedUntil") or 0
+		snapshot.LockCooldownUntil = self._lockCooldown[player] or 0
+	end)
+end
+
+function FoodService:Start()
+	local folder = Instance.new("Folder")
+	folder.Name = "WildFood"
+	folder.Parent = World.Folder
+	self._wildFolder = folder
+
+	task.spawn(function()
+		while true do
+			task.wait(GameConfig.WildFood.Interval)
+			if #folder:GetChildren() < GameConfig.WildFood.Max then
+				self:SpawnWild()
+			end
+		end
+	end)
+
+	Net.Get("BuyFood").OnServerEvent:Connect(function(player, foodId, amount)
+		self:Buy(player, foodId, amount)
+	end)
+	Net.Get("SelectFood").OnServerEvent:Connect(function(player, foodId)
+		if type(foodId) == "string" and Foods[foodId] and foodId ~= "Order" then
+			player:SetAttribute("SelectedFood", foodId)
+			Data:Changed(player)
+		end
+	end)
+	Net.Get("LockStorage").OnServerEvent:Connect(function(player)
+		self:Lock(player)
+	end)
+end
+
+function FoodService:OnPlayerReady(player: Player)
+	local plot = World:GetPlot(player)
+	if plot then
+		-- New players get a short lock so they can't be robbed instantly.
+		self:_setLock(plot, GameConfig.Steal.JoinProtection)
+	end
+	self:RefreshStorage(player)
+end
+
+function FoodService:OnPlayerRemoving(player: Player)
+	self._lockCooldown[player] = nil
+end
+
+--------------------------------------------------------------------------
+-- Storage
+--------------------------------------------------------------------------
+
+function FoodService:SpaceLeft(player: Player): number
+	local data = Data:Get(player)
+	if not data then
+		return 0
+	end
+	return CreatureMath.StorageCap(data.Rebirths) - CreatureMath.CountFood(data.Food)
+end
+
+-- Adds food to the player's storage (up to the cap). Returns amount added.
+function FoodService:Give(player: Player, foodId: string, amount: number): number
+	local data = Data:Get(player)
+	if not data or not Foods[foodId] then
+		return 0
+	end
+	local given = math.min(amount, self:SpaceLeft(player))
+	if given <= 0 then
+		if Net.Throttle(player, "StorageFull", 3) then
+			Net.Notify(player, "📦 Your food storage is full! Feed your " .. GameConfig.CreatureNamePlural .. ".", Color3.fromRGB(255, 170, 60))
+		end
+		return 0
+	end
+	data.Food[foodId] = (data.Food[foodId] or 0) + given
+	self:RefreshStorage(player)
+	Data:Changed(player)
+	return given
+end
+
+function FoodService:RefreshStorage(player: Player)
+	local plot = World:GetPlot(player)
+	local data = Data:Get(player)
+	if not plot or not data then
+		return
+	end
+	plot.FoodLabel.Text = string.format("🍖 %d / %d", CreatureMath.CountFood(data.Food), CreatureMath.StorageCap(data.Rebirths))
+end
+
+--------------------------------------------------------------------------
+-- Lock
+--------------------------------------------------------------------------
+
+function FoodService:_setLock(plot, duration: number)
+	local lockedUntil = now() + duration
+	plot.Model:SetAttribute("LockedUntil", lockedUntil)
+	plot.LockBubble.Transparency = 0.4
+	plot.LockLabel.Text = "🔒 Locked"
+	task.delay(duration, function()
+		if (plot.Model:GetAttribute("LockedUntil") or 0) <= now() + 0.05 then
+			plot.LockBubble.Transparency = 1
+			plot.LockLabel.Text = ""
+		end
+	end)
+end
+
+function FoodService:IsLocked(plot): boolean
+	return (plot.Model:GetAttribute("LockedUntil") or 0) > now()
+end
+
+function FoodService:Lock(player: Player)
+	local plot = World:GetPlot(player)
+	if not plot or not Net.Throttle(player, "Lock", 1) then
+		return
+	end
+	local cooldownUntil = self._lockCooldown[player] or 0
+	if now() < cooldownUntil then
+		Net.Notify(player, "⏳ Lock is recharging: " .. Format.Time(cooldownUntil - now()))
+		return
+	end
+	self:_setLock(plot, GameConfig.Steal.LockDuration)
+	self._lockCooldown[player] = now() + GameConfig.Steal.LockDuration + GameConfig.Steal.LockCooldown
+	Fx:PlayAll("Lock", { Position = plot.Crate.Position })
+	Net.Notify(player, "🔒 Storage locked for " .. GameConfig.Steal.LockDuration .. "s!", Color3.fromRGB(90, 170, 255))
+	Data:Changed(player)
+end
+
+--------------------------------------------------------------------------
+-- Shop
+--------------------------------------------------------------------------
+
+function FoodService:Buy(player: Player, foodId: any, amount: any)
+	if type(foodId) ~= "string" or not Net.Throttle(player, "BuyFood", 0.2) then
+		return
+	end
+	local def = Foods[foodId]
+	local data = Data:Get(player)
+	if not def or not def.Price or not data then
+		return
+	end
+	amount = math.clamp(math.floor(tonumber(amount) or 1), 1, 10)
+	amount = math.min(amount, self:SpaceLeft(player))
+	if amount <= 0 then
+		Net.Notify(player, "📦 Your food storage is full!", Color3.fromRGB(255, 170, 60))
+		return
+	end
+	local cost = def.Price * amount
+	if data.Cash < cost then
+		Net.Notify(player, "Not enough cash!", Color3.fromRGB(255, 90, 90))
+		return
+	end
+	data.Cash -= cost
+	self:Give(player, foodId, amount)
+	Net.Notify(player, string.format("Bought %dx %s", amount, def.Name), def.Color)
+end
+
+--------------------------------------------------------------------------
+-- Wild food
+--------------------------------------------------------------------------
+
+local function foodEntries(weightKey: string)
+	local entries = {}
+	for _, id in Foods.Order do
+		table.insert(entries, { Id = id, Weight = Foods[id][weightKey] or 0 })
+	end
+	return entries
+end
+
+function FoodService:_makeFoodPart(foodId: string, position: Vector3): Part
+	local def = Foods[foodId]
+	local rarity = Rarities[def.Rarity]
+	local p = Instance.new("Part")
+	p.Name = foodId
+	p.Shape = Enum.PartType.Ball
+	p.Size = Vector3.one * (rarity.Order >= Rarities.Legendary.Order and 3 or 2)
+	p.Color = def.Color
+	p.Material = if rarity.Order >= Rarities.Epic.Order then Enum.Material.Neon else Enum.Material.SmoothPlastic
+	p.Anchored = true
+	p.CanCollide = false
+	p.CastShadow = false
+	p.Position = position
+	p:SetAttribute("FoodId", foodId)
+	if rarity.Order >= Rarities.Rare.Order then
+		Auras.Apply(p, { Color = def.Color, Light = rarity.Order >= Rarities.Epic.Order, Particles = "Sparkles" })
+	end
+	if rarity.Order >= Rarities.Legendary.Order then
+		local gui = Instance.new("BillboardGui")
+		gui.Size = UDim2.fromScale(8, 1.5)
+		gui.StudsOffset = Vector3.new(0, 3, 0)
+		gui.LightInfluence = 0
+		gui.MaxDistance = 200
+		gui.Parent = p
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.FredokaOne
+		label.TextScaled = true
+		label.TextColor3 = rarity.Color
+		label.Text = def.Name
+		label.Parent = gui
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Parent = label
+	end
+	return p
+end
+
+function FoodService:_hookPickup(p: Part, foodId: string)
+	local taken = false
+	p.Touched:Connect(function(hit)
+		if taken then
+			return
+		end
+		local character = hit:FindFirstAncestorOfClass("Model")
+		local player = character and Players:GetPlayerFromCharacter(character)
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not player or not humanoid or humanoid.Health <= 0 then
+			return
+		end
+		local data = Data:Get(player)
+		if not data then
+			return
+		end
+		-- Forage trait (e.g. Kraken): chance for double food
+		local forage = 0
+		for _, creature in data.Creatures do
+			forage += CreatureMath.Trait(creature, "Forage")
+		end
+		local amount = if math.random() < math.min(forage, 0.75) then 2 else 1
+		local given = self:Give(player, foodId, amount)
+		if given > 0 then
+			taken = true
+			local def = Foods[foodId]
+			Fx:PlayFor(player, "Pickup", {
+				Position = p.Position,
+				Color = def.Color,
+				Text = string.format("+%d %s%s", given, def.Name, if given > 1 then " (x2!)" else ""),
+			})
+			p:Destroy()
+		end
+	end)
+end
+
+function FoodService:SpawnWild(foodId: string?)
+	local id = foodId
+	if not id then
+		local pick = WeightedRandom.Pick(foodEntries("WildWeight"), function(e)
+			return e.Weight
+		end)
+		id = pick and pick.Id
+	end
+	if not id then
+		return
+	end
+	local position = World:RandomArenaPoint() + Vector3.new(0, 1.5, 0)
+	local p = self:_makeFoodPart(id, position)
+	p.Parent = self._wildFolder
+	self:_hookPickup(p, id)
+	local def = Foods[id]
+	if def.Announce then
+		Net.NotifyAll("⭐ A " .. def.Name .. " appeared in the middle! Go get it!", def.Color)
+	end
+end
+
+-- Meteor Feast: food falls from the sky with impact effects.
+function FoodService:MeteorShower(count: number)
+	local entries = foodEntries("WildWeight")
+	-- Meteors favour rarer food: flatten the weights.
+	for _, e in entries do
+		e.Weight = math.sqrt(e.Weight)
+	end
+	for i = 1, count do
+		task.delay(i * 0.15, function()
+			local pick = WeightedRandom.Pick(entries, function(e)
+				return e.Weight
+			end)
+			if not pick then
+				return
+			end
+			local target = World:RandomArenaPoint() + Vector3.new(0, 1.5, 0)
+			local p = self:_makeFoodPart(pick.Id, target + Vector3.new(math.random(-40, 40), 150, math.random(-40, 40)))
+			p.Parent = self._wildFolder
+			local fire = Instance.new("Fire")
+			fire.Size = 6
+			fire.Heat = 15
+			fire.Parent = p
+			Fx:PlayNear(target, 400, "MeteorWarning", { Position = target })
+			local fall = TweenService:Create(p, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Position = target })
+			fall:Play()
+			fall.Completed:Connect(function()
+				fire:Destroy()
+				Fx:PlayNear(target, 400, "MeteorImpact", { Position = target, Color = Foods[pick.Id].Color })
+				self:_hookPickup(p, pick.Id)
+			end)
+		end)
+	end
+end
+
+return FoodService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="31">
+          <Properties>
+            <string name="Name">FxService</string>
+            <string name="Source"><![CDATA[--[[
+	FxService: tells clients to play effect presets (see shared/Fx/Presets.lua).
+
+	  FxService:PlayAll("LevelUp", { Position = pos })
+	  FxService:PlayFor(player, "StealAlert", {})
+	  FxService:PlayNear(position, 200, "MeteorImpact", { Position = position })
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Net = require(ReplicatedStorage:WaitForChild("Shared").Net)
+
+local FxService = {}
+
+function FxService:Init(services)
+	self.Services = services
+	self.Remote = Net.Get("Fx")
+end
+
+function FxService:PlayAll(name: string, params: { [string]: any }?)
+	self.Remote:FireAllClients(name, params or {})
+end
+
+function FxService:PlayFor(player: Player, name: string, params: { [string]: any }?)
+	self.Remote:FireClient(player, name, params or {})
+end
+
+-- Only sends to players whose character is within `radius` (saves bandwidth).
+function FxService:PlayNear(position: Vector3, radius: number, name: string, params: { [string]: any }?)
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if root and (root.Position - position).Magnitude <= radius then
+			self.Remote:FireClient(player, name, params or {})
+		end
+	end
+end
+
+return FxService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="32">
+          <Properties>
+            <string name="Name">KingService</string>
+            <string name="Source"><![CDATA[--[[
+	KingService: the biggest kaiju on the server becomes the Kaiju King.
+	Its owner gets bonus income, and the kaiju wears a crown + golden outline.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local CreatureMath = require(Shared.CreatureMath)
+local Net = require(Shared.Net)
+
+local GOLD = Color3.fromRGB(255, 200, 40)
+
+local KingService = {
+	Current = nil :: { Player: Player, Uid: string }?,
+	_crown = nil :: Model?,
+	_highlight = nil :: Highlight?,
+}
+
+local Data, Creatures, Fx, World
+
+function KingService:Init(services)
+	Data = services.DataService
+	Creatures = services.CreatureService
+	Fx = services.FxService
+	World = services.WorldService
+end
+
+function KingService:Start()
+	task.spawn(function()
+		while true do
+			task.wait(GameConfig.KingCheckInterval)
+			self:Evaluate()
+		end
+	end)
+end
+
+local function buildCrown(size: number): Model
+	local crown = Instance.new("Model")
+	crown.Name = "KingCrown"
+	local function piece(partSize: Vector3, cf: CFrame, shape: Enum.PartType?)
+		local p = Instance.new("Part")
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.Material = Enum.Material.Foil
+		p.Color = GOLD
+		p.Shape = shape or Enum.PartType.Block
+		p.Size = partSize
+		p.CFrame = cf
+		p.Parent = crown
+		return p
+	end
+	local base = piece(Vector3.new(size * 0.35, size, size), CFrame.Angles(0, 0, math.rad(90)), Enum.PartType.Cylinder)
+	crown.PrimaryPart = base
+	for i = 1, 5 do
+		local angle = i / 5 * math.pi * 2
+		local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * size * 0.4
+		piece(Vector3.new(size * 0.18, size * 0.45, size * 0.18), CFrame.new(offset + Vector3.new(0, size * 0.35, 0)))
+		local jewel = piece(Vector3.one * size * 0.16, CFrame.new(offset + Vector3.new(0, size * 0.62, 0)), Enum.PartType.Ball)
+		jewel.Material = Enum.Material.Neon
+		jewel.Color = Color3.fromRGB(255, 60, 90)
+	end
+	local light = Instance.new("PointLight")
+	light.Color = GOLD
+	light.Brightness = 2
+	light.Range = size * 3
+	light.Parent = base
+	return crown
+end
+
+function KingService:_findBest()
+	local best, bestLevel, bestIncome = nil, 0, -1
+	for player, profile in Data.Profiles do
+		if not player.Parent then
+			continue
+		end
+		for uid, creature in profile.Data.Creatures do
+			local income = CreatureMath.BaseIncome(creature)
+			if creature.Level > bestLevel or (creature.Level == bestLevel and income > bestIncome) then
+				best, bestLevel, bestIncome = { Player = player, Uid = uid }, creature.Level, income
+			end
+		end
+	end
+	if bestLevel < GameConfig.KingMinLevel then
+		return nil
+	end
+	return best
+end
+
+function KingService:Evaluate()
+	local best = self:_findBest()
+	local current = self.Current
+	local changed = (best == nil) ~= (current == nil)
+		or (best and current and (best.Player ~= current.Player or best.Uid ~= current.Uid))
+	if changed then
+		if current and current.Player.Parent then
+			current.Player:SetAttribute("IsKing", false)
+			Creatures:RefreshAllTags(current.Player)
+		end
+		self.Current = best
+		if best then
+			best.Player:SetAttribute("IsKing", true)
+			Creatures:RefreshAllTags(best.Player)
+			local creature = Data:Get(best.Player).Creatures[best.Uid]
+			local model = Creatures:GetModel(best.Player, best.Uid)
+			Net.Announce(
+				"👑 NEW " .. string.upper(GameConfig.CreatureName) .. " KING",
+				string.format("%s's %s (Lv.%d)", best.Player.DisplayName, CreatureMath.DisplayName(creature), creature.Level),
+				GOLD
+			)
+			Fx:PlayAll("NewKing", {
+				Position = model and model:GetPivot().Position,
+				Owner = best.Player.UserId,
+			})
+		end
+	end
+	self:UpdateCrown()
+end
+
+-- Puts the crown on top of the king's kaiju (called after it grows too).
+function KingService:UpdateCrown()
+	local current = self.Current
+	local model = current and Creatures:GetModel(current.Player, current.Uid)
+	if not model then
+		if self._crown then
+			self._crown:Destroy()
+			self._crown = nil
+		end
+		if self._highlight then
+			self._highlight:Destroy()
+			self._highlight = nil
+		end
+		return
+	end
+	local extents = model:GetExtentsSize()
+	local size = math.clamp(extents.X * 0.4, 2, 30)
+	if not self._crown or math.abs(((self._crown.PrimaryPart :: BasePart).Size.Y) - size) > 0.01 then
+		if self._crown then
+			self._crown:Destroy()
+		end
+		self._crown = buildCrown(size)
+	end
+	local crown = self._crown :: Model
+	crown.Parent = World.Folder
+	-- The crown's base is a cylinder lying on its side, so rotate it upright.
+	crown:PivotTo(CFrame.new(model:GetPivot().Position + Vector3.new(0, extents.Y + size * 0.3, 0)) * CFrame.Angles(0, 0, math.rad(90)))
+
+	if not self._highlight or self._highlight.Parent ~= model then
+		if self._highlight then
+			self._highlight:Destroy()
+		end
+		local highlight = Instance.new("Highlight")
+		highlight.FillTransparency = 1
+		highlight.OutlineColor = GOLD
+		highlight.Parent = model
+		self._highlight = highlight
+	end
+end
+
+function KingService:OnPlayerRemoving(player: Player)
+	if self.Current and self.Current.Player == player then
+		self.Current = nil
+		task.defer(function()
+			self:Evaluate()
+		end)
+	end
+end
+
+return KingService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="33">
+          <Properties>
+            <string name="Name">RebirthService</string>
+            <string name="Source"><![CDATA[--[[
+	RebirthService: reset kaiju, cash and food for a permanent bonus
+	(+income, +pen slots, +storage).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local CreatureMath = require(Shared.CreatureMath)
+local Format = require(Shared.Util.Format)
+local Net = require(Shared.Net)
+
+local RebirthService = {}
+
+local Data, CreatureService, Food, Steal, Fx, World
+
+function RebirthService:Init(services)
+	Data = services.DataService
+	CreatureService = services.CreatureService
+	Food = services.FoodService
+	Steal = services.StealService
+	Fx = services.FxService
+	World = services.WorldService
+end
+
+function RebirthService:Start()
+	Net.Get("Rebirth").OnServerEvent:Connect(function(player)
+		self:Rebirth(player)
+	end)
+end
+
+function RebirthService:Rebirth(player: Player)
+	local data = Data:Get(player)
+	if not data or not Net.Throttle(player, "Rebirth", 2) then
+		return
+	end
+	local cost = CreatureMath.RebirthCost(data.Rebirths)
+	if data.Cash < cost then
+		Net.Notify(player, "You need " .. Format.Money(cost) .. " to rebirth!", Color3.fromRGB(255, 90, 90))
+		return
+	end
+	Steal:ReturnFood(player, "left")
+	CreatureService:RemoveAll(player)
+	data.Cash = GameConfig.StartingCash
+	data.Food = Data.DeepCopy(GameConfig.StartingFood)
+	data.Rebirths += 1
+
+	local plot = World:GetPlot(player)
+	Fx:PlayAll("Rebirth", {
+		Position = plot and plot.CFrame.Position,
+		Owner = player.UserId,
+	})
+	Net.Announce("🌟 REBIRTH!", player.DisplayName .. " reached Rebirth " .. data.Rebirths .. "!", Color3.fromRGB(190, 130, 255))
+
+	CreatureService:Add(player, GameConfig.StarterCreature)
+	Food:RefreshStorage(player)
+	Data:Changed(player)
+end
+
+return RebirthService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="34">
+          <Properties>
+            <string name="Name">StealService</string>
+            <string name="Source"><![CDATA[--[[
+	StealService: stealing food from other players' storage.
+
+	1. Hold the "Steal Food" prompt on someone else's crate.
+	2. You carry one food above your head and walk slower.
+	3. Reach your own crate to keep it.
+	The owner can "Take Back" by using the prompt on the thief,
+	guard kaiju (Guard trait) can knock thieves away,
+	and if the thief dies or leaves, the food goes back.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Foods = require(Shared.Config.Foods)
+local CreatureMath = require(Shared.CreatureMath)
+local WeightedRandom = require(Shared.Util.WeightedRandom)
+local Net = require(Shared.Net)
+
+local RED = Color3.fromRGB(255, 80, 80)
+local GREEN = Color3.fromRGB(90, 220, 120)
+
+type Carry = {
+	FoodId: string,
+	Victim: Player,
+	VictimPlot: any,
+	Part: BasePart,
+	Prompt: ProximityPrompt,
+	Humanoid: Humanoid,
+	DeathConnection: RBXScriptConnection,
+	LastGuardCheck: number,
+}
+
+local StealService = {
+	Carriers = {} :: { [Player]: Carry },
+}
+
+local Data, World, Fx, Food
+
+function StealService:Init(services)
+	Data = services.DataService
+	World = services.WorldService
+	Fx = services.FxService
+	Food = services.FoodService
+end
+
+function StealService:Start()
+	for _, plot in World.Plots do
+		plot.StealPrompt.Triggered:Connect(function(thief)
+			self:TryStart(thief, plot)
+		end)
+	end
+
+	local accumulator = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accumulator += dt
+		if accumulator < 0.2 then
+			return
+		end
+		accumulator = 0
+		self:_tick()
+	end)
+end
+
+function StealService:OnPlayerRemoving(player: Player)
+	if self.Carriers[player] then
+		self:ReturnFood(player, "left")
+	end
+end
+
+local function speedBonus(player: Player): number
+	local data = Data:Get(player)
+	local bonus = 0
+	if data then
+		for _, creature in data.Creatures do
+			bonus = math.max(bonus, CreatureMath.Trait(creature, "Speed"))
+		end
+	end
+	return bonus
+end
+
+function StealService:TryStart(thief: Player, plot)
+	local victim = plot.Owner
+	if not victim or victim == thief or self.Carriers[thief] then
+		return
+	end
+	local victimData = Data:Get(victim)
+	if not victimData or not Data:Get(thief) then
+		return
+	end
+	if Food:IsLocked(plot) then
+		Net.Notify(thief, "🔒 This storage is locked!", RED)
+		return
+	end
+	if Food:SpaceLeft(thief) <= 0 then
+		Net.Notify(thief, "📦 Your storage is full!", RED)
+		return
+	end
+	local character = thief.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	local entries = {}
+	for id, count in victimData.Food do
+		if count > 0 and Foods[id] then
+			table.insert(entries, { Id = id, Count = count })
+		end
+	end
+	local pick = WeightedRandom.Pick(entries, function(e)
+		return e.Count
+	end)
+	if not pick then
+		Net.Notify(thief, "Their storage is empty!", RED)
+		return
+	end
+	local def = Foods[pick.Id]
+	victimData.Food[pick.Id] -= 1
+
+	-- Food floating above the thief's head
+	local carried = Instance.new("Part")
+	carried.Name = "CarriedFood"
+	carried.Shape = Enum.PartType.Ball
+	carried.Size = Vector3.one * 2.5
+	carried.Color = def.Color
+	carried.Material = Enum.Material.Neon
+	carried.CanCollide = false
+	carried.CanTouch = false
+	carried.CanQuery = false
+	carried.Massless = true
+	carried.CFrame = root.CFrame * CFrame.new(0, 4.5, 0)
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = root
+	weld.Part1 = carried
+	weld.Parent = carried
+	carried.Parent = character
+
+	local takeBack = Instance.new("ProximityPrompt")
+	takeBack.Name = "TakeBackPrompt"
+	takeBack.ActionText = "Take Back!"
+	takeBack.ObjectText = def.Name
+	takeBack.HoldDuration = 0
+	takeBack.MaxActivationDistance = 10
+	takeBack.RequiresLineOfSight = false
+	takeBack:SetAttribute("OnlyUserId", victim.UserId)
+	takeBack.Parent = root
+	takeBack.Triggered:Connect(function(who)
+		if who == victim then
+			self:ReturnFood(thief, "takeback")
+		end
+	end)
+
+	humanoid.WalkSpeed = GameConfig.Steal.CarryWalkSpeed + speedBonus(thief)
+
+	self.Carriers[thief] = {
+		FoodId = pick.Id,
+		Victim = victim,
+		VictimPlot = plot,
+		Part = carried,
+		Prompt = takeBack,
+		Humanoid = humanoid,
+		DeathConnection = humanoid.Died:Connect(function()
+			self:ReturnFood(thief, "died")
+		end),
+		LastGuardCheck = 0,
+	}
+	thief:SetAttribute("Carrying", pick.Id)
+
+	Fx:PlayAll("StealStart", { Position = plot.Crate.Position })
+	Fx:PlayFor(victim, "StealAlert", {})
+	Net.Notify(victim, "🚨 " .. thief.DisplayName .. " is stealing your " .. def.Name .. "! Stop them!", RED)
+	Net.Notify(thief, "😈 Got " .. def.Name .. "! Run back to your base!", def.Color)
+	Food:RefreshStorage(victim)
+	Data:Changed(victim)
+end
+
+function StealService:_clear(thief: Player): Carry?
+	local carry = self.Carriers[thief]
+	if not carry then
+		return nil
+	end
+	self.Carriers[thief] = nil
+	carry.DeathConnection:Disconnect()
+	carry.Part:Destroy()
+	carry.Prompt:Destroy()
+	if carry.Humanoid.Parent and carry.Humanoid.Health > 0 then
+		carry.Humanoid.WalkSpeed = GameConfig.Steal.NormalWalkSpeed
+	end
+	if thief.Parent then
+		thief:SetAttribute("Carrying", nil)
+	end
+	return carry
+end
+
+-- Gives the food back to its owner (thief caught, died or left).
+function StealService:ReturnFood(thief: Player, reason: string)
+	local position = self.Carriers[thief] and self.Carriers[thief].Part.Position
+	local carry = self:_clear(thief)
+	if not carry then
+		return
+	end
+	local victim = carry.Victim
+	local victimData = victim.Parent and Data:Get(victim)
+	if victimData then
+		victimData.Food[carry.FoodId] = (victimData.Food[carry.FoodId] or 0) + 1
+		Food:RefreshStorage(victim)
+		Data:Changed(victim)
+		if reason ~= "left" then
+			Net.Notify(victim, "✅ You got your " .. Foods[carry.FoodId].Name .. " back!", GREEN)
+		end
+	end
+	if position then
+		Fx:PlayAll("TakeBack", { Position = position })
+	end
+	if thief.Parent then
+		local message = if reason == "guard"
+			then "🦍 A guard knocked you away! You dropped the food."
+			elseif reason == "takeback" then "❌ " .. victim.DisplayName .. " took their food back!"
+			else "❌ You dropped the food!"
+		Net.Notify(thief, message, RED)
+	end
+end
+
+function StealService:_deposit(thief: Player, plot)
+	local carry = self:_clear(thief)
+	if not carry then
+		return
+	end
+	local data = Data:Get(thief)
+	local def = Foods[carry.FoodId]
+	if data then
+		data.Food[carry.FoodId] = (data.Food[carry.FoodId] or 0) + 1
+		data.Stats.Steals += 1
+		Food:RefreshStorage(thief)
+		Data:Changed(thief)
+	end
+	local victimData = carry.Victim.Parent and Data:Get(carry.Victim)
+	if victimData then
+		victimData.Stats.Stolen += 1
+		Net.Notify(carry.Victim, "😭 " .. thief.DisplayName .. " stole your " .. def.Name .. "!", RED)
+	end
+	Fx:PlayAll("Deposit", { Position = plot.Crate.Position, Color = def.Color, Owner = thief.UserId })
+end
+
+function StealService:_guardChance(victim: Player): number
+	local data = Data:Get(victim)
+	if not data then
+		return 0
+	end
+	local chance = 0
+	for _, creature in data.Creatures do
+		chance += CreatureMath.GuardChance(creature)
+	end
+	return math.min(chance, GameConfig.Steal.MaxGuardChance)
+end
+
+function StealService:_tick()
+	local t = Workspace:GetServerTimeNow()
+	for thief, carry in self.Carriers do
+		local character = thief.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not root then
+			self:ReturnFood(thief, "died")
+			continue
+		end
+		local home = World:GetPlot(thief)
+		if home and (root.Position - home.Crate.Position).Magnitude <= GameConfig.Steal.DepositDistance then
+			self:_deposit(thief, home)
+			continue
+		end
+		local plot = carry.VictimPlot
+		if
+			plot.Owner == carry.Victim
+			and t - carry.LastGuardCheck >= GameConfig.Steal.GuardCheckInterval
+			and World:IsInside(plot, root.Position)
+		then
+			carry.LastGuardCheck = t
+			if math.random() < self:_guardChance(carry.Victim) then
+				local away = (root.Position - plot.CFrame.Position) * Vector3.new(1, 0, 1)
+				local direction = if away.Magnitude > 0.1 then away.Unit else Vector3.new(0, 0, 1)
+				-- The thief's client owns its physics, so the knockback is applied
+				-- there (see the GuardKnock preset).
+				Fx:PlayAll("GuardKnock", {
+					Position = root.Position,
+					Target = thief.UserId,
+					Velocity = direction * 90 + Vector3.new(0, 60, 0),
+				})
+				self:ReturnFood(thief, "guard")
+			end
+		end
+	end
+end
+
+return StealService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="35">
+          <Properties>
+            <string name="Name">WorldService</string>
+            <string name="Source"><![CDATA[--[[
+	WorldService: builds the map, the player bases (plots) and the lighting.
+	Everything is generated from code so the game works in an empty place.
+	Later you can replace parts of it with a map you build in Studio.
+
+	  WorldService:Assign(player) / :Release(player)
+	  WorldService:GetPlot(player)
+	  WorldService:IsInside(plot, position)
+]]
+
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+
+local WorldService = {
+	Plots = {} :: { any },
+	ByPlayer = {} :: { [Player]: any },
+	Folder = nil :: Folder?,
+}
+
+local PLOT_COLORS = {
+	Color3.fromRGB(120, 200, 110),
+	Color3.fromRGB(110, 170, 230),
+	Color3.fromRGB(240, 170, 90),
+	Color3.fromRGB(200, 120, 220),
+	Color3.fromRGB(240, 220, 100),
+	Color3.fromRGB(230, 110, 110),
+	Color3.fromRGB(100, 210, 200),
+	Color3.fromRGB(180, 180, 190),
+}
+
+local function makePart(parent: Instance, props: { [string]: any }): Part
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	for key, value in props do
+		(part :: any)[key] = value
+	end
+	part.Parent = parent
+	return part
+end
+
+local function textLabel(parent: Instance, text: string, color: Color3?): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = color or Color3.new(1, 1, 1)
+	label.Text = text
+	label.Parent = parent
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3
+	stroke.Parent = label
+	return label
+end
+
+local function ensure(className: string, parent: Instance): Instance
+	local existing = parent:FindFirstChildWhichIsA(className)
+	if existing then
+		return existing
+	end
+	local inst = Instance.new(className)
+	inst.Parent = parent
+	return inst
+end
+
+local function setupLighting()
+	Lighting.ClockTime = 14
+	Lighting.Brightness = 2.5
+	Lighting.OutdoorAmbient = Color3.fromRGB(140, 140, 160)
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 1
+
+	local atmosphere = ensure("Atmosphere", Lighting) :: Atmosphere
+	atmosphere.Density = 0.3
+	atmosphere.Offset = 0.25
+	atmosphere.Color = Color3.fromRGB(200, 220, 255)
+	atmosphere.Decay = Color3.fromRGB(110, 130, 170)
+	atmosphere.Glare = 0.2
+	atmosphere.Haze = 1.5
+
+	local bloom = ensure("BloomEffect", Lighting) :: BloomEffect
+	bloom.Intensity = 0.8
+	bloom.Size = 24
+	bloom.Threshold = 1.2
+
+	local color = ensure("ColorCorrectionEffect", Lighting) :: ColorCorrectionEffect
+	color.Saturation = 0.15
+	color.Contrast = 0.05
+
+	local rays = ensure("SunRaysEffect", Lighting) :: SunRaysEffect
+	rays.Intensity = 0.05
+end
+
+function WorldService:Init(services)
+	self.Services = services
+end
+
+function WorldService:Start()
+	setupLighting()
+
+	if GameConfig.ReplaceBaseplate then
+		local baseplate = Workspace:FindFirstChild("Baseplate")
+		if baseplate then
+			baseplate:Destroy()
+		end
+	end
+
+	local world = Instance.new("Folder")
+	world.Name = "KaijuWorld"
+	world.Parent = Workspace
+	self.Folder = world
+
+	local mapSize = (GameConfig.Plots.Radius + GameConfig.Plots.Size) * 2 + 200
+	makePart(world, {
+		Name = "Ground",
+		Size = Vector3.new(mapSize, 2, mapSize),
+		CFrame = CFrame.new(0, -1, 0),
+		Color = Color3.fromRGB(95, 170, 85),
+		Material = Enum.Material.Grass,
+	})
+	-- Center arena where wild food spawns
+	makePart(world, {
+		Name = "Arena",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(1, GameConfig.WildFood.AreaRadius * 2 + 20, GameConfig.WildFood.AreaRadius * 2 + 20),
+		CFrame = CFrame.new(0, -0.4, 0) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(215, 195, 140),
+		Material = Enum.Material.Sand,
+	})
+
+	if not Workspace:FindFirstChildWhichIsA("SpawnLocation", true) then
+		local spawn = Instance.new("SpawnLocation")
+		spawn.Anchored = true
+		spawn.Size = Vector3.new(12, 1, 12)
+		spawn.CFrame = CFrame.new(0, 0.5, 0)
+		spawn.Neutral = true
+		spawn.Parent = world
+	end
+
+	local plotsFolder = Instance.new("Folder")
+	plotsFolder.Name = "Plots"
+	plotsFolder.Parent = world
+
+	for i = 1, GameConfig.Plots.Count do
+		table.insert(self.Plots, self:_buildPlot(plotsFolder, i))
+	end
+end
+
+function WorldService:_buildPlot(parent: Instance, index: number)
+	local S = GameConfig.Plots.Size
+	local angle = (index - 1) / GameConfig.Plots.Count * math.pi * 2
+	local position = Vector3.new(math.cos(angle), 0, math.sin(angle)) * GameConfig.Plots.Radius
+	-- LookVector (-Z) faces the middle of the map = the plot's "front"
+	local cf = CFrame.lookAt(position, Vector3.zero)
+	local color = PLOT_COLORS[(index - 1) % #PLOT_COLORS + 1]
+	local wallColor = color:Lerp(Color3.new(0, 0, 0), 0.35)
+
+	local model = Instance.new("Model")
+	model.Name = "Plot" .. index
+	model:SetAttribute("PlotIndex", index)
+
+	makePart(model, {
+		Name = "Floor",
+		Size = Vector3.new(S, 1, S),
+		CFrame = cf * CFrame.new(0, 0.5, 0),
+		Color = color,
+		Material = Enum.Material.SmoothPlastic,
+	})
+
+	local function wall(size: Vector3, offset: Vector3)
+		makePart(model, {
+			Name = "Wall",
+			Size = size,
+			CFrame = cf * CFrame.new(offset),
+			Color = wallColor,
+			Material = Enum.Material.WoodPlanks,
+		})
+	end
+	wall(Vector3.new(S, 4, 1), Vector3.new(0, 3, S / 2 - 0.5))
+	wall(Vector3.new(1, 4, S), Vector3.new(S / 2 - 0.5, 3, 0))
+	wall(Vector3.new(1, 4, S), Vector3.new(-(S / 2 - 0.5), 3, 0))
+	local gap = 24
+	local segment = (S - gap) / 2
+	wall(Vector3.new(segment, 4, 1), Vector3.new(gap / 2 + segment / 2, 3, -(S / 2 - 0.5)))
+	wall(Vector3.new(segment, 4, 1), Vector3.new(-(gap / 2 + segment / 2), 3, -(S / 2 - 0.5)))
+
+	-- Food storage crate (other players steal from here)
+	local crate = makePart(model, {
+		Name = "FoodStorage",
+		Size = Vector3.new(6, 5, 6),
+		CFrame = cf * CFrame.new(0, 3.5, -S / 2 + 10),
+		Color = Color3.fromRGB(150, 100, 55),
+		Material = Enum.Material.WoodPlanks,
+	})
+	local crateGui = Instance.new("BillboardGui")
+	crateGui.Size = UDim2.fromScale(10, 3)
+	crateGui.StudsOffset = Vector3.new(0, 5, 0)
+	crateGui.MaxDistance = 120
+	crateGui.LightInfluence = 0
+	crateGui.Parent = crate
+	local foodLabel = textLabel(crateGui, "🍖 0 / 0")
+	foodLabel.Size = UDim2.fromScale(1, 0.6)
+	local lockLabel = textLabel(crateGui, "", Color3.fromRGB(120, 190, 255))
+	lockLabel.Size = UDim2.fromScale(1, 0.4)
+	lockLabel.Position = UDim2.fromScale(0, 0.6)
+
+	local stealPrompt = Instance.new("ProximityPrompt")
+	stealPrompt.Name = "StealPrompt"
+	stealPrompt.ActionText = "Steal Food"
+	stealPrompt.ObjectText = "Food Storage"
+	stealPrompt.HoldDuration = GameConfig.Steal.HoldTime
+	stealPrompt.MaxActivationDistance = 12
+	stealPrompt.RequiresLineOfSight = false
+	stealPrompt:SetAttribute("OnlyUserId", -1) -- hidden until someone owns the plot
+	stealPrompt.Parent = crate
+
+	local lockBubble = makePart(model, {
+		Name = "LockBubble",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(18, 18, 18),
+		CFrame = crate.CFrame,
+		Color = Color3.fromRGB(90, 170, 255),
+		Material = Enum.Material.ForceField,
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		CastShadow = false,
+	})
+
+	-- Owner sign at the back, facing the middle
+	local sign = makePart(model, {
+		Name = "Sign",
+		Size = Vector3.new(24, 7, 1),
+		CFrame = cf * CFrame.new(0, 9, S / 2 - 2),
+		Color = wallColor,
+		Material = Enum.Material.WoodPlanks,
+	})
+	for _, x in { -10, 10 } do
+		makePart(model, {
+			Name = "SignPost",
+			Size = Vector3.new(1, 6, 1),
+			CFrame = cf * CFrame.new(x, 3, S / 2 - 2),
+			Color = wallColor,
+			Material = Enum.Material.WoodPlanks,
+		})
+	end
+	local surface = Instance.new("SurfaceGui")
+	surface.Face = Enum.NormalId.Front
+	surface.LightInfluence = 0
+	surface.PixelsPerStud = 30
+	surface.Parent = sign
+	local signLabel = textLabel(surface, "Empty Plot")
+
+	-- Pen slots: 4 columns x 3 rows
+	local slots = {}
+	for row = 0, 2 do
+		for col = 0, 3 do
+			local slotCf = cf * CFrame.new(-30 + col * 20, 1.2, -8 + row * 18)
+			makePart(model, {
+				Name = "SlotPad",
+				Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(0.2, 9, 9),
+				CFrame = slotCf * CFrame.new(0, -0.1, 0) * CFrame.Angles(0, 0, math.rad(90)),
+				Color = color:Lerp(Color3.new(1, 1, 1), 0.4),
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+			})
+			table.insert(slots, slotCf)
+		end
+	end
+
+	local creatures = Instance.new("Folder")
+	creatures.Name = "Creatures"
+	creatures.Parent = model
+
+	model.Parent = parent
+
+	return {
+		Index = index,
+		Model = model,
+		CFrame = cf,
+		Crate = crate,
+		StealPrompt = stealPrompt,
+		LockBubble = lockBubble,
+		FoodLabel = foodLabel,
+		LockLabel = lockLabel,
+		SignLabel = signLabel,
+		Slots = slots,
+		CreatureFolder = creatures,
+		SpawnCFrame = cf * CFrame.new(0, 4, -S / 2 + 18),
+		Owner = nil :: Player?,
+		CharacterConnection = nil :: RBXScriptConnection?,
+	}
+end
+
+function WorldService:Assign(player: Player)
+	for _, plot in self.Plots do
+		if not plot.Owner then
+			plot.Owner = player
+			self.ByPlayer[player] = plot
+			plot.Model:SetAttribute("OwnerUserId", player.UserId)
+			plot.StealPrompt:SetAttribute("OnlyUserId", nil)
+			plot.StealPrompt:SetAttribute("HideForUserId", player.UserId)
+			plot.SignLabel.Text = player.DisplayName .. "'s " .. GameConfig.CreatureNamePlural
+			plot.CharacterConnection = player.CharacterAdded:Connect(function(character)
+				self:_teleportHome(plot, character)
+			end)
+			if player.Character then
+				self:_teleportHome(plot, player.Character)
+			end
+			return plot
+		end
+	end
+	return nil
+end
+
+function WorldService:_teleportHome(plot, character: Model)
+	task.spawn(function()
+		local root = character:WaitForChild("HumanoidRootPart", 5)
+		if root then
+			task.wait(0.1)
+			character:PivotTo(plot.SpawnCFrame)
+		end
+	end)
+end
+
+function WorldService:Release(player: Player)
+	local plot = self.ByPlayer[player]
+	if not plot then
+		return
+	end
+	self.ByPlayer[player] = nil
+	plot.Owner = nil
+	plot.Model:SetAttribute("OwnerUserId", nil)
+	plot.Model:SetAttribute("LockedUntil", nil)
+	plot.StealPrompt:SetAttribute("HideForUserId", nil)
+	plot.StealPrompt:SetAttribute("OnlyUserId", -1)
+	plot.SignLabel.Text = "Empty Plot"
+	plot.FoodLabel.Text = ""
+	plot.LockLabel.Text = ""
+	plot.LockBubble.Transparency = 1
+	if plot.CharacterConnection then
+		plot.CharacterConnection:Disconnect()
+		plot.CharacterConnection = nil
+	end
+	plot.CreatureFolder:ClearAllChildren()
+end
+
+function WorldService:GetPlot(player: Player)
+	return self.ByPlayer[player]
+end
+
+function WorldService:IsInside(plot, position: Vector3): boolean
+	local localPos = plot.CFrame:PointToObjectSpace(position)
+	local half = GameConfig.Plots.Size / 2
+	return math.abs(localPos.X) <= half and math.abs(localPos.Z) <= half
+end
+
+-- Random point inside the middle arena
+function WorldService:RandomArenaPoint(): Vector3
+	local radius = GameConfig.WildFood.AreaRadius * math.sqrt(math.random())
+	local angle = math.random() * math.pi * 2
+	return Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+end
+
+return WorldService
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="36">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="37">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="Folder" referent="38">
+        <Properties>
+          <string name="Name">Client</string>
+        </Properties>
+        <Item class="Folder" referent="39">
+          <Properties>
+            <string name="Name">Controllers</string>
+          </Properties>
+          <Item class="ModuleScript" referent="40">
+            <Properties>
+              <string name="Name">FxController</string>
+              <string name="Source"><![CDATA[--[[
+	FxController: plays effects the server asks for, and animates
+	"AnimatedMutation" kaiju (e.g. Rainbow) on this client.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Net = require(Shared.Net)
+local Fx = require(Shared.Fx)
+
+local FxController = {}
+
+function FxController.Start()
+	Net.Get("Fx").OnClientEvent:Connect(function(name, params)
+		Fx.Play(name, params)
+	end)
+
+	-- Rainbow color cycling
+	local elapsed = 0
+	RunService.Heartbeat:Connect(function(dt)
+		elapsed += dt
+		if elapsed < 0.05 then
+			return
+		end
+		elapsed = 0
+		local hue = (os.clock() * 0.2) % 1
+		for _, model in CollectionService:GetTagged("AnimatedMutation") do
+			for _, d in model:GetDescendants() do
+				if d:IsA("BasePart") then
+					local paint = d:GetAttribute("Paint")
+					if paint == "Body" then
+						d.Color = Color3.fromHSV(hue, 0.8, 1)
+					elseif paint == "Accent" then
+						d.Color = Color3.fromHSV((hue + 0.5) % 1, 0.6, 1)
+					end
+				end
+			end
+		end
+	end)
+end
+
+return FxController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="41">
+            <Properties>
+              <string name="Name">PromptController</string>
+              <string name="Source"><![CDATA[--[[
+	PromptController: shows each ProximityPrompt only to the right players.
+
+	Server sets attributes on a prompt:
+	  OnlyUserId    = only this player sees it (feed/sell your own kaiju)
+	  HideForUserId = everyone except this player (steal from others)
+]]
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+
+local PromptController = {}
+
+local function evaluate(prompt: ProximityPrompt)
+	local only = prompt:GetAttribute("OnlyUserId")
+	local hide = prompt:GetAttribute("HideForUserId")
+	local visible = true
+	if only ~= nil and only ~= player.UserId then
+		visible = false
+	end
+	if hide ~= nil and hide == player.UserId then
+		visible = false
+	end
+	prompt.Enabled = visible
+end
+
+local function track(instance: Instance)
+	if instance:IsA("ProximityPrompt") then
+		evaluate(instance)
+		instance.AttributeChanged:Connect(function()
+			evaluate(instance)
+		end)
+	end
+end
+
+function PromptController.Start()
+	for _, d in Workspace:GetDescendants() do
+		track(d)
+	end
+	Workspace.DescendantAdded:Connect(track)
+end
+
+return PromptController
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="LocalScript" referent="42">
+          <Properties>
+            <string name="Name">Main</string>
+            <string name="Source"><![CDATA[--[[
+	Client entry point. Starts every controller and UI module.
+	Each module has Start(); UI modules get snapshots via Update(snapshot).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Net = require(Shared.Net)
+
+local Controllers = script.Parent:WaitForChild("Controllers")
+local UI = script.Parent:WaitForChild("UI")
+
+local FxController = require(Controllers.FxController)
+local PromptController = require(Controllers.PromptController)
+local Toasts = require(UI.Toasts)
+local Hud = require(UI.Hud)
+local Shop = require(UI.Shop)
+local HatchReveal = require(UI.HatchReveal)
+
+FxController.Start()
+PromptController.Start()
+Toasts.Start()
+Shop.Start()
+Hud.Start(Shop)
+HatchReveal.Start()
+
+Net.Get("DataUpdate").OnClientEvent:Connect(function(snapshot)
+	Hud.Update(snapshot)
+	Shop.Update(snapshot)
+end)
+
+Net.Get("Notify").OnClientEvent:Connect(function(message)
+	Toasts.Notify(message.Text, message.Color)
+end)
+
+Net.Get("Announce").OnClientEvent:Connect(function(message)
+	Toasts.Banner(message.Title, message.Text, message.Color)
+end)
+
+Net.Get("Hatched").OnClientEvent:Connect(function(info)
+	HatchReveal.Show(info)
+end)
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="Folder" referent="43">
+          <Properties>
+            <string name="Name">UI</string>
+          </Properties>
+          <Item class="ModuleScript" referent="44">
+            <Properties>
+              <string name="Name">HatchReveal</string>
+              <string name="Source"><![CDATA[--[[
+	HatchReveal: the egg-opening animation.
+	Egg shakes (faster for rarer kaiju) -> flash -> card with the result.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Eggs = require(Shared.Config.Eggs)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local CreatureMath = require(Shared.CreatureMath)
+local Fx = require(Shared.Fx)
+local Theme = require(script.Parent.Theme)
+
+local HatchReveal = {}
+
+local gui: ScreenGui
+local queue = {}
+local playing = false
+
+function HatchReveal.Start()
+	gui = Theme.ScreenGui("HatchReveal", 30)
+	gui.IgnoreGuiInset = true
+end
+
+local function play(info)
+	local def = Creatures[info.CreatureId]
+	local rarity = Rarities[def.Rarity]
+	local egg = Eggs[info.EggId]
+	local mutation = info.Mutation and Mutations[info.Mutation]
+	local color = if mutation then mutation.Color else rarity.Color
+
+	local dim = Theme.New("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1,
+		Parent = gui,
+	})
+	TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 0.45 }):Play()
+
+	local holder = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(420, 420),
+		BackgroundTransparency = 1,
+		Parent = dim,
+	})
+	Theme.AutoScale(holder)
+
+	local eggFrame = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.45),
+		Size = UDim2.fromOffset(150, 190),
+		BackgroundColor3 = egg and egg.Color or Color3.new(1, 1, 1),
+		Parent = holder,
+	}, { Theme.Corner(75), Theme.Stroke(Color3.new(0, 0, 0), 4) })
+
+	-- Shake: more shakes for rarer results builds suspense.
+	local shakes = 2 + rarity.Order
+	for i = 1, shakes do
+		local speed = math.max(0.05, 0.16 - i * 0.012)
+		local angle = if i % 2 == 0 then 15 else -15
+		local t = TweenService:Create(eggFrame, TweenInfo.new(speed), { Rotation = angle })
+		t:Play()
+		t.Completed:Wait()
+	end
+	eggFrame:Destroy()
+
+	Fx.Play("HatchReveal", { Color = color, RarityOrder = rarity.Order + (if mutation then 2 else 0) })
+
+	local card = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(380, 260),
+		BackgroundColor3 = Theme.Background,
+		Parent = holder,
+	}, { Theme.Corner(20), Theme.Stroke(color, 5) })
+	Theme.Label({
+		Position = UDim2.fromOffset(10, 16),
+		Size = UDim2.new(1, -20, 0, 34),
+		Text = string.upper(def.Rarity),
+		TextColor3 = rarity.Color,
+		Parent = card,
+	})
+	local nameLabel = Theme.Label({
+		Position = UDim2.fromOffset(10, 58),
+		Size = UDim2.new(1, -20, 0, 70),
+		Text = CreatureMath.DisplayName({ Id = info.CreatureId, Level = 1, Xp = 0, Mutation = info.Mutation }),
+		TextColor3 = color,
+		Parent = card,
+	})
+	Theme.Label({
+		Position = UDim2.fromOffset(10, 136),
+		Size = UDim2.new(1, -20, 0, 30),
+		Text = def.Description,
+		TextColor3 = Theme.Muted,
+		Parent = card,
+	})
+	Theme.Label({
+		Position = UDim2.fromOffset(10, 176),
+		Size = UDim2.new(1, -20, 0, 28),
+		Text = CreatureMath.DescribeTraits(info.CreatureId),
+		TextColor3 = Theme.Green,
+		Parent = card,
+	})
+	if mutation then
+		Theme.Label({
+			Position = UDim2.fromOffset(10, 212),
+			Size = UDim2.new(1, -20, 0, 30),
+			Text = "🧬 " .. mutation.Name .. " mutation! x" .. mutation.IncomeMult .. " income",
+			TextColor3 = mutation.Color,
+			Parent = card,
+		})
+	end
+	Fx.Primitives.Pop(card, 0.4)
+	Fx.Primitives.Pop(nameLabel, 0.3)
+
+	task.wait(2.6)
+	TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+	TweenService:Create(card, TweenInfo.new(0.3), { Position = UDim2.fromScale(0.5, 1.5) }):Play()
+	task.wait(0.3)
+	dim:Destroy()
+end
+
+function HatchReveal.Show(info)
+	table.insert(queue, info)
+	if playing then
+		return
+	end
+	playing = true
+	task.spawn(function()
+		while #queue > 0 do
+			local ok, err = pcall(play, table.remove(queue, 1))
+			if not ok then
+				warn("[HatchReveal]", err)
+			end
+		end
+		playing = false
+	end)
+end
+
+return HatchReveal
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="45">
+            <Properties>
+              <string name="Name">Hud</string>
+              <string name="Source"><![CDATA[--[[
+	Hud: always-on-screen UI. Cash, income, menu buttons, food bar,
+	storage/pen info, king badge, event timer and "carrying" banner.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Foods = require(Shared.Config.Foods)
+local GameConfig = require(Shared.Config.GameConfig)
+local CreatureMath = require(Shared.CreatureMath)
+local Format = require(Shared.Util.Format)
+local Net = require(Shared.Net)
+local Fx = require(Shared.Fx)
+local Theme = require(script.Parent.Theme)
+
+local player = Players.LocalPlayer
+
+local Hud = {}
+
+local refs: { [string]: any } = {}
+local foodButtons: { [string]: TextButton } = {}
+local state: any = nil
+local lastCash = nil
+
+local EVENT_NAMES = {
+	MeteorFeast = "☄️ Meteor Feast",
+	BloodMoon = "🩸 Blood Moon",
+}
+
+local function buildTop(gui: ScreenGui)
+	local top = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 8),
+		Size = UDim2.fromOffset(300, 78),
+		BackgroundColor3 = Theme.Background,
+		BackgroundTransparency = 0.15,
+		Parent = gui,
+	}, { Theme.Corner(16), Theme.Stroke(Theme.Gold, 3) })
+	Theme.AutoScale(top)
+	refs.Cash = Theme.Label({
+		Size = UDim2.new(1, -16, 0.6, 0),
+		Position = UDim2.fromOffset(8, 4),
+		Text = "💰 $0",
+		TextColor3 = Theme.Gold,
+		Parent = top,
+	})
+	refs.Income = Theme.Label({
+		Size = UDim2.new(1, -16, 0.32, 0),
+		Position = UDim2.new(0, 8, 0.62, 0),
+		Text = "+$0/s",
+		TextColor3 = Theme.Green,
+		Parent = top,
+	})
+	refs.King = Theme.Label({
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 1, 6),
+		Size = UDim2.fromOffset(340, 26),
+		Text = "👑 You own the " .. GameConfig.CreatureName .. " King! +" .. math.round(GameConfig.KingIncomeBonus * 100) .. "% income",
+		TextColor3 = Theme.Gold,
+		Visible = false,
+		Parent = top,
+	})
+	refs.Event = Theme.Label({
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 1, 34),
+		Size = UDim2.fromOffset(300, 24),
+		Text = "",
+		TextColor3 = Color3.fromRGB(255, 140, 120),
+		Parent = top,
+	})
+end
+
+local function buildMenu(gui: ScreenGui, shop)
+	local menu = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 10, 0.5, 0),
+		Size = UDim2.fromOffset(130, 290),
+		BackgroundTransparency = 1,
+		Parent = gui,
+	}, {
+		Theme.New("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+	Theme.AutoScale(menu)
+	local buttons = {
+		{ "🥚 Eggs", Theme.Gold, function()
+			shop.Open("Eggs")
+		end },
+		{ "🍖 Food", Theme.Red, function()
+			shop.Open("Food")
+		end },
+		{ "🌟 Rebirth", Theme.Purple, function()
+			shop.Open("Rebirth")
+		end },
+		{ "🔒 Lock", Theme.Blue, function()
+			Net.Get("LockStorage"):FireServer()
+		end },
+	}
+	for i, info in buttons do
+		local button = Theme.Button({
+			Size = UDim2.fromOffset(130, 60),
+			Text = info[1],
+			BackgroundColor3 = info[2],
+			LayoutOrder = i,
+			Parent = menu,
+		})
+		button.Activated:Connect(info[3])
+		if i == 4 then
+			refs.LockButton = button
+		end
+	end
+end
+
+local function buildFoodBar(gui: ScreenGui)
+	local bottom = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -12),
+		Size = UDim2.fromOffset(620, 120),
+		BackgroundTransparency = 1,
+		Parent = gui,
+	})
+	Theme.AutoScale(bottom)
+	refs.Info = Theme.Label({
+		Size = UDim2.new(1, 0, 0, 26),
+		Text = "",
+		Parent = bottom,
+	})
+	local bar = Theme.New("Frame", {
+		Position = UDim2.fromOffset(0, 32),
+		Size = UDim2.new(1, 0, 0, 84),
+		BackgroundColor3 = Theme.Background,
+		BackgroundTransparency = 0.2,
+		Parent = bottom,
+	}, {
+		Theme.Corner(14),
+		Theme.New("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	for i, id in Foods.Order do
+		local def = Foods[id]
+		local button = Theme.Button({
+			Size = UDim2.fromOffset(92, 70),
+			Text = "",
+			BackgroundColor3 = Theme.Panel,
+			LayoutOrder = i,
+			Parent = bar,
+		})
+		Theme.New("Frame", {
+			Name = "Dot",
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.fromScale(0.5, 0.02),
+			Size = UDim2.fromOffset(24, 24),
+			BackgroundColor3 = def.Color,
+			Parent = button,
+		}, { Theme.Corner(12), Theme.Stroke(Color3.new(0, 0, 0), 1.5) })
+		Theme.Label({
+			Name = "FoodName",
+			Position = UDim2.fromScale(0, 0.42),
+			Size = UDim2.fromScale(1, 0.28),
+			Text = def.Name,
+			Parent = button,
+		})
+		Theme.Label({
+			Name = "Count",
+			Position = UDim2.fromScale(0, 0.7),
+			Size = UDim2.fromScale(1, 0.3),
+			Text = "x0",
+			TextColor3 = Theme.Gold,
+			Parent = button,
+		})
+		button.Activated:Connect(function()
+			Net.Get("SelectFood"):FireServer(id)
+			if state then
+				state.SelectedFood = id
+				Hud.RefreshFoodBar()
+			end
+			Fx.Primitives.Pop(button, 0.15)
+		end)
+		foodButtons[id] = button
+	end
+end
+
+local function buildCarrying(gui: ScreenGui)
+	refs.Carrying = Theme.Label({
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.72),
+		Size = UDim2.fromOffset(520, 40),
+		Text = "",
+		TextColor3 = Color3.fromRGB(255, 120, 120),
+		Visible = false,
+		Parent = gui,
+	})
+	Theme.AutoScale(refs.Carrying)
+	local function update()
+		local foodId = player:GetAttribute("Carrying")
+		refs.Carrying.Visible = foodId ~= nil
+		if foodId and Foods[foodId] then
+			refs.Carrying.Text = "😈 Carrying " .. Foods[foodId].Name .. "! Run to your base!"
+			Fx.Primitives.Pop(refs.Carrying, 0.3)
+		end
+	end
+	player:GetAttributeChangedSignal("Carrying"):Connect(update)
+	update()
+end
+
+function Hud.Start(shop)
+	local gui = Theme.ScreenGui("Hud", 5)
+	buildTop(gui)
+	buildMenu(gui, shop)
+	buildFoodBar(gui)
+	buildCarrying(gui)
+
+	-- Timers (event countdown, lock cooldown) update every frame-ish.
+	local elapsed = 0
+	RunService.Heartbeat:Connect(function(dt)
+		elapsed += dt
+		if elapsed < 0.25 then
+			return
+		end
+		elapsed = 0
+		Hud.RefreshTimers()
+	end)
+end
+
+function Hud.RefreshFoodBar()
+	if not state then
+		return
+	end
+	for id, button in foodButtons do
+		local count = state.Food[id] or 0
+		local countLabel = button:FindFirstChild("Count") :: TextLabel
+		countLabel.Text = "x" .. count
+		button.BackgroundColor3 = if count > 0 then Theme.Panel else Color3.fromRGB(35, 35, 45)
+		local stroke = button:FindFirstChild("Border") :: UIStroke
+		local selected = state.SelectedFood == id
+		stroke.Color = if selected then Theme.Gold else Color3.new(0, 0, 0)
+		stroke.Thickness = if selected then 4 else 2
+	end
+end
+
+function Hud.RefreshTimers()
+	local now = Workspace:GetServerTimeNow()
+	local event = Workspace:GetAttribute("ActiveEvent")
+	if event then
+		local endsAt = Workspace:GetAttribute("EventEndsAt")
+		local name = EVENT_NAMES[event] or event
+		refs.Event.Text = if endsAt then name .. " • " .. Format.Time(endsAt - now) else name
+	else
+		refs.Event.Text = ""
+	end
+	if state and refs.LockButton then
+		if (state.LockedUntil or 0) > now then
+			refs.LockButton.Text = "🔒 " .. Format.Time(state.LockedUntil - now)
+		elseif (state.LockCooldownUntil or 0) > now then
+			refs.LockButton.Text = "⏳ " .. Format.Time(state.LockCooldownUntil - now)
+		else
+			refs.LockButton.Text = "🔒 Lock"
+		end
+	end
+end
+
+function Hud.Update(snapshot)
+	state = snapshot
+	refs.Cash.Text = "💰 " .. Format.Money(snapshot.Cash)
+	refs.Income.Text = "+" .. Format.Money(snapshot.Income or 0) .. "/s"
+	refs.King.Visible = snapshot.IsKing == true
+	if lastCash and snapshot.Cash < lastCash then
+		Fx.Primitives.Pop(refs.Cash, 0.12)
+	end
+	lastCash = snapshot.Cash
+
+	refs.Info.Text = string.format(
+		"📦 Food %d/%d   •   🐾 %s %d/%d   •   🌟 Rebirth %d",
+		CreatureMath.CountFood(snapshot.Food),
+		snapshot.StorageCap,
+		GameConfig.CreatureNamePlural,
+		CreatureMath.Count(snapshot.Creatures),
+		snapshot.Slots,
+		snapshot.Rebirths
+	)
+	Hud.RefreshFoodBar()
+	Hud.RefreshTimers()
+end
+
+return Hud
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="46">
+            <Properties>
+              <string name="Name">Shop</string>
+              <string name="Source"><![CDATA[--[[
+	Shop: the pop-up window with Eggs, Food and Rebirth pages.
+	Shop.Open("Eggs" | "Food" | "Rebirth"), Shop.Close()
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Eggs = require(Shared.Config.Eggs)
+local Foods = require(Shared.Config.Foods)
+local GameConfig = require(Shared.Config.GameConfig)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local CreatureMath = require(Shared.CreatureMath)
+local Format = require(Shared.Util.Format)
+local Net = require(Shared.Net)
+local Theme = require(script.Parent.Theme)
+
+local Shop = {}
+
+local window: Frame
+local titleLabel: TextLabel
+local pages: { [string]: ScrollingFrame } = {}
+local priceButtons: { { Button: TextButton, Price: () -> number } } = {}
+local rebirthRefs: { [string]: any } = {}
+local state: any = nil
+
+local TITLES = {
+	Eggs = "🥚 Egg Shop",
+	Food = "🍖 Food Shop",
+	Rebirth = "🌟 Rebirth",
+}
+
+local function page(name: string): ScrollingFrame
+	local scroll = Theme.New("ScrollingFrame", {
+		Name = name,
+		Position = UDim2.fromOffset(12, 64),
+		Size = UDim2.new(1, -24, 1, -76),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 6,
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		CanvasSize = UDim2.new(),
+		Visible = false,
+		Parent = window,
+	}, {
+		Theme.New("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+	pages[name] = scroll
+	return scroll
+end
+
+local function row(parent: Instance, order: number, height: number): Frame
+	return Theme.New("Frame", {
+		Size = UDim2.new(1, -8, 0, height),
+		BackgroundColor3 = Theme.Panel,
+		LayoutOrder = order,
+		Parent = parent,
+	}, { Theme.Corner(12) })
+end
+
+local function buildEggs()
+	local p = page("Eggs")
+	for i, eggId in Eggs.Order do
+		local egg = Eggs[eggId]
+		local r = row(p, i, 120)
+		Theme.New("Frame", {
+			Position = UDim2.fromOffset(12, 18),
+			Size = UDim2.fromOffset(64, 84),
+			BackgroundColor3 = egg.Color,
+			Parent = r,
+		}, { Theme.Corner(32), Theme.Stroke(Color3.new(0, 0, 0), 2) })
+		Theme.Label({
+			Position = UDim2.fromOffset(90, 8),
+			Size = UDim2.new(1, -230, 0, 30),
+			Text = egg.Name,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local total = 0
+		for _, odd in egg.Odds do
+			total += odd.Weight
+		end
+		local lines = {}
+		for _, odd in egg.Odds do
+			local def = Creatures[odd.Creature]
+			local color = Rarities[def.Rarity].Color
+			table.insert(
+				lines,
+				string.format(
+					'<font color="#%s">%s</font> %s',
+					color:ToHex(),
+					def.Name,
+					Format.Percent(odd.Weight / total)
+				)
+			)
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(90, 42),
+			Size = UDim2.new(1, -230, 0, 66),
+			Text = table.concat(lines, "  •  "),
+			RichText = true,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			Parent = r,
+		})
+		local buy = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Size = UDim2.fromOffset(120, 56),
+			Text = Format.Money(egg.Price),
+			BackgroundColor3 = Theme.Green,
+			Parent = r,
+		})
+		buy.Activated:Connect(function()
+			Net.Get("BuyEgg"):FireServer(eggId)
+		end)
+		table.insert(priceButtons, {
+			Button = buy,
+			Price = function()
+				return egg.Price
+			end,
+		})
+	end
+end
+
+local function buildFood()
+	local p = page("Food")
+	local order = 0
+	for _, foodId in Foods.Order do
+		local def = Foods[foodId]
+		if not def.Price then
+			continue
+		end
+		order += 1
+		local r = row(p, order, 80)
+		Theme.New("Frame", {
+			Position = UDim2.fromOffset(14, 18),
+			Size = UDim2.fromOffset(44, 44),
+			BackgroundColor3 = def.Color,
+			Parent = r,
+		}, { Theme.Corner(22), Theme.Stroke(Color3.new(0, 0, 0), 2) })
+		Theme.Label({
+			Position = UDim2.fromOffset(70, 8),
+			Size = UDim2.new(1, -300, 0, 30),
+			Text = def.Name,
+			TextColor3 = Rarities[def.Rarity].Color,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local detail = "+" .. def.Growth .. " XP"
+		if def.Mutation then
+			detail ..= "  •  " .. Format.Percent(def.Mutation.Chance) .. " " .. Mutations[def.Mutation.Id].Name .. " mutation"
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(70, 42),
+			Size = UDim2.new(1, -300, 0, 26),
+			Text = detail,
+			TextColor3 = Theme.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		for i, amount in { 1, 5 } do
+			local buy = Theme.Button({
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -12 - (2 - i) * 112, 0.5, 0),
+				Size = UDim2.fromOffset(104, 52),
+				Text = "x" .. amount .. " " .. Format.Money(def.Price * amount),
+				BackgroundColor3 = Theme.Green,
+				Parent = r,
+			})
+			buy.Activated:Connect(function()
+				Net.Get("BuyFood"):FireServer(foodId, amount)
+			end)
+			table.insert(priceButtons, {
+				Button = buy,
+				Price = function()
+					return def.Price * amount
+				end,
+			})
+		end
+	end
+	local hint = row(p, order + 1, 60)
+	hint.BackgroundTransparency = 1
+	Theme.Label({
+		Size = UDim2.fromScale(1, 1),
+		Text = "Rare foods like Shadow Shroom and Star Food can't be bought. Find them... or steal them!",
+		TextWrapped = true,
+		TextColor3 = Theme.Muted,
+		Parent = hint,
+	})
+end
+
+local function buildRebirth()
+	local p = page("Rebirth")
+	local r = row(p, 1, 300)
+	r.BackgroundTransparency = 1
+	rebirthRefs.Current = Theme.Label({
+		Size = UDim2.new(1, 0, 0, 34),
+		Text = "Rebirth 0",
+		TextColor3 = Theme.Purple,
+		Parent = r,
+	})
+	Theme.Label({
+		Position = UDim2.fromOffset(0, 44),
+		Size = UDim2.new(1, 0, 0, 100),
+		Text = string.format(
+			"You get forever:\n+%d%% income  •  +%d %s slot  •  +%d food storage",
+			math.round(GameConfig.RebirthIncomeBonus * 100),
+			GameConfig.SlotsPerRebirth,
+			GameConfig.CreatureName,
+			GameConfig.StorageCapPerRebirth
+		),
+		TextWrapped = true,
+		TextColor3 = Theme.Green,
+		Parent = r,
+	})
+	Theme.Label({
+		Position = UDim2.fromOffset(0, 150),
+		Size = UDim2.new(1, 0, 0, 50),
+		Text = "⚠️ You lose your " .. GameConfig.CreatureNamePlural .. ", cash and food.\nYour collection (Index) is kept.",
+		TextWrapped = true,
+		TextColor3 = Color3.fromRGB(255, 170, 120),
+		Parent = r,
+	})
+	local button = Theme.Button({
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 214),
+		Size = UDim2.fromOffset(260, 64),
+		Text = "Rebirth",
+		BackgroundColor3 = Theme.Purple,
+		Parent = r,
+	})
+	button.Activated:Connect(function()
+		Net.Get("Rebirth"):FireServer()
+		Shop.Close()
+	end)
+	rebirthRefs.Button = button
+end
+
+function Shop.Start()
+	local gui = Theme.ScreenGui("Shop", 10)
+	window = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(620, 460),
+		BackgroundColor3 = Theme.Background,
+		Visible = false,
+		Parent = gui,
+	}, { Theme.Corner(18), Theme.Stroke(Theme.Gold, 3) })
+	Theme.AutoScale(window)
+	titleLabel = Theme.Label({
+		Position = UDim2.fromOffset(16, 10),
+		Size = UDim2.new(1, -90, 0, 44),
+		Text = "",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = window,
+	})
+	local close = Theme.Button({
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 10),
+		Size = UDim2.fromOffset(48, 44),
+		Text = "X",
+		BackgroundColor3 = Theme.Red,
+		Parent = window,
+	})
+	close.Activated:Connect(Shop.Close)
+
+	buildEggs()
+	buildFood()
+	buildRebirth()
+end
+
+function Shop.Open(name: string)
+	if window.Visible and pages[name] and pages[name].Visible then
+		Shop.Close()
+		return
+	end
+	for pageName, p in pages do
+		p.Visible = pageName == name
+	end
+	titleLabel.Text = TITLES[name] or name
+	window.Visible = true
+	window.Position = UDim2.fromScale(0.5, 0.56)
+	TweenService:Create(window, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.5) }):Play()
+end
+
+function Shop.Close()
+	window.Visible = false
+end
+
+function Shop.Update(snapshot)
+	state = snapshot
+	for _, entry in priceButtons do
+		local affordable = state.Cash >= entry.Price()
+		entry.Button.BackgroundColor3 = if affordable then Theme.Green else Color3.fromRGB(90, 90, 100)
+	end
+	rebirthRefs.Current.Text = "Rebirth " .. state.Rebirths .. " → " .. (state.Rebirths + 1)
+	local cost = CreatureMath.RebirthCost(state.Rebirths)
+	rebirthRefs.Button.Text = "Rebirth for " .. Format.Money(cost)
+	rebirthRefs.Button.BackgroundColor3 = if state.Cash >= cost then Theme.Purple else Color3.fromRGB(90, 90, 100)
+end
+
+return Shop
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="47">
+            <Properties>
+              <string name="Name">Theme</string>
+              <string name="Source"><![CDATA[--[[
+	Theme: shared colors, font and small UI helpers.
+	Change the look of the whole UI here.
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local Theme = {
+	Font = Enum.Font.FredokaOne,
+	Background = Color3.fromRGB(30, 30, 45),
+	Panel = Color3.fromRGB(45, 45, 65),
+	PanelLight = Color3.fromRGB(65, 65, 90),
+	Text = Color3.fromRGB(255, 255, 255),
+	Muted = Color3.fromRGB(180, 180, 200),
+	Green = Color3.fromRGB(80, 200, 110),
+	Red = Color3.fromRGB(230, 80, 80),
+	Blue = Color3.fromRGB(80, 150, 255),
+	Gold = Color3.fromRGB(255, 200, 40),
+	Purple = Color3.fromRGB(170, 110, 255),
+}
+
+function Theme.New(className: string, props: { [string]: any }?, children: { Instance }?): any
+	local inst = Instance.new(className)
+	local parent = nil
+	local properties: { [string]: any } = props or {}
+	local childList: { Instance } = children or {}
+	for key, value in properties do
+		if key == "Parent" then
+			parent = value
+		else
+			(inst :: any)[key] = value
+		end
+	end
+	for _, child in childList do
+		child.Parent = inst
+	end
+	if parent then
+		inst.Parent = parent
+	end
+	return inst
+end
+
+function Theme.Corner(radius: number?): UICorner
+	return Theme.New("UICorner", { CornerRadius = UDim.new(0, radius or 12) })
+end
+
+function Theme.Stroke(color: Color3?, thickness: number?): UIStroke
+	return Theme.New("UIStroke", {
+		Color = color or Color3.new(0, 0, 0),
+		Thickness = thickness or 2,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+end
+
+function Theme.TextStroke(thickness: number?): UIStroke
+	return Theme.New("UIStroke", { Thickness = thickness or 2 })
+end
+
+function Theme.Label(props: { [string]: any }): TextLabel
+	local label = Theme.New("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = Theme.Font,
+		TextColor3 = Theme.Text,
+		TextScaled = true,
+	}, { Theme.TextStroke(1.5) })
+	for key, value in props do
+		if key ~= "Parent" then
+			(label :: any)[key] = value
+		end
+	end
+	label.Parent = props.Parent
+	return label
+end
+
+-- A chunky button with hover and press animations.
+function Theme.Button(props: { [string]: any }): TextButton
+	local color = props.BackgroundColor3 or Theme.Blue
+	local button = Theme.New("TextButton", {
+		AutoButtonColor = false,
+		BackgroundColor3 = color,
+		Font = Theme.Font,
+		TextColor3 = Theme.Text,
+		TextScaled = true,
+	}, {
+		Theme.Corner(10),
+		Theme.New("UIStroke", {
+			Name = "Border",
+			Thickness = 2,
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		}),
+		Theme.New("UIPadding", {
+			PaddingTop = UDim.new(0, 4),
+			PaddingBottom = UDim.new(0, 4),
+			PaddingLeft = UDim.new(0, 6),
+			PaddingRight = UDim.new(0, 6),
+		}),
+	})
+	for key, value in props do
+		if key ~= "Parent" then
+			(button :: any)[key] = value
+		end
+	end
+	Theme.TextStroke(1.5).Parent = button
+	local scale = Theme.New("UIScale", { Parent = button })
+	local info = TweenInfo.new(0.12)
+	button.MouseEnter:Connect(function()
+		TweenService:Create(scale, info, { Scale = 1.05 }):Play()
+	end)
+	button.MouseLeave:Connect(function()
+		TweenService:Create(scale, info, { Scale = 1 }):Play()
+	end)
+	button.MouseButton1Down:Connect(function()
+		TweenService:Create(scale, info, { Scale = 0.92 }):Play()
+	end)
+	button.MouseButton1Up:Connect(function()
+		TweenService:Create(scale, info, { Scale = 1.05 }):Play()
+	end)
+	button.Parent = props.Parent
+	return button
+end
+
+-- Scales a GUI cluster with the screen size so it fits phones and PCs.
+function Theme.AutoScale(gui: GuiObject, baseHeight: number?)
+	local scale = Theme.New("UIScale", { Parent = gui })
+	local function update()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			scale.Scale = math.clamp(camera.ViewportSize.Y / (baseHeight or 800), 0.55, 1.25)
+		end
+	end
+	update()
+	local camera = Workspace.CurrentCamera
+	if camera then
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
+	end
+	return scale
+end
+
+function Theme.ScreenGui(name: string, displayOrder: number?): ScreenGui
+	return Theme.New("ScreenGui", {
+		Name = name,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		DisplayOrder = displayOrder or 0,
+		Parent = Players.LocalPlayer:WaitForChild("PlayerGui"),
+	})
+end
+
+return Theme
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="48">
+            <Properties>
+              <string name="Name">Toasts</string>
+              <string name="Source"><![CDATA[--[[
+	Toasts: small messages at the top, and big banners for server news.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Theme = require(script.Parent.Theme)
+local Fx = require(ReplicatedStorage:WaitForChild("Shared").Fx)
+
+local Toasts = {}
+
+local list: Frame
+local bannerHolder: Frame
+local MAX_TOASTS = 5
+
+function Toasts.Start()
+	local gui = Theme.ScreenGui("Toasts", 20)
+	list = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 90),
+		Size = UDim2.fromOffset(520, 300),
+		BackgroundTransparency = 1,
+		Parent = gui,
+	}, {
+		Theme.New("UIListLayout", {
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 6),
+		}),
+	})
+	Theme.AutoScale(list)
+	bannerHolder = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0.18, 0),
+		Size = UDim2.fromOffset(640, 110),
+		BackgroundTransparency = 1,
+		Parent = gui,
+	})
+	Theme.AutoScale(bannerHolder)
+end
+
+local order = 0
+function Toasts.Notify(text: string, color: Color3?)
+	order += 1
+	local toasts = {}
+	for _, child in list:GetChildren() do
+		if child:IsA("Frame") then
+			table.insert(toasts, child)
+		end
+	end
+	if #toasts >= MAX_TOASTS then
+		table.sort(toasts, function(a, b)
+			return a.LayoutOrder < b.LayoutOrder
+		end)
+		toasts[1]:Destroy()
+	end
+	local frame = Theme.New("CanvasGroup", {
+		Size = UDim2.fromOffset(500, 40),
+		BackgroundColor3 = Theme.Background,
+		BackgroundTransparency = 0.15,
+		LayoutOrder = order,
+		GroupTransparency = 1,
+		Parent = list,
+	}, {
+		Theme.Corner(10),
+		Theme.Stroke(color or Theme.Text, 2),
+	})
+	Theme.Label({
+		Size = UDim2.new(1, -20, 1, -8),
+		Position = UDim2.fromOffset(10, 4),
+		Text = text,
+		TextColor3 = color or Theme.Text,
+		Parent = frame,
+	})
+	TweenService:Create(frame, TweenInfo.new(0.2), { GroupTransparency = 0 }):Play()
+	task.delay(4, function()
+		if frame.Parent then
+			local fade = TweenService:Create(frame, TweenInfo.new(0.4), { GroupTransparency = 1 })
+			fade:Play()
+			fade.Completed:Wait()
+			frame:Destroy()
+		end
+	end)
+end
+
+function Toasts.Banner(title: string, text: string?, color: Color3?)
+	bannerHolder:ClearAllChildren()
+	local banner = Theme.New("CanvasGroup", {
+		Size = UDim2.fromScale(1, 1),
+		Position = UDim2.fromScale(0, -0.4),
+		BackgroundColor3 = Theme.Background,
+		BackgroundTransparency = 0.1,
+		GroupTransparency = 1,
+		Parent = bannerHolder,
+	}, {
+		Theme.Corner(16),
+		Theme.Stroke(color or Theme.Gold, 3),
+	})
+	local titleLabel = Theme.Label({
+		Size = UDim2.new(1, -20, 0.55, 0),
+		Position = UDim2.fromOffset(10, 6),
+		Text = title,
+		TextColor3 = color or Theme.Gold,
+		Parent = banner,
+	})
+	Theme.Label({
+		Size = UDim2.new(1, -20, 0.35, 0),
+		Position = UDim2.new(0, 10, 0.58, 0),
+		Text = text or "",
+		TextColor3 = Theme.Text,
+		Parent = banner,
+	})
+	TweenService:Create(banner, TweenInfo.new(0.4, Enum.EasingStyle.Back), {
+		Position = UDim2.fromScale(0, 0),
+		GroupTransparency = 0,
+	}):Play()
+	Fx.Primitives.Pop(titleLabel, 0.3)
+	Fx.Primitives.Sound("Whoosh", nil, 0.5)
+	task.delay(4.5, function()
+		if banner.Parent then
+			local fade = TweenService:Create(banner, TweenInfo.new(0.4), { GroupTransparency = 1 })
+			fade:Play()
+			fade.Completed:Wait()
+			banner:Destroy()
+		end
+	end)
+end
+
+return Toasts
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="49">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <float name="Gravity">196.2</float>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+  </Item>
+</roblox>

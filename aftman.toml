@@ -1,0 +1,4 @@
+# Tools used by this project. Install Aftman (https://github.com/LPGhatguy/aftman)
+# then run `aftman install` in this folder.
+[tools]
+rojo = "rojo-rbx/rojo@7.4.4"

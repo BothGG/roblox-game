@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rojo and luau-lsp
+        run: |
+          mkdir -p tools
+          curl -sSL -o rojo.zip https://github.com/rojo-rbx/rojo/releases/download/v7.4.4/rojo-7.4.4-linux-x86_64.zip
+          unzip -o -q rojo.zip -d tools
+          curl -sSL -o lsp.zip https://github.com/JohnnyMorganz/luau-lsp/releases/latest/download/luau-lsp-linux-x86_64.zip
+          unzip -o -q lsp.zip -d tools
+          curl -sSL -o globalTypes.d.luau https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/main/scripts/globalTypes.RobloxScriptSecurity.d.luau
+          chmod +x tools/*
+
+      - name: Build place file
+        run: tools/rojo build default.project.json -o KaijuKeepers.rbxlx
+
+      - name: Type check
+        run: |
+          tools/rojo sourcemap default.project.json -o sourcemap.json
+          OUTPUT=$(tools/luau-lsp analyze --definitions=globalTypes.d.luau --sourcemap=sourcemap.json src 2>&1 | grep -v '^\[' || true)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -q "Error"; then exit 1; fi
+
+      - name: Upload place file
+        uses: actions/upload-artifact@v4
+        with:
+          name: KaijuKeepers-place
+          path: KaijuKeepers.rbxlx
