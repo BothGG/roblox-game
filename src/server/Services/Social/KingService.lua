@@ -1,6 +1,6 @@
 --[[
-	KingService: the biggest kaiju on the server becomes the Kaiju King.
-	Its owner gets bonus income, and the kaiju wears a crown + golden outline.
+	KingService: the biggest titan on the server becomes the Titan King.
+	Its owner gets bonus income, and the titan wears a crown + golden outline.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -127,7 +127,7 @@ function KingService:Evaluate()
 	self:UpdateCrown()
 end
 
--- Puts the crown on top of the king's kaiju (called after it grows too).
+-- Puts the crown on top of the king's titan (called after it grows too).
 function KingService:UpdateCrown()
 	local current = self.Current
 	local model = current and Creatures:GetModel(current.Player, current.Uid)

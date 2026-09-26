@@ -1,5 +1,5 @@
 --[[
-	EggService: buying and hatching eggs, plus the free starter kaiju.
+	EggService: buying and hatching eggs, plus the free starter titan.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +14,8 @@ local Rules = require(Shared.Game.Rules)
 local Guard = require(Shared.Lib.Guard)
 local WeightedRandom = require(Shared.Lib.WeightedRandom)
 local Net = require(Shared.Net)
+
+local GameEvents = require(game:GetService("ServerScriptService"):WaitForChild("Server").Modules.GameEvents)
 
 local RED = Color3.fromRGB(255, 90, 90)
 
@@ -51,8 +53,8 @@ function EggService:OnPlayerReady(player: Player)
 	end
 end
 
-local function rollMutation(): string?
-	local roll = math.random()
+local function rollMutation(luck: number): string?
+	local roll = math.random() / luck
 	if roll < GameConfig.RainbowHatchChance then
 		return "Rainbow"
 	end
@@ -79,20 +81,23 @@ function EggService:Buy(player: Player, eggId: string)
 		Net.Notify(player, "Not enough cash!", RED)
 		return
 	end
-	local pick = WeightedRandom.Pick(egg.Odds, function(e)
+	local now = os.time()
+	local luck = Rules.Luck(data, now)
+	local pick = WeightedRandom.Pick(Rules.ApplyLuck(egg.Odds, luck), function(e)
 		return e.Weight
 	end)
 	if not pick then
 		return
 	end
 	data.Cash -= egg.Price
-	local mutation = rollMutation()
+	local mutation = rollMutation(luck)
 	local uid = CreatureService:Add(player, pick.Creature, mutation)
 	if not uid then
 		data.Cash += egg.Price
 		return
 	end
 	data.Stats.Hatched += 1
+	GameEvents.Fire(player, "Hatched", { Titan = pick.Creature, Mutation = mutation })
 
 	local def = Creatures[pick.Creature]
 	local rarity = Rarities[def.Rarity]

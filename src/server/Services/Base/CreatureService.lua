@@ -1,10 +1,12 @@
 --[[
-	CreatureService: owns the kaiju in each player's zoo.
-	Feeding, growing, mutating, selling, income and the 3D models.
+	CreatureService: owns the titans in each player's base.
+	Feeding, growing, mutating, selling, choosing a fighter, income and
+	the 3D models.
 
 	  CreatureService:Add(player, creatureId, mutation?) -> uid?
 	  CreatureService:Feed(player, uid)
 	  CreatureService:Sell(player, uid)
+	  CreatureService:Equip(player, uid)
 	  CreatureService:GetModel(player, uid)
 	  CreatureService:GetIncome(player)
 ]]
@@ -22,21 +24,25 @@ local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
 local CreatureMath = require(Shared.Game.CreatureMath)
 local Rules = require(Shared.Game.Rules)
+local Battle = require(Shared.Game.Battle)
+local Tags = require(Shared.Game.Tags)
 local Format = require(Shared.Lib.Format)
 local Net = require(Shared.Net)
 
-local CreatureBuilder = require(ServerScriptService:WaitForChild("Server").Modules.CreatureBuilder)
+local ServerModules = ServerScriptService:WaitForChild("Server").Modules
+local CreatureBuilder = require(ServerModules.CreatureBuilder)
+local GameEvents = require(ServerModules.GameEvents)
 
 local CreatureService = {
 	Priority = 25,
 	Models = {} :: { [Player]: { [string]: Model } },
 }
 
-local Data, Zoo, Fx, Food, King
+local Data, Base, Fx, Food, King
 
 function CreatureService:Init(registry)
 	Data = registry.DataService
-	Zoo = registry.ZooService
+	Base = registry.BaseService
 	Fx = registry.FxService
 	Food = registry.FoodService
 	King = registry.KingService
@@ -55,26 +61,37 @@ function CreatureService:Start()
 			for player, profile in Data.Profiles do
 				local income = self:GetIncome(player)
 				profile.Data.Cash += income
+				profile.Data.Stats.CashEarned += income
 				player:SetAttribute("Income", income)
 				self:_updateLeaderstats(player)
+				if income > 0 then
+					GameEvents.Fire(player, "Earned", { Amount = income })
+				end
 				Data:Changed(player)
 			end
 		end
+	end)
+
+	Net.On("Equip", function(player, uid)
+		self:Equip(player, uid)
+	end)
+	Net.On("SellTitan", function(player, uid)
+		self:Sell(player, uid)
 	end)
 end
 
 function CreatureService:OnPlayerReady(player: Player)
 	local leaderstats = Instance.new("Folder")
 	leaderstats.Name = "leaderstats"
+	local trophies = Instance.new("IntValue")
+	trophies.Name = "Trophies"
+	trophies.Parent = leaderstats
 	local biggest = Instance.new("IntValue")
 	biggest.Name = "Biggest Lv"
 	biggest.Parent = leaderstats
 	local cash = Instance.new("StringValue")
 	cash.Name = "Cash"
 	cash.Parent = leaderstats
-	local rebirths = Instance.new("IntValue")
-	rebirths.Name = "Rebirths"
-	rebirths.Parent = leaderstats
 	leaderstats.Parent = player
 
 	player:SetAttribute("SelectedFood", "Meat")
@@ -107,9 +124,9 @@ function CreatureService:_updateLeaderstats(player: Player)
 	for _, creature in data.Creatures do
 		biggest = math.max(biggest, creature.Level)
 	end
+	(leaderstats:FindFirstChild("Trophies") :: IntValue).Value = data.Trophies;
 	(leaderstats:FindFirstChild("Biggest Lv") :: IntValue).Value = biggest;
-	(leaderstats:FindFirstChild("Cash") :: StringValue).Value = Format.Money(data.Cash);
-	(leaderstats:FindFirstChild("Rebirths") :: IntValue).Value = data.Rebirths
+	(leaderstats:FindFirstChild("Cash") :: StringValue).Value = Format.Money(data.Cash)
 end
 
 function CreatureService:GetIncome(player: Player): number
@@ -117,12 +134,15 @@ function CreatureService:GetIncome(player: Player): number
 	if not data then
 		return 0
 	end
-	local mult = CreatureMath.PlayerMultiplier(data.Rebirths, player:GetAttribute("IsKing") == true)
-	local total = 0
-	for _, creature in data.Creatures do
-		total += CreatureMath.BaseIncome(creature)
-	end
-	return total * mult
+	return Rules.Income(data, self:IncomeContext(player))
+end
+
+function CreatureService:IncomeContext(player: Player): Rules.IncomeContext
+	return {
+		IsKing = player:GetAttribute("IsKing") == true,
+		Friends = player:GetAttribute("Friends") or 0,
+		Now = os.time(),
+	}
 end
 
 function CreatureService:GetModel(player: Player, uid: string): Model?
@@ -152,7 +172,7 @@ end
 
 function CreatureService:_spawnModel(player: Player, uid: string)
 	local data = Data:Get(player)
-	local plot = Zoo:GetPlot(player)
+	local plot = Base:GetPlot(player)
 	local creature = data.Creatures[uid]
 	if not plot or not creature then
 		return
@@ -162,14 +182,14 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 	model:SetAttribute("OwnerUserId", player.UserId)
 	model:SetAttribute("Uid", uid)
 	model.Parent = plot.CreatureFolder
-	CollectionService:AddTag(model, "ZooCreature") -- client idle animation
+	CollectionService:AddTag(model, Tags.BaseTitan) -- client idle animation
 	self.Models[player][uid] = model
 
 	local root = model.PrimaryPart :: BasePart
 
 	local tag = Instance.new("BillboardGui")
 	tag.Name = "Tag"
-	tag.Size = UDim2.fromOffset(200, 70)
+	tag.Size = UDim2.fromOffset(210, 90)
 	tag.LightInfluence = 0
 	tag.MaxDistance = 150
 	tag.Adornee = root
@@ -189,12 +209,13 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 		stroke.Parent = label
 		return label
 	end
-	line("NameLabel", 0, 0.4)
-	line("InfoLabel", 0.4, 0.3)
+	line("NameLabel", 0, 0.32)
+	line("InfoLabel", 0.32, 0.24)
+	line("StatsLabel", 0.56, 0.24)
 	local bar = Instance.new("Frame")
 	bar.Name = "XpBar"
-	bar.Size = UDim2.new(0.7, 0, 0.12, 0)
-	bar.Position = UDim2.fromScale(0.15, 0.78)
+	bar.Size = UDim2.new(0.7, 0, 0.1, 0)
+	bar.Position = UDim2.fromScale(0.15, 0.86)
 	bar.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 	bar.BorderSizePixel = 0
 	bar.Parent = tag
@@ -273,12 +294,16 @@ function CreatureService:_refreshTag(player: Player, uid: string)
 	local root = model.PrimaryPart :: BasePart
 	local tag = root:FindFirstChild("Tag") :: BillboardGui
 	local nameLabel = tag:FindFirstChild("NameLabel") :: TextLabel
-	nameLabel.Text = CreatureMath.DisplayName(creature)
+	local activeUid = Rules.ActiveTitan(data)
+	nameLabel.Text = (if activeUid == uid then "⚔️ " else "") .. CreatureMath.DisplayName(creature)
 	nameLabel.TextColor3 = if creature.Mutation then Mutations[creature.Mutation].Color else Rarities[def.Rarity].Color
-	local income = CreatureMath.BaseIncome(creature)
-		* CreatureMath.PlayerMultiplier(data.Rebirths, player:GetAttribute("IsKing") == true)
+	local income = CreatureMath.BaseIncome(creature) * Rules.IncomeMultiplier(data, self:IncomeContext(player))
 	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
 	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
+	local stats = Battle.Stats(creature)
+	local statsLabel = tag:FindFirstChild("StatsLabel") :: TextLabel
+	statsLabel.Text = string.format("❤️ %s   ⚔️ %s", Format.Number(stats.MaxHP), Format.Number(stats.Attack))
+	statsLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
 	local fill = tag:FindFirstChild("XpBar"):FindFirstChild("Fill") :: Frame
 	local progress = if creature.Level >= GameConfig.MaxLevel
 		then 1
@@ -297,7 +322,7 @@ end
 
 function CreatureService:_layout(player: Player)
 	local data = Data:Get(player)
-	local plot = Zoo:GetPlot(player)
+	local plot = Base:GetPlot(player)
 	if not data or not plot then
 		return
 	end
@@ -330,7 +355,7 @@ function CreatureService:Add(player: Player, creatureId: string, mutation: strin
 	if not data or not Creatures[creatureId] then
 		return nil
 	end
-	if CreatureMath.Count(data.Creatures) >= CreatureMath.MaxSlots(data.Rebirths) then
+	if not Rules.HasFreeSlot(data) then
 		return nil
 	end
 	local uid = tostring(data.NextUid)
@@ -364,6 +389,7 @@ function CreatureService:RemoveAll(player: Player)
 	end
 	self.Models[player] = {}
 	data.Creatures = {}
+	data.Active = nil
 	King:Evaluate()
 end
 
@@ -380,11 +406,7 @@ function CreatureService:Feed(player: Player, uid: string)
 
 	local foodId = Rules.PickFood(data.Food, player:GetAttribute("SelectedFood") :: string?)
 	if not foodId then
-		Net.Notify(
-			player,
-			"No food! Explore the biomes to find some... or steal some 😈",
-			Color3.fromRGB(255, 170, 60)
-		)
+		Net.Notify(player, "No food! Grab some in the fields... or steal some 😈", Color3.fromRGB(255, 170, 60))
 		return
 	end
 	local food = Foods[foodId]
@@ -393,18 +415,30 @@ function CreatureService:Feed(player: Player, uid: string)
 	data.Stats.FoodEaten += 1
 
 	local favorite = Rules.IsFavorite(creature.Id, foodId)
-	local xp = Rules.FeedXp(creature, foodId, Workspace:GetAttribute("GrowthMult"))
-	local leveledUp = Rules.AddXp(creature, xp) > 0
+	local now = os.time()
+	local growth = Rules.GrowthMultiplier(data, now, Workspace:GetAttribute("GrowthMult"))
+	local xp = Rules.FeedXp(creature, foodId, growth)
+	local levelsGained = Rules.AddXp(creature, xp)
+	local leveledUp = levelsGained > 0
 
 	local mutated = false
 	if food.Mutation then
 		local new = Mutations[food.Mutation.Id]
 		local current = creature.Mutation and Mutations[creature.Mutation]
-		if (not current or new.IncomeMult > current.IncomeMult) and math.random() < food.Mutation.Chance then
+		local chance = food.Mutation.Chance * Rules.Luck(data, now)
+		if (not current or new.IncomeMult > current.IncomeMult) and math.random() < chance then
 			creature.Mutation = food.Mutation.Id
 			data.Index[creature.Id .. ":" .. creature.Mutation] = true
 			mutated = true
 		end
+	end
+
+	GameEvents.Fire(player, "Fed", { Food = foodId, Favorite = favorite })
+	if leveledUp then
+		GameEvents.Fire(player, "LevelUp", { Level = creature.Level, Levels = levelsGained, Titan = creature.Id })
+	end
+	if mutated then
+		GameEvents.Fire(player, "Mutated", { Mutation = creature.Mutation })
 	end
 
 	if mutated then
@@ -481,9 +515,43 @@ function CreatureService:Sell(player: Player, uid: string)
 		self.Models[player][uid] = nil
 	end
 	data.Creatures[uid] = nil
+	if data.Active == uid then
+		data.Active = nil
+	end
 	data.Cash += price
 	self:_layout(player)
 	King:Evaluate()
+	Data:Changed(player)
+end
+
+-- Sets a titan's level directly (admin/testing).
+function CreatureService:SetLevel(player: Player, uid: string, level: number)
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	if not creature then
+		return
+	end
+	creature.Level = math.clamp(math.floor(level), 1, GameConfig.MaxLevel)
+	creature.Xp = 0
+	self:_rescale(player, uid)
+	King:Evaluate()
+end
+
+-- Choose which titan fights in battles.
+function CreatureService:Equip(player: Player, uid: string)
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	if not creature then
+		return
+	end
+	data.Active = uid
+	self:RefreshAllTags(player)
+	Net.Notify(
+		player,
+		"⚔️ " .. CreatureMath.DisplayName(creature) .. " is your fighter!",
+		Color3.fromRGB(255, 200, 80)
+	)
+	GameEvents.Fire(player, "Equipped", { Titan = creature.Id })
 	Data:Changed(player)
 end
 

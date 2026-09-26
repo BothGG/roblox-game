@@ -14,4 +14,12 @@ return {
 	Alarm = "",
 	Hatch = "rbxasset://sounds/electronicpingshort.wav",
 	Fanfare = "",
+	Hit = "rbxasset://sounds/swordlunge.wav",
+	Countdown = "rbxasset://sounds/electronicpingshort.wav",
+
+	-- Background music (looped). Add ids from the Creator Store; "" = silence.
+	Music = {
+		Island = "",
+		Battle = "",
+	},
 }

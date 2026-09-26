@@ -16,6 +16,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local CreatureMath = require(Shared.Game.CreatureMath)
+local Rules = require(Shared.Game.Rules)
 local Signal = require(Shared.Lib.Signal)
 local Log = require(Shared.Lib.Log)
 local Net = require(Shared.Net)
@@ -161,13 +162,25 @@ function DataService:BuildSnapshot(player: Player): Types.Snapshot
 		Cash = data.Cash,
 		Rebirths = data.Rebirths,
 		Creatures = data.Creatures,
+		Active = Rules.ActiveTitan(data),
 		Food = data.Food,
-		Unlocks = data.Unlocks,
+		Trophies = data.Trophies,
+		Index = data.Index,
+		IndexClaimed = data.IndexClaimed,
 		IndexCount = CreatureMath.Count(data.Index),
-		Slots = CreatureMath.MaxSlots(data.Rebirths),
-		StorageCap = CreatureMath.StorageCap(data.Rebirths),
+		Slots = Rules.MaxSlots(data),
+		StorageCap = Rules.StorageCap(data),
 		RebirthCost = CreatureMath.RebirthCost(data.Rebirths),
 		SelectedFood = player:GetAttribute("SelectedFood"),
+		Tutorial = data.Tutorial,
+		TutorialProgress = data.TutorialProgress,
+		Daily = data.Daily,
+		Quests = data.Quests,
+		Boosts = data.Boosts,
+		Passes = data.Passes,
+		Settings = data.Settings,
+		Stats = data.Stats,
+		ServerTime = os.time(),
 	}
 	for _, hook in self._hooks do
 		local ok, err = pcall(hook, player, snapshot)

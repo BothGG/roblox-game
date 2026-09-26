@@ -22,16 +22,39 @@ local Remotes: { [string]: RemoteSpec } = {
 	Notify = { Direction = "ToClient" }, -- small toast
 	Announce = { Direction = "ToClient" }, -- big banner
 	Fx = { Direction = "ToClient", Unreliable = true }, -- effect preset
-	Hatched = { Direction = "ToClient" }, -- egg / catch reveal
+	Hatched = { Direction = "ToClient" }, -- egg reveal
+	Rewarded = { Direction = "ToClient" }, -- reward popup { Title, Text }
+	OfflineEarnings = { Direction = "ToClient" }, -- { Amount, Seconds }
+	DuelRequest = { Direction = "ToClient" }, -- { FromUserId, FromName, Titan, Level }
+	BattleState = { Direction = "ToClient" }, -- match info for the battle HUD
+	ClashInvite = { Direction = "ToClient" }, -- { EndsAt }
 
-	-- Client -> server
+	-- Client -> server: economy
 	BuyEgg = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.4 },
 	BuyFood = { Direction = "ToServer", Args = { "string", "integer" }, RateLimit = 0.2 },
 	SelectFood = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.1 },
 	LockStorage = { Direction = "ToServer", Args = {}, RateLimit = 1 },
 	Rebirth = { Direction = "ToServer", Args = {}, RateLimit = 2 },
-	UnlockBiome = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },
 	TeleportHome = { Direction = "ToServer", Args = {}, RateLimit = 3 },
+	Equip = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },
+	SellTitan = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },
+
+	-- Client -> server: battles
+	Challenge = { Direction = "ToServer", Args = { "integer" }, RateLimit = 1 },
+	DuelRespond = { Direction = "ToServer", Args = { "integer", "boolean" }, RateLimit = 0.3 },
+	JoinClash = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	Practice = { Direction = "ToServer", Args = {}, RateLimit = 2 },
+	Spectate = { Direction = "ToServer", Args = {}, RateLimit = 2 },
+	BattleAction = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.15 },
+
+	-- Client -> server: progress
+	ClaimDaily = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	ClaimQuest = { Direction = "ToServer", Args = { "integer" }, RateLimit = 0.5 },
+	ClaimIndex = { Direction = "ToServer", Args = { "integer" }, RateLimit = 0.5 },
+	RedeemCode = { Direction = "ToServer", Args = { "string" }, RateLimit = 2 },
+	SetSetting = { Direction = "ToServer", Args = { "string", "boolean" }, RateLimit = 0.3 },
+	SkipTutorial = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	AdminCommand = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.3 },
 }
 
 return Remotes

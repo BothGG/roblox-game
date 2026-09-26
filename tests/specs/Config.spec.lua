@@ -8,16 +8,10 @@ return function(t)
 		end
 	end)
 
-	t.test("every creature lives in at least one biome or egg", function()
+	t.test("every titan can be hatched from an egg", function()
 		local Creatures = t.require(t.Shared.Config.Creatures)
-		local Biomes = t.require(t.Shared.Config.Biomes)
 		local Eggs = t.require(t.Shared.Config.Eggs)
 		local obtainable = {}
-		for _, id in Biomes.Order do
-			for _, entry in Biomes[id].Wild do
-				obtainable[entry.Creature] = true
-			end
-		end
 		for _, id in Eggs.Order do
 			for _, odd in Eggs[id].Odds do
 				obtainable[odd.Creature] = true
@@ -25,24 +19,25 @@ return function(t)
 		end
 		for id in Creatures do
 			if not obtainable[id] then
+				error(id .. " is in no egg")
+			end
+		end
+	end)
+
+	t.test("every food grows in the fields or can be bought", function()
+		local Foods = t.require(t.Shared.Config.Foods)
+		for _, id in Foods.Order do
+			local def = Foods[id]
+			if (def.SpawnWeight or 0) <= 0 and not def.Price then
 				error(id .. " can't be obtained anywhere")
 			end
 		end
 	end)
 
-	t.test("every food grows in a biome or can be bought", function()
-		local Foods = t.require(t.Shared.Config.Foods)
-		local Biomes = t.require(t.Shared.Config.Biomes)
-		local found = {}
-		for _, id in Biomes.Order do
-			for _, entry in Biomes[id].Foods do
-				found[entry.Food] = true
-			end
-		end
-		for _, id in Foods.Order do
-			if not found[id] and not Foods[id].Price then
-				error(id .. " can't be obtained anywhere")
-			end
+	t.test("every tutorial and quest event is one the server fires", function()
+		local Tutorial = t.require(t.Shared.Config.Tutorial)
+		for _, step in Tutorial.Steps do
+			t.expect(ConfigValidator.Events[step.Event]).toBe(true)
 		end
 	end)
 end

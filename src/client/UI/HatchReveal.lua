@@ -1,6 +1,6 @@
 --[[
 	HatchReveal: the egg-opening / catch reveal.
-	Egg: shakes (more for rarer kaiju) -> flash -> card with the result.
+	Egg: shakes (more for rarer titan) -> flash -> card with the result.
 	Catch (info.Source == "Catch"): straight to the card, titled "CAUGHT!".
 ]]
 

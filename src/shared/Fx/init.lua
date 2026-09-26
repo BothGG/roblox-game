@@ -5,7 +5,7 @@
 
 	Presets (named effects) live in Fx/Presets.lua.
 	Building blocks (burst, ring, shake, ...) live in Fx/Primitives.lua.
-	Persistent auras on kaiju live in Fx/Auras.lua (used by the server).
+	Persistent auras on titan live in Fx/Auras.lua (used by the server).
 
 	From the server, don't call this directly. Use FxService:
 	  FxService:PlayAll("LevelUp", params)

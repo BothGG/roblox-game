@@ -322,6 +322,50 @@ function Props.Fountain(parent: Instance, position: Vector3): Model
 	return m
 end
 
+function Props.Torch(parent: Instance, position: Vector3): Model
+	local m = model(parent, "Torch")
+	column(m, position, 9, 0.9, { Color = Color3.fromRGB(90, 70, 50), Material = Enum.Material.Wood })
+	local bowl = column(
+		m,
+		position + Vector3.new(0, 9, 0),
+		1,
+		2.4,
+		{ Color = Color3.fromRGB(60, 55, 55), Material = Enum.Material.Metal }
+	)
+	local fire = Instance.new("Fire")
+	fire.Size = 4
+	fire.Heat = 6
+	fire.Parent = bowl
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 160, 70)
+	light.Range = 18
+	light.Brightness = 1.5
+	light.Parent = bowl
+	return m
+end
+
+function Props.Flowers(parent: Instance, position: Vector3, rng: Random): Model
+	local m = model(parent, "Flowers")
+	local colors = {
+		Color3.fromRGB(255, 120, 150),
+		Color3.fromRGB(255, 220, 90),
+		Color3.fromRGB(170, 130, 255),
+		Color3.fromRGB(255, 255, 255),
+	}
+	for _ = 1, rng:NextInteger(3, 6) do
+		local p = position + Vector3.new(rng:NextNumber(-3, 3), 0, rng:NextNumber(-3, 3))
+		column(m, p, 0.9, 0.2, { Color = Color3.fromRGB(70, 150, 60), CanCollide = false })
+		part(m, {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * 0.7,
+			CFrame = CFrame.new(p + Vector3.new(0, 1, 0)),
+			Color = colors[rng:NextInteger(1, #colors)],
+			CanCollide = false,
+		})
+	end
+	return m
+end
+
 function Props.GateArch(parent: Instance, cf: CFrame, width: number, color: Color3): Model
 	local m = model(parent, "GateArch")
 	for _, x in { -width / 2 - 1.5, width / 2 + 1.5 } do

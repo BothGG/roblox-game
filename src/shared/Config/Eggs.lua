@@ -1,5 +1,5 @@
 --[[
-	Eggs are how players get new kaiju. Odds are weights, not percents
+	Eggs are how players get new titans. Odds are weights, not percents
 	(the UI converts them to percents).
 ]]
 
@@ -30,8 +30,8 @@ local Eggs = {
 			{ Creature = "Drake", Weight = 5 },
 		},
 	},
-	KaijuEgg = {
-		Name = "Kaiju Egg",
+	TitanEgg = {
+		Name = "Titan Egg",
 		Price = 100000,
 		Color = Color3.fromRGB(255, 80, 120),
 		Odds = {
@@ -49,6 +49,6 @@ for id, def in Eggs do
 	def.Id = id
 end
 
-Eggs.Order = { "BasicEgg", "GreatEgg", "KaijuEgg" }
+Eggs.Order = { "BasicEgg", "GreatEgg", "TitanEgg" }
 
 return Eggs

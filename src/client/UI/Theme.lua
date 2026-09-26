@@ -138,6 +138,36 @@ function Theme.AutoScale(gui: GuiObject, baseHeight: number?)
 	return scale
 end
 
+-- A panel row for list pages.
+function Theme.Row(parent: Instance, order: number, height: number): Frame
+	return Theme.New("Frame", {
+		Size = UDim2.new(1, -8, 0, height),
+		BackgroundColor3 = Theme.Panel,
+		LayoutOrder = order,
+		Parent = parent,
+	}, { Theme.Corner(12) })
+end
+
+-- A progress bar. Returns (bar, fill). Set fill.Size = UDim2.fromScale(0..1, 1).
+function Theme.ProgressBar(parent: Instance, props: { [string]: any }): (Frame, Frame)
+	local bar = Theme.New("Frame", {
+		BackgroundColor3 = Color3.fromRGB(25, 25, 35),
+		BorderSizePixel = 0,
+	}, { Theme.Corner(8) })
+	for key, value in props do
+		(bar :: any)[key] = value
+	end
+	local fill = Theme.New("Frame", {
+		Name = "Fill",
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = Theme.Green,
+		BorderSizePixel = 0,
+		Parent = bar,
+	}, { Theme.Corner(8) })
+	bar.Parent = parent
+	return bar, fill
+end
+
 function Theme.ScreenGui(name: string, displayOrder: number?): ScreenGui
 	return Theme.New("ScreenGui", {
 		Name = name,

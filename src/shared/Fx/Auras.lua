@@ -1,6 +1,6 @@
 --[[
-	Auras: effects that stay attached to a kaiju (mutation glow, rare sparkle).
-	Used by the server when it builds a kaiju model, so every player sees them.
+	Auras: effects that stay attached to a titan (mutation glow, rare sparkle).
+	Used by the server when it builds a titan model, so every player sees them.
 
 	Add a new particle style: add a function to PARTICLES below and use its
 	name in Config/Mutations.lua  (Aura = { Particles = "YourStyle" }).
@@ -74,7 +74,7 @@ export type AuraDef = {
 	Particles: string?,
 }
 
--- Adds the aura to a part (usually the kaiju's body). Call before scaling
+-- Adds the aura to a part (usually the titan's body). Call before scaling
 -- the model, so Model:ScaleTo scales the particles and light with it.
 function Auras.Apply(part: BasePart, aura: AuraDef)
 	if aura.Particles and PARTICLES[aura.Particles] then
@@ -90,7 +90,7 @@ function Auras.Apply(part: BasePart, aura: AuraDef)
 	end
 end
 
--- Subtle sparkle for Legendary+ kaiju so rare ones stand out.
+-- Subtle sparkle for Legendary+ titan so rare ones stand out.
 function Auras.RarityGlow(part: BasePart, color: Color3)
 	Auras.Apply(part, { Color = color, Light = true, Particles = "Sparkles" })
 end

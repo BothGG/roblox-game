@@ -1,8 +1,8 @@
 --[[
-	CreatureBuilder: makes the 3D model for a kaiju.
+	CreatureBuilder: makes the 3D model for a titan.
 
 	If ServerStorage has a folder "CreatureModels" with a Model named after
-	the kaiju's Id (e.g. "Rex"), that model is used. Otherwise a placeholder
+	the titan's Id (e.g. "Rex"), that model is used. Otherwise a placeholder
 	is built from parts using the Style and colors in Config/Creatures.lua.
 
 	Custom model rules: set a PrimaryPart at the FEET, facing -Z (forward).
@@ -196,7 +196,7 @@ local function buildPlaceholder(def): Model
 	root.Name = "Root"
 	root.Transparency = 1
 	root:SetAttribute("Paint", nil)
-	-- Pivot at the feet so scaling grows the kaiju upward.
+	-- Pivot at the feet so scaling grows the titan upward.
 	root.PivotOffset = CFrame.new(0, -0.5, 0)
 	model.PrimaryPart = root
 	local builder = BUILDERS[def.Style] or BUILDERS.Biped
@@ -262,7 +262,7 @@ local function applyMutation(model: Model, mutationId: string)
 	end
 end
 
--- Builds a kaiju model at scale 1 (not parented, not positioned).
+-- Builds a titan model at scale 1 (not parented, not positioned).
 function CreatureBuilder.Build(creature): Model
 	local def = Creatures[creature.Id]
 	local model = buildCustom(creature.Id) or buildPlaceholder(def)

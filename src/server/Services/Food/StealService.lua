@@ -5,7 +5,7 @@
 	2. You carry one food above your head and walk slower.
 	3. Reach your own crate to keep it.
 	The owner can "Take Back" by using the prompt on the thief,
-	guard kaiju (Guard trait) can knock thieves away,
+	guard titan (Guard trait) can knock thieves away,
 	and if the thief dies or leaves, the food goes back.
 ]]
 
@@ -19,6 +19,8 @@ local Foods = require(Shared.Config.Foods)
 local CreatureMath = require(Shared.Game.CreatureMath)
 local WeightedRandom = require(Shared.Lib.WeightedRandom)
 local Net = require(Shared.Net)
+
+local GameEvents = require(game:GetService("ServerScriptService"):WaitForChild("Server").Modules.GameEvents)
 
 local RED = Color3.fromRGB(255, 80, 80)
 local GREEN = Color3.fromRGB(90, 220, 120)
@@ -39,17 +41,17 @@ local StealService = {
 	Carriers = {} :: { [Player]: Carry },
 }
 
-local Data, Zoo, Fx, Food
+local Data, Base, Fx, Food
 
 function StealService:Init(registry)
 	Data = registry.DataService
-	Zoo = registry.ZooService
+	Base = registry.BaseService
 	Fx = registry.FxService
 	Food = registry.FoodService
 end
 
 function StealService:Start()
-	for _, plot in Zoo.Plots do
+	for _, plot in Base.Plots do
 		plot.StealPrompt.Triggered:Connect(function(thief)
 			self:TryStart(thief, plot)
 		end)
@@ -85,7 +87,7 @@ end
 
 function StealService:TryStart(thief: Player, plot)
 	local victim = plot.Owner
-	if not victim or victim == thief or self.Carriers[thief] then
+	if not victim or victim == thief or self.Carriers[thief] or thief:GetAttribute("InBattle") then
 		return
 	end
 	local victimData = Data:Get(victim)
@@ -237,6 +239,7 @@ function StealService:_deposit(thief: Player, plot)
 	if data then
 		data.Food[carry.FoodId] = (data.Food[carry.FoodId] or 0) + 1
 		data.Stats.Steals += 1
+		GameEvents.Fire(thief, "Stole", { Food = carry.FoodId })
 		Food:RefreshStorage(thief)
 		Data:Changed(thief)
 	end
@@ -269,7 +272,7 @@ function StealService:_tick()
 			self:ReturnFood(thief, "died")
 			continue
 		end
-		local home = Zoo:GetPlot(thief)
+		local home = Base:GetPlot(thief)
 		if home and (root.Position - home.Crate.Position).Magnitude <= GameConfig.Steal.DepositDistance then
 			self:_deposit(thief, home)
 			continue
@@ -278,7 +281,7 @@ function StealService:_tick()
 		if
 			plot.Owner == carry.Victim
 			and t - carry.LastGuardCheck >= GameConfig.Steal.GuardCheckInterval
-			and Zoo:IsInside(plot, root.Position)
+			and Base:IsInside(plot, root.Position)
 		then
 			carry.LastGuardCheck = t
 			if math.random() < self:_guardChance(carry.Victim) then

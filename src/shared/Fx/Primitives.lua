@@ -252,7 +252,13 @@ end
 
 -- Plays a sound. `sound` is a key from Config/Sounds.lua or a raw sound id.
 -- With a position it is 3D, otherwise it plays for this player only.
+-- Set by the UI from the player's settings.
+Primitives.SoundEnabled = true
+
 function Primitives.Sound(sound: string, position: Vector3?, volume: number?, pitch: number?)
+	if not Primitives.SoundEnabled then
+		return
+	end
 	local id = Sounds[sound] or sound
 	if id == nil or id == "" then
 		return
@@ -421,7 +427,7 @@ function Primitives.Knockback(velocity: Vector3)
 	end
 end
 
--- Makes a zoo kaiju do a little jump (animated by ZooAnimController).
+-- Makes a base titan do a little jump (animated by BaseAnimController).
 function Primitives.Bounce(model: Instance?)
 	if model and model.Parent then
 		model:SetAttribute("ClientBounce", os.clock())

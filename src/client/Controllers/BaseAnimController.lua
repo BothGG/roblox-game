@@ -1,22 +1,22 @@
 --[[
-	ZooAnimController: makes zoo kaiju feel alive (client only, no network).
+	BaseAnimController: makes titans in bases feel alive (client only, no network).
 	- gentle breathing bob + looking around
 	- a bounce when fed (Fx primitive P.Bounce sets "ClientBounce")
-	Only animates kaiju near the camera.
+	Only animates titan near the camera.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local ZooAnimController = {
+local BaseAnimController = {
 	Priority = 30,
 }
 
 local MAX_DISTANCE = 200
 local BOUNCE_TIME = 0.35
 
-function ZooAnimController:Start()
+function BaseAnimController:Start()
 	local elapsed = 0
 	RunService.RenderStepped:Connect(function(dt)
 		elapsed += dt
@@ -29,7 +29,7 @@ function ZooAnimController:Start()
 			return
 		end
 		local t = os.clock()
-		for _, model in CollectionService:GetTagged("ZooCreature") do
+		for _, model in CollectionService:GetTagged("BaseTitan") do
 			if not model:IsA("Model") then
 				continue
 			end
@@ -50,4 +50,4 @@ function ZooAnimController:Start()
 	end)
 end
 
-return ZooAnimController
+return BaseAnimController

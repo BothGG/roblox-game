@@ -5,7 +5,9 @@ return function(t)
 	t.test("new players get the template", function()
 		local data = Schema.Prepare(nil)
 		t.expect(data.Version).toBe(Schema.CURRENT_VERSION)
-		t.expect(data.Unlocks.Forest).toBe(true)
+		t.expect(data.Tutorial).toBe(1)
+		t.expect(data.Trophies).toBe(0)
+		t.expect(data.Daily.LastDay).toBe(-1)
 	end)
 
 	t.test("v1 saves are migrated without losing progress", function()
@@ -23,9 +25,42 @@ return function(t)
 		t.expect(data.Version).toBe(Schema.CURRENT_VERSION)
 		t.expect(data.Cash).toBe(1234)
 		t.expect(data.Creatures["1"].Level).toBe(10)
-		t.expect(data.Unlocks.Forest).toBe(true)
-		t.expect(data.Stats.Caught).toBe(0)
+		t.expect(data.Unlocks).toBe(nil)
+		t.expect(data.Trophies).toBe(0)
+		t.expect(data.Stats.BattlesWon).toBe(0)
+		t.expect(data.Settings.Music).toBe(true)
+		t.expect(data.Tutorial).toBe(0) -- played a lot already: no tutorial
 		t.expect(next(data.Food)).toBe(nil) -- empty food stays empty
+	end)
+
+	t.test("v2 saves (big land update) migrate to v3", function()
+		local old = {
+			Version = 2,
+			Cash = 50,
+			Rebirths = 0,
+			NextUid = 2,
+			Creatures = {},
+			Food = { Meat = 1 },
+			Unlocks = { Forest = true, Beach = true },
+			Index = {},
+			Stats = {
+				StarterGiven = true,
+				Hatched = 0,
+				Caught = 4,
+				Steals = 0,
+				Stolen = 0,
+				FoodEaten = 3,
+				PlayTime = 10,
+			},
+			LastOnline = 123,
+		}
+		local data = Schema.Prepare(old)
+		t.expect(data.Version).toBe(3)
+		t.expect(data.Unlocks).toBe(nil)
+		t.expect(data.Stats.Caught).toBe(nil)
+		t.expect(data.Tutorial).toBe(1)
+		t.expect(data.LastOnline).toBe(123)
+		t.expect(data.Food.Meat).toBe(1)
 	end)
 
 	t.test("every old version has a migration", function()

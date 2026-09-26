@@ -5,7 +5,7 @@
 	2. Loader finds every "*Service" module in Services/ and runs
 	   Init(registry) then Start(), ordered by each service's Priority.
 	3. Player lifecycle:
-	     join  -> DataService:Load -> ZooService:Assign -> OnPlayerReady(player) on every service
+	     join  -> DataService:Load -> BaseService:Assign -> OnPlayerReady(player) on every service
 	     leave -> OnPlayerRemoving(player) on every service (reverse order) -> save & release
 
 	See docs/ARCHITECTURE.md.
@@ -28,7 +28,7 @@ end
 
 local registry, ordered = Loader.Boot(script.Parent:WaitForChild("Services"), "Service")
 local Data = registry.DataService
-local Zoo = registry.ZooService
+local Base = registry.BaseService
 
 local reversed = table.clone(ordered)
 for i = 1, #reversed // 2 do
@@ -40,7 +40,7 @@ local function onPlayerAdded(player: Player)
 	if not data or not player.Parent then
 		return
 	end
-	if not Zoo:Assign(player) then
+	if not Base:Assign(player) then
 		player:Kick("This server is full. Please join another one!")
 		return
 	end
@@ -53,7 +53,7 @@ local function onPlayerRemoving(player: Player)
 		return
 	end
 	Loader.Each(reversed, "OnPlayerRemoving", player)
-	Zoo:Release(player)
+	Base:Release(player)
 	Data:Release(player)
 end
 

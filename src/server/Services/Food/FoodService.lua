@@ -1,5 +1,5 @@
 --[[
-	FoodService: food growing across the biomes, the food shop, each zoo's
+	FoodService: food growing in the fields, the food shop, each base's
 	food storage (crate) and the storage lock.
 
 	Food grows at FoodSpawn markers. When someone picks it up, that spot
@@ -20,7 +20,6 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Biomes = require(Shared.Config.Biomes)
 local Foods = require(Shared.Config.Foods)
 local GameConfig = require(Shared.Config.GameConfig)
 local CreatureMath = require(Shared.Game.CreatureMath)
@@ -31,7 +30,9 @@ local Log = require(Shared.Lib.Log)
 local WeightedRandom = require(Shared.Lib.WeightedRandom)
 local Net = require(Shared.Net)
 
-local FoodBuilder = require(ServerScriptService:WaitForChild("Server").Modules.FoodBuilder)
+local ServerModules = ServerScriptService:WaitForChild("Server").Modules
+local FoodBuilder = require(ServerModules.FoodBuilder)
+local GameEvents = require(ServerModules.GameEvents)
 
 local log = Log.new("FoodService")
 
@@ -44,7 +45,7 @@ local FoodService = {
 	_lockCooldown = {} :: { [Player]: number },
 }
 
-local Data, Zoo, Map, Fx
+local Data, Base, Map, Fx
 
 local function now(): number
 	return Workspace:GetServerTimeNow()
@@ -52,12 +53,12 @@ end
 
 function FoodService:Init(registry)
 	Data = registry.DataService
-	Zoo = registry.ZooService
+	Base = registry.BaseService
 	Map = registry.MapService
 	Fx = registry.FxService
 
 	Data:AddSnapshotHook(function(player, snapshot)
-		local plot = Zoo:GetPlot(player)
+		local plot = Base:GetPlot(player)
 		snapshot.LockedUntil = plot and plot.Model:GetAttribute("LockedUntil") or 0
 		snapshot.LockCooldownUntil = self._lockCooldown[player] or 0
 	end)
@@ -69,14 +70,10 @@ function FoodService:Start()
 	folder.Parent = Map.Map or Workspace
 	self._folder = folder
 
-	local spots = 0
-	for biomeId, spawns in Map.FoodSpawns do
-		for _, spawnPart in spawns do
-			spots += 1
-			task.defer(self._growAt, self, biomeId, spawnPart)
-		end
+	for _, spawnPart in Map.FoodSpawns do
+		task.defer(self._growAt, self, spawnPart)
 	end
-	log:Info("food grows at", spots, "spots")
+	log:Info("food grows at", #Map.FoodSpawns, "spots")
 
 	Net.On("BuyFood", function(player, foodId, amount)
 		self:Buy(player, foodId, amount)
@@ -93,7 +90,7 @@ function FoodService:Start()
 end
 
 function FoodService:OnPlayerReady(player: Player)
-	local plot = Zoo:GetPlot(player)
+	local plot = Base:GetPlot(player)
 	if plot then
 		-- New players get a short lock so they can't be robbed instantly.
 		self:_setLock(plot, GameConfig.Steal.JoinProtection)
@@ -109,38 +106,38 @@ end
 -- Growing food
 --------------------------------------------------------------------------
 
-local function pickBiomeFood(biomeId: string): string?
-	local biome = Biomes[biomeId]
-	if not biome then
-		return nil
-	end
-	local entry = WeightedRandom.Pick(biome.Foods, function(e)
+local spawnEntries = {}
+for _, id in Foods.Order do
+	table.insert(spawnEntries, { Id = id, Weight = Foods[id].SpawnWeight or 0 })
+end
+
+local function pickFieldFood(): string?
+	local entry = WeightedRandom.Pick(spawnEntries, function(e)
 		return e.Weight
 	end)
-	return entry and entry.Food
+	return entry and entry.Id
 end
 
 -- Grows one food at a spawn spot; when it's picked, schedules the regrow.
-function FoodService:_growAt(biomeId: string, spawnPart: BasePart)
-	local foodId = pickBiomeFood(biomeId)
+function FoodService:_growAt(spawnPart: BasePart)
+	local foodId = pickFieldFood()
 	if not foodId then
 		return
 	end
-	local model = self:_spawnFood(foodId, spawnPart.Position, biomeId, function()
+	local model = self:_spawnFood(foodId, spawnPart.Position, function()
 		local rarity = Foods[foodId].Rarity
 		local delay = (GameConfig.Food.RespawnTime[rarity] or 30) * (0.8 + math.random() * 0.4)
-		task.delay(delay, self._growAt, self, biomeId, spawnPart)
+		task.delay(delay, self._growAt, self, spawnPart)
 	end)
 	local def = Foods[foodId]
 	if def.Rarity == "Mythic" or def.Rarity == "Secret" then
-		local biome = Biomes[biomeId]
-		Net.NotifyAll(string.format("%s A %s appeared in the %s!", biome.Icon, def.Name, biome.Name), def.Color)
+		Net.NotifyAll(string.format("⭐ A %s appeared in the fields!", def.Name), def.Color)
 	end
 	return model
 end
 
 -- Creates a pickup. onTaken runs after someone collects it.
-function FoodService:_spawnFood(foodId: string, position: Vector3, biomeId: string?, onTaken: (() -> ())?): Model
+function FoodService:_spawnFood(foodId: string, position: Vector3, onTaken: (() -> ())?): Model
 	local model = FoodBuilder.Build(foodId, position)
 	model.Parent = self._folder
 	CollectionService:AddTag(model, "FoodPickup") -- client spin/bob
@@ -157,7 +154,7 @@ function FoodService:_spawnFood(foodId: string, position: Vector3, biomeId: stri
 			return
 		end
 		local data = Data:Get(player)
-		if not data or (biomeId and not Rules.IsBiomeUnlocked(data, biomeId)) then
+		if not data or player:GetAttribute("InBattle") then
 			return
 		end
 		-- Forage trait (e.g. Kraken): chance for double food
@@ -169,6 +166,8 @@ function FoodService:_spawnFood(foodId: string, position: Vector3, biomeId: stri
 		local given = self:Give(player, foodId, amount)
 		if given > 0 then
 			taken = true
+			data.Stats.FoodPicked += given
+			GameEvents.Fire(player, "FoodPicked", { Amount = given, Food = foodId })
 			local def = Foods[foodId]
 			Fx:PlayFor(player, "Pickup", {
 				Position = hitbox.Position,
@@ -216,11 +215,10 @@ function FoodService:Give(player: Player, foodId: string, amount: number): numbe
 end
 
 function FoodService:RefreshStorage(player: Player)
-	local plot = Zoo:GetPlot(player)
+	local plot = Base:GetPlot(player)
 	local data = Data:Get(player)
 	if plot and data then
-		plot.FoodLabel.Text =
-			string.format("🍖 %d / %d", CreatureMath.CountFood(data.Food), CreatureMath.StorageCap(data.Rebirths))
+		plot.FoodLabel.Text = string.format("🍖 %d / %d", CreatureMath.CountFood(data.Food), Rules.StorageCap(data))
 	end
 end
 
@@ -245,7 +243,7 @@ function FoodService:IsLocked(plot): boolean
 end
 
 function FoodService:Lock(player: Player)
-	local plot = Zoo:GetPlot(player)
+	local plot = Base:GetPlot(player)
 	if not plot then
 		return
 	end
@@ -298,7 +296,7 @@ end
 --------------------------------------------------------------------------
 
 function FoodService:MeteorShower(count: number)
-	-- Meteors favour rarer food: flatten the spawn weights of all biomes.
+	-- Meteors favour rarer food: weights come from respawn time (rarer = longer).
 	local entries = {}
 	for _, id in Foods.Order do
 		table.insert(entries, { Id = id, Weight = math.sqrt(GameConfig.Food.RespawnTime[Foods[id].Rarity] or 1) })
@@ -337,7 +335,7 @@ function FoodService:MeteorShower(count: number)
 				value:Destroy()
 				model:Destroy()
 				Fx:PlayNear(target, 400, "MeteorImpact", { Position = target, Color = Foods[pick.Id].Color })
-				local landed = self:_spawnFood(pick.Id, target)
+				local landed = self:_spawnFood(pick.Id, target, nil)
 				task.delay(90, function()
 					if landed.Parent then
 						landed:Destroy()

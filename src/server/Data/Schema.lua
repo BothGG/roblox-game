@@ -20,7 +20,7 @@ type PlayerData = Types.PlayerData
 
 local Schema = {}
 
-Schema.CURRENT_VERSION = 2
+Schema.CURRENT_VERSION = 3
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -35,27 +35,37 @@ end
 Schema.DeepCopy = deepCopy
 
 function Schema.Template(): PlayerData
-	local unlocks = {}
-	for _, biomeId in GameConfig.StartingBiomes do
-		unlocks[biomeId] = true
-	end
 	return {
 		Version = Schema.CURRENT_VERSION,
 		Cash = GameConfig.StartingCash,
 		Rebirths = 0,
 		NextUid = 1,
 		Creatures = {},
+		Active = nil,
 		Food = deepCopy(GameConfig.StartingFood),
-		Unlocks = unlocks,
+		Trophies = 0,
 		Index = {},
+		IndexClaimed = {},
+		Tutorial = 1,
+		TutorialProgress = 0,
+		Daily = { Streak = 0, LastDay = -1 },
+		Quests = { Day = -1, List = {} },
+		Codes = {},
+		Boosts = {},
+		Passes = {},
+		Purchases = {},
+		Settings = { Music = true, Sfx = true },
 		Stats = {
 			StarterGiven = false,
 			Hatched = 0,
-			Caught = 0,
 			Steals = 0,
 			Stolen = 0,
 			FoodEaten = 0,
+			FoodPicked = 0,
 			PlayTime = 0,
+			BattlesPlayed = 0,
+			BattlesWon = 0,
+			CashEarned = 0,
 		},
 		LastOnline = 0,
 	}
@@ -64,20 +74,24 @@ end
 -- Migrations[v] upgrades a save from version v to v + 1.
 local Migrations: { [number]: (any) -> () } = {
 	[1] = function(data)
-		-- v2: big land update. Biome unlocks + catch stats.
-		data.Unlocks = data.Unlocks or {}
-		for _, biomeId in GameConfig.StartingBiomes do
-			data.Unlocks[biomeId] = true
-		end
-		data.Stats = data.Stats or {}
-		data.Stats.Caught = data.Stats.Caught or 0
+		-- v2: big land update (biomes). Only LastOnline survives into v3.
 		data.LastOnline = data.LastOnline or 0
+	end,
+	[2] = function(data)
+		-- v3: Titan Clash. Biomes/catching removed; battles + retention added.
+		data.Unlocks = nil
+		if data.Stats then
+			data.Stats.Caught = nil
+		end
+		-- Players who already played a lot skip the tutorial.
+		local played = data.Stats and (data.Stats.FoodEaten or 0) > 30
+		data.Tutorial = if played then 0 else 1
 	end,
 }
 Schema.Migrations = Migrations
 
--- Fills in anything missing from the template (top level + Stats only,
--- so an empty Food / Creatures table stays empty).
+-- Fills in anything missing from the template (top level + Stats/Settings
+-- only, so an empty Food / Creatures table stays empty).
 local function reconcile(data: any)
 	local template = Schema.Template() :: any
 	for key, value in template do
@@ -85,9 +99,11 @@ local function reconcile(data: any)
 			data[key] = value
 		end
 	end
-	for key, value in template.Stats do
-		if data.Stats[key] == nil then
-			data.Stats[key] = value
+	for _, section in { "Stats", "Settings", "Daily", "Quests" } do
+		for key, value in template[section] do
+			if data[section][key] == nil then
+				data[section][key] = value
+			end
 		end
 	end
 end

@@ -8,6 +8,8 @@
 	Keep far-away effects cheap: check P.Distance(position) first.
 ]]
 
+local Textures = require(script.Parent.Textures)
+
 local GOLD = Color3.fromRGB(255, 210, 60)
 local RED = Color3.fromRGB(255, 60, 60)
 local WHITE = Color3.new(1, 1, 1)
@@ -15,7 +17,7 @@ local FAR = 250 -- skip world effects farther than this from the camera
 
 local Presets = {}
 
--- Kaiju eats food.
+-- Titan eats food.
 function Presets.Feed(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
@@ -35,7 +37,7 @@ function Presets.Feed(p, P)
 	end
 end
 
--- Kaiju levels up (and grows).
+-- Titan levels up (and grows).
 function Presets.LevelUp(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
@@ -54,7 +56,7 @@ function Presets.LevelUp(p, P)
 	end
 end
 
--- Kaiju mutates (big moment!).
+-- Titan mutates (big moment!).
 function Presets.Mutation(p, P)
 	local color = p.Color or WHITE
 	if P.Distance(p.Position) <= FAR then
@@ -82,7 +84,7 @@ function Presets.Mutation(p, P)
 	end
 end
 
--- A new kaiju appears in the pen.
+-- A new titan appears in the pen.
 function Presets.Spawn(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
@@ -129,7 +131,7 @@ function Presets.Deposit(p, P)
 	end
 end
 
--- A guard kaiju knocks a thief away.
+-- A guard titan knocks a thief away.
 function Presets.GuardKnock(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
@@ -152,7 +154,7 @@ function Presets.TakeBack(p, P)
 	P.Sound("Pop", p.Position, 0.6, 0.9)
 end
 
--- Sold a kaiju.
+-- Sold a titan.
 function Presets.Sell(p, P)
 	P.Burst(p.Position, { Color = GOLD, Count = 40, Speed = 25, Size = 0.8 })
 	P.Ring(p.Ground or p.Position, { Color = GOLD, Radius = 10 })
@@ -191,7 +193,7 @@ function Presets.MeteorWarning(p, P)
 	P.Ring(p.Position, { Color = RED, Radius = 5, Duration = 1.2, Thickness = 0.15 })
 end
 
--- A new Kaiju King is crowned.
+-- A new Titan King is crowned.
 function Presets.NewKing(p, P)
 	if p.Position and P.Distance(p.Position) <= FAR * 2 then
 		P.Pillar(p.Position, { Color = GOLD, Height = 150, Width = 14, Duration = 2 })
@@ -227,50 +229,7 @@ function Presets.HatchReveal(p, P)
 	end
 end
 
--- Biome unlocked (only the unlocking player sees the screen part).
-function Presets.Unlock(p, P)
-	local color = p.Color or GOLD
-	if p.Position then
-		P.Pillar(p.Position, { Color = color, Height = 90, Width = 16, Duration = 1.5 })
-		P.Ring(p.Position, { Color = color, Radius = 30, Duration = 0.8 })
-		P.Burst(p.Position, { Color = color, Count = 50, Speed = 35, Size = 1.2 })
-	end
-	P.Flash(color, 0.5, 0.3)
-	P.Confetti(70, { color, WHITE, GOLD })
-	P.Sound("Fanfare", nil, 0.8)
-end
-
--- A rare wild kaiju spawned (seen by everyone nearby).
-function Presets.RareSpawn(p, P)
-	if P.Distance(p.Position) > FAR * 2 then
-		return
-	end
-	P.Pillar(p.Position, { Color = p.Color, Height = 120, Width = 8, Duration = 2.5 })
-	P.Ring(p.Position, { Color = p.Color, Radius = 20, Duration = 0.8 })
-end
-
--- Caught a wild kaiju.
-function Presets.CatchSuccess(p, P)
-	if P.Distance(p.Position) <= FAR then
-		P.Ring(p.Position, { Color = p.Color, Radius = 14, Duration = 0.5 })
-		P.Burst(p.Position + Vector3.new(0, 2, 0), { Color = p.Color, Count = 40, Speed = 30, Size = 1 })
-		P.Light(p.Position, { Color = p.Color, Brightness = 8, Range = 25 })
-	end
-	if P.IsMe(p.Owner) then
-		P.FloatText(p.Position + Vector3.new(0, 4, 0), "CAUGHT!", { Color = p.Color, Size = 3.5 })
-		P.Shake(0.2, 0.3)
-	end
-end
-
--- Catch failed: it runs away in a puff of smoke.
-function Presets.CatchFail(p, P)
-	Presets.Poof(p, P)
-	if P.IsMe(p.Target) then
-		P.FloatText(p.Position + Vector3.new(0, 3, 0), "It got away!", { Color = RED, Size = 2.5 })
-	end
-end
-
--- Puff of smoke (wild kaiju leaving).
+-- Puff of smoke (wild titan leaving).
 function Presets.Poof(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
@@ -285,6 +244,148 @@ function Presets.Poof(p, P)
 		LightEmission = 0,
 	})
 	P.Sound("Whoosh", p.Position, 0.5)
+end
+
+--------------------------------------------------------------------------
+-- Battle
+--------------------------------------------------------------------------
+
+-- A titan attacks (basic attack or special). Look = facing direction.
+function Presets.TitanAttack(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	local look = p.Look or Vector3.new(0, 0, -1)
+	local range = p.Range or 10
+	local ground = p.Position - Vector3.new(0, 2, 0)
+	local color = p.Color or WHITE
+	if p.Kind == "Attack" then
+		P.Burst(
+			p.Position + look * range * 0.6,
+			{ Color = color, Count = 14, Speed = 18, Size = 1.2, Lifetime = 0.4, Gravity = 0 }
+		)
+		P.Sound("Whoosh", p.Position, 0.5, 0.9 + math.random() * 0.3)
+	elseif p.Special == "Slam" then
+		task.delay(0.3, function()
+			P.Ring(ground, { Color = color, Radius = range * 1.5, Duration = 0.5, Thickness = 0.6 })
+			P.Burst(ground, {
+				Color = Color3.fromRGB(160, 130, 90),
+				Count = 30,
+				Speed = 30,
+				Size = 2.5,
+				LightEmission = 0,
+				Gravity = -30,
+			})
+			P.Sound("Impact", ground, 0.9, 0.7)
+			if P.Distance(ground) < range * 3 then
+				P.Shake(0.6, 0.35)
+			end
+		end)
+	elseif p.Special == "Charge" then
+		for i = 1, 5 do
+			task.delay(i * 0.05, function()
+				P.Burst(
+					ground + look * i * 4,
+					{ Color = Color3.fromRGB(170, 140, 100), Count = 8, Speed = 8, Size = 2, LightEmission = 0 }
+				)
+			end)
+		end
+		P.Sound("Whoosh", p.Position, 0.8, 0.7)
+	elseif p.Special == "Bounce" then
+		task.delay(0.6, function()
+			P.Ring(ground, { Color = color, Radius = range * 1.4, Duration = 0.5, Thickness = 0.6 })
+			P.Burst(ground, { Color = color, Count = 30, Speed = 28, Size = 1.6 })
+			P.Sound("Impact", ground, 0.8, 1.1)
+		end)
+	elseif p.Special == "Breath" then
+		for i = 1, 8 do
+			task.delay(i * 0.04, function()
+				local at = p.Position + look * (range * 2.2) * (i / 8)
+				P.Burst(at, {
+					Color = ColorSequence.new(Color3.fromRGB(255, 220, 80), Color3.fromRGB(255, 60, 20)),
+					Count = 10,
+					Speed = 6 + i,
+					Size = 2 + i * 0.3,
+					Lifetime = 0.5,
+					Gravity = 6,
+					Texture = Textures.Fire,
+				})
+			end)
+		end
+		P.Light(p.Position + look * range, { Color = Color3.fromRGB(255, 140, 40), Brightness = 6, Range = range * 2 })
+		P.Sound("Whoosh", p.Position, 0.8, 0.6)
+	end
+end
+
+-- A titan gets hit.
+function Presets.Hit(p, P)
+	if P.Distance(p.Position) <= FAR then
+		P.Burst(
+			p.Position,
+			{ Color = Color3.fromRGB(255, 240, 200), Count = 12, Speed = 25, Size = 1.2, Lifetime = 0.35 }
+		)
+		P.FloatText(
+			p.Position + Vector3.new(0, 2, 0),
+			"-" .. tostring(p.Amount or ""),
+			{ Color = Color3.fromRGB(255, 90, 90), Size = 3, Duration = 0.9 }
+		)
+		P.Sound("Hit", p.Position, 0.7, 0.9 + math.random() * 0.3)
+	end
+	if P.IsMe(p.Target) then
+		P.Shake(0.5, 0.25)
+		P.Vignette(Color3.fromRGB(255, 40, 40), 0.5)
+		if p.Velocity then
+			P.Knockback(p.Velocity)
+		end
+	end
+end
+
+-- A titan is knocked out.
+function Presets.KO(p, P)
+	if P.Distance(p.Position) <= FAR * 1.5 then
+		P.Pillar(p.Position, { Color = RED, Height = 60, Width = 10, Duration = 1 })
+		P.Ring(p.Position, { Color = RED, Radius = 25, Duration = 0.7 })
+		P.Burst(p.Position + Vector3.new(0, 4, 0), {
+			Color = Color3.fromRGB(220, 220, 220),
+			Count = 30,
+			Speed = 20,
+			Size = 4,
+			Lifetime = 1.4,
+			Gravity = 4,
+			LightEmission = 0,
+		})
+		P.FloatText(p.Position + Vector3.new(0, 10, 0), "K.O.!", { Color = RED, Size = 5, Duration = 1.6 })
+		P.Sound("Impact", p.Position, 1, 0.5)
+	end
+	if P.IsMe(p.Target) then
+		P.Flash(RED, 0.6, 0.3)
+	end
+end
+
+-- Match winner.
+function Presets.Victory(p, P)
+	if p.Position and P.Distance(p.Position) <= FAR * 2 then
+		P.Pillar(p.Position, { Color = GOLD, Height = 140, Width = 16, Duration = 2 })
+		P.Ring(p.Position, { Color = GOLD, Radius = 40, Duration = 1 })
+		P.Burst(p.Position + Vector3.new(0, 10, 0), { Color = GOLD, Count = 60, Speed = 40, Size = 1.6 })
+	end
+	if P.IsMe(p.Owner) then
+		P.Confetti(100, { GOLD, WHITE, Color3.fromRGB(255, 170, 0) })
+		P.Sound("Fanfare", nil, 0.9)
+	end
+end
+
+-- Moves the local player's character (dash / bounce specials).
+function Presets.Launch(p, P)
+	if p.Velocity then
+		P.Knockback(p.Velocity)
+	end
+end
+
+-- Reward received (small celebration).
+function Presets.Reward(_p, P)
+	P.Confetti(30)
+	P.Sound("Coin", nil, 0.7)
 end
 
 -- Storage lock turned on.

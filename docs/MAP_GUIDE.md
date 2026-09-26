@@ -1,41 +1,37 @@
 # Map Guide
 
-The game generates a placeholder map from code (terrain + part props). When you're ready for
-real art, build the map in Studio. **Gameplay only cares about tagged markers**, so a
-hand-built map works as long as it has them.
+The game generates **Titan Island** from code (terrain + part props). For real art, build
+the map in Studio. **Gameplay only cares about tagged markers**, so a hand-built map works as
+long as it has them.
 
 ## How it decides
 
-On server start, `MapService` checks for any part tagged `ZooPlot`.
-- **Found** → uses your map as-is.
-- **None** → runs `MapGenerator` to build the placeholder.
+On server start `MapService` looks for any part tagged `Plot`.
+- **Found** → uses your map.
+- **None** → runs `MapGenerator` (placeholder island).
 
-So: build your map inside `Workspace/Map`, add the markers below, and publish.
-(Tip: press Play, copy the generated `Workspace/Map` folder, stop, and paste it into edit mode as
-a starting point. That copies the parts and markers. Terrain doesn't copy this way; save it with
-the Terrain Editor's Region tools, or sculpt your own.)
+Tip: press Play, copy `Workspace/Map`, stop, paste it in edit mode as a starting point
+(parts and markers copy; terrain doesn't, so use the Terrain Editor's region tools for that).
 
 ## Markers (CollectionService tags)
 
-Use the **Tag Editor** in Studio (Model tab → Tag Editor), or the Properties panel → Tags.
-Markers should be invisible parts: `Transparency = 1`, `CanCollide = false`, `Anchored = true`.
+Use the **Tag Editor** (View → Tag Editor) or Properties → Tags. Marker parts should be
+invisible: `Transparency = 1`, `CanCollide = false`, `Anchored = true`.
 
 | Tag | What | Attributes |
 |---|---|---|
-| `ZooPlot` | One per zoo (need `GameConfig.Zoo.PlotCount`). The zoo is built centered on it. **Front (-Z / LookVector) faces the plaza.** | `PlotIndex` (number, 1..N) |
-| `BiomeZone` | Covers a biome's area. Used for unlocks, ambience and "which biome am I in". | `Biome` (id from Biomes.lua), optional `Radius` (round zone; otherwise the part's box is used) |
-| `FoodSpawn` | Where food grows (put it ~1.5 studs above the ground). 15–25 per biome feels good. | `Biome` |
-| `WildSpawn` | Where wild kaiju appear and wander around (40 stud radius). 4–8 per biome. | `Biome` |
-| `BiomeGate` | A solid wall across a biome's entrance. Locked players are blocked; the Unlock prompt + sign are added automatically. **Front (-Z) faces into the biome.** | `Biome` |
-| `HubSpawn` | Where players appear before being sent to their zoo. Usually a SpawnLocation. | - |
-| `MeteorZone` | Where Meteor Feast food lands. | optional `Radius` (default 60) |
+| `Plot` | One per base (need `GameConfig.Plots.Count`). The base is built centered on it. **Front (-Z) faces the arena.** Needs ~74×74 studs of flat ground. | `PlotIndex` (1..N) |
+| `Arena` | Center of the fighting area. | `Radius` (fighting circle, studs) |
+| `ArenaSpawn` | Where fighters start (at least 2; 12 for full Titan Clashes), facing the center. | — |
+| `Stands` | Where spectators are moved during a match. | — |
+| `FoodSpawn` | Where food grows (~1.5 studs above ground). 40–80 total. | — |
+| `MeteorZone` | Where Meteor Feast food lands: a ring around the part. | `Radius`, `InnerRadius` |
+| `Leaderboard` | A flat board (front face readable). | `Board` = `Trophies` / `Biggest` / `Rebirths` |
+| `HubSpawn` | Where players first appear (a SpawnLocation). | — |
 
 ## Rules of thumb
 
-- Keep biome zones from overlapping (the first match wins).
-- Players standing in a locked biome's zone get teleported outside its gate, so make sure every
-  locked biome **has a gate** and its zone doesn't cover the path leading up to it.
-- Keep food/wild spawns reachable (not on cliff tops).
-- The zoo needs about `Zoo.PlotSize` (90×90 studs) of flat ground per plot.
-- Big maps: turn on **Workspace.StreamingEnabled**. The code already handles streaming
-  (biome zones are copied to `ReplicatedStorage.MapInfo`).
+- Keep the arena flat and walled (fighters leaving `Radius` get pulled back in).
+- Keep food spawns reachable and outside the arena.
+- Bases need clear paths to the fields: stealing is the core loop.
+- Turn on **Workspace.StreamingEnabled** for big maps; the code handles it.

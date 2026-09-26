@@ -1,43 +1,46 @@
-# 🦖 Kaiju Keepers
+# ⚔️ Titan Clash
 
-Run your own **kaiju zoo**. Explore a big land of biomes, **catch wild kaiju**, find
-food to make them grow **giant**, steal food from other zoos, and fight to own the
-**Kaiju King**.
+Raise giant titans by grabbing and **stealing food**, then **pilot your titan into the arena**
+and fight other players' titans, like a monster movie. 6–12 players per server.
 
-> The name lives in one place (`src/shared/Config/GameConfig.lua`), so it's easy to change.
+> Name, balance and content all live in `src/shared/Config/`. The full game plan is in
+> **[docs/PLAN.md](docs/PLAN.md)**.
 
 ## ▶️ Play it in Roblox Studio
 
-**Easiest:** download [`build/KaijuKeepers.rbxlx`](build/KaijuKeepers.rbxlx), double-click it and
-press **Play (F5)**. The map is generated when the server starts, so give it a few seconds.
+**Easiest:** download [`build/TitanClash.rbxlx`](build/TitanClash.rbxlx), double-click it,
+press **Play (F5)**. The island is generated when the server starts (a few seconds).
 
-- Test with several players (for stealing): **Test → Clients and Servers → 2 Players → Start**.
-- Before publishing: **Game Settings → Security → Enable Studio Access to API Services** (saving),
-  and **Max Players = 8** (one zoo per player).
+- **Test battles alone:** open ⚔️ Battle → **Practice vs Bot**.
+- **Test with friends / stealing / duels:** Test tab → Clients and Servers → **2 Players** → Start.
+- **Admin panel:** in Studio everyone is an admin. Open 🛠️ Admin for cash, titans, levels, events.
+- Before publishing, follow **[docs/LAUNCH.md](docs/LAUNCH.md)**.
 
-**While developing (live sync):** install [Aftman](https://github.com/LPGhatguy/aftman), run
-`aftman install`, then `rojo serve`, and click **Connect** in the Rojo Studio plugin.
+**Live sync while coding:** install [Aftman](https://github.com/LPGhatguy/aftman) → `aftman install`
+→ `rojo serve` → Rojo plugin in Studio → **Connect**.
 
-## 🎮 Gameplay (v0.2: Big Land)
+## 🎮 The game
 
-| | |
+| System | What it is |
 |---|---|
-| **Big land** | Zoo hub in the middle + 6 biomes: 🌲 Forest, 🏖️ Beach, ❄️ Snow Peaks, 🌋 Volcano, 💎 Crystal Caves, ⭐ Star Island |
-| **Explore** | Each biome grows its own food, which regrows over time. Biomes unlock with cash and rebirths |
-| **Catch** | Wild kaiju roam each biome. Hold **E** to catch (rarer = longer + may run away). Rare spawns are announced server-wide |
-| **Feed & grow** | Kaiju level up and physically **grow**. Each kaiju has **favorite foods** (2x XP ❤️) |
-| **Mutations** | Special foods mutate kaiju (Lava, Crystal, Shadow, Golden, Rainbow): big income boost + auras |
-| **Steal** | Steal food from other zoos' storage and run home. Owners take it back; guard kaiju knock thieves away |
-| **Kaiju King** | The biggest kaiju on the server gets a crown and +50% income |
-| **Rebirth** | Reset for permanent bonuses: income, enclosures, storage. Unlocks later areas |
-| **Events** | ☄️ Meteor Feast, 🩸 Blood Moon |
+| **Titans** | 13 species, 6 rarities, battle stats (HP / Attack / Speed) and a special move per body type |
+| **Food & stealing** | Food grows in the fields around the arena. Steal from other bases, carry it home. Owners take it back; guard titans knock thieves away |
+| **Growth** | Feeding levels titans up: bigger, stronger, more income. Favorite foods = 2× XP |
+| **Mutations** | Lava, Crystal, Shadow, Golden, Rainbow: more income, better stats, glowing auras |
+| **Battles** | **Pilot your titan** in the arena. Duels (1v1, winner takes 15 % of the loser's food), **Titan Clash** free-for-all event, **Practice vs Bot** |
+| **Progress** | Eggs, rebirth, trophies, Titan King 👑, Champion 🏅, global leaderboards |
+| **Retention** | Tutorial with arrows, daily rewards (7-day streak), daily quests, offline earnings, Index book with milestones, codes, boosts, friend boost |
+| **Store** | Game passes (2× Cash, VIP, Big Storage, Extra Pens) + products (cash, potions, Star Food). Set IDs in `Config/Store.lua` |
+| **Events** | Titan Clash, Meteor Feast, Blood Moon |
 
-**Controls:** E = feed / catch / steal / take back / unlock · hold F = sell · left menu = Eggs, Food, Areas, Rebirth, Home, Lock · bottom bar = pick food.
+**Controls:** E = feed / steal / take back · G = challenge (at a base entrance) · hold F = sell ·
+in battle: **Click / F = Attack, Q = Special** (or the on-screen buttons on mobile).
 
 ## 🧱 For developers
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: how the code is organized + recipes for adding content and systems
-- **[docs/MAP_GUIDE.md](docs/MAP_GUIDE.md)**: how to replace the generated map with a hand-built one
-- **[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)**: game plan and update roadmap
+- **[docs/PLAN.md](docs/PLAN.md)**: the full game plan (systems, numbers, save data)
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: how the code is organized + recipes for adding things
+- **[docs/MAP_GUIDE.md](docs/MAP_GUIDE.md)**: replacing the generated island with a hand-built map
+- **[docs/LAUNCH.md](docs/LAUNCH.md)**: publishing checklist
 
-Run every check (format, build, type check, tests) with `scripts/check.sh`. CI runs the same on every push.
+`scripts/check.sh` runs formatting, build, type check and **49 unit tests**. CI runs it on every push.

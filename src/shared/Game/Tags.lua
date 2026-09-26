@@ -6,15 +6,17 @@
 ]]
 
 return {
-	ZooPlot = "ZooPlot", -- anchor part per zoo. Attribute PlotIndex (number). Front (-Z) faces the plaza.
-	BiomeZone = "BiomeZone", -- invisible part covering a biome. Attribute Biome, optional Radius (round zone).
-	FoodSpawn = "FoodSpawn", -- where food appears. Attribute Biome.
-	WildSpawn = "WildSpawn", -- where wild kaiju appear. Attribute Biome.
-	BiomeGate = "BiomeGate", -- barrier at a biome entrance. Attribute Biome.
-	HubSpawn = "HubSpawn", -- where players appear if they have no zoo.
+	Plot = "Plot", -- anchor part per base. Attribute PlotIndex (number). Front (-Z) faces the arena.
+	FoodSpawn = "FoodSpawn", -- where food grows.
+	Arena = "Arena", -- arena center part. Attribute Radius (fighting area).
+	ArenaSpawn = "ArenaSpawn", -- fighter start points (at least 2, around the arena edge).
+	Stands = "Stands", -- where spectators get moved during a match.
+	HubSpawn = "HubSpawn", -- where players appear before being sent to their base.
 	MeteorZone = "MeteorZone", -- where Meteor Feast food lands. Optional Radius.
+	Leaderboard = "Leaderboard", -- board part. Attribute Board = "Trophies" | "Biggest" | "Rebirths".
 
 	-- Runtime tags
 	AnimatedMutation = "AnimatedMutation",
-	WildCreature = "WildCreature",
+	BaseTitan = "BaseTitan",
+	FoodPickup = "FoodPickup",
 }

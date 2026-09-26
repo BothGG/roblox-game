@@ -20,7 +20,7 @@ echo "== format"
 
 echo "== build"
 mkdir -p build
-"$ROJO" build default.project.json -o build/KaijuKeepers.rbxlx
+"$ROJO" build default.project.json -o build/TitanClash.rbxlx
 
 echo "== type check"
 "$ROJO" sourcemap default.project.json -o sourcemap.json

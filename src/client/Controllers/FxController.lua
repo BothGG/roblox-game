@@ -1,6 +1,6 @@
 --[[
 	FxController: plays effects the server asks for, and animates
-	"AnimatedMutation" kaiju (e.g. Rainbow) on this client.
+	"AnimatedMutation" titan (e.g. Rainbow) on this client.
 ]]
 
 local CollectionService = game:GetService("CollectionService")

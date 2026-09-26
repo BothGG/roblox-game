@@ -1,6 +1,6 @@
 --[[
-	RebirthService: reset kaiju, cash and food for a permanent bonus
-	(+income, +pen slots, +storage).
+	RebirthService: reset titans, cash and food for a permanent bonus
+	(+income, +pens, +storage). Trophies and the Index are kept.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,11 +11,13 @@ local CreatureMath = require(Shared.Game.CreatureMath)
 local Format = require(Shared.Lib.Format)
 local Net = require(Shared.Net)
 
+local GameEvents = require(game:GetService("ServerScriptService"):WaitForChild("Server").Modules.GameEvents)
+
 local RebirthService = {
 	Priority = 55,
 }
 
-local Data, CreatureService, Food, Steal, Fx, Zoo
+local Data, CreatureService, Food, Steal, Fx, Base, Battle
 
 function RebirthService:Init(registry)
 	Data = registry.DataService
@@ -23,7 +25,8 @@ function RebirthService:Init(registry)
 	Food = registry.FoodService
 	Steal = registry.StealService
 	Fx = registry.FxService
-	Zoo = registry.ZooService
+	Base = registry.BaseService
+	Battle = registry.BattleService
 end
 
 function RebirthService:Start()
@@ -37,6 +40,10 @@ function RebirthService:Rebirth(player: Player)
 	if not data then
 		return
 	end
+	if Battle:IsFighting(player) then
+		Net.Notify(player, "You can't rebirth during a battle!")
+		return
+	end
 	local cost = CreatureMath.RebirthCost(data.Rebirths)
 	if data.Cash < cost then
 		Net.Notify(player, "You need " .. Format.Money(cost) .. " to rebirth!", Color3.fromRGB(255, 90, 90))
@@ -48,7 +55,7 @@ function RebirthService:Rebirth(player: Player)
 	data.Food = Data.DeepCopy(GameConfig.StartingFood)
 	data.Rebirths += 1
 
-	local plot = Zoo:GetPlot(player)
+	local plot = Base:GetPlot(player)
 	Fx:PlayAll("Rebirth", {
 		Position = plot and plot.CFrame.Position,
 		Owner = player.UserId,
@@ -59,8 +66,9 @@ function RebirthService:Rebirth(player: Player)
 		Color3.fromRGB(190, 130, 255)
 	)
 
+	GameEvents.Fire(player, "Rebirthed", { Rebirths = data.Rebirths })
 	CreatureService:Add(player, GameConfig.StarterCreature)
-	Zoo:RefreshEnclosures(player)
+	Base:RefreshPens(player)
 	Food:RefreshStorage(player)
 	Data:Changed(player)
 end

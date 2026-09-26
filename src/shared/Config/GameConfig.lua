@@ -5,19 +5,18 @@
 
 local GameConfig = {
 	-- Display names. Rename the game or the creatures in one place.
-	GameName = "Kaiju Keepers",
-	CreatureName = "Kaiju",
-	CreatureNamePlural = "Kaiju",
+	GameName = "Titan Clash",
+	CreatureName = "Titan",
+	CreatureNamePlural = "Titans",
 
 	-- Starting state for a new player (and after a rebirth)
 	StartingCash = 150,
 	StartingFood = { Meat = 5 },
 	StarterCreature = "Rex",
-	StartingBiomes = { "Forest" }, -- biomes unlocked for free
 
-	-- Pen / storage
+	-- Pens (titans per base) / food storage
 	StartingSlots = 3,
-	MaxSlots = 12,
+	MaxSlots = 8, -- pens per base (the base has 8 pen spots)
 	SlotsPerRebirth = 1,
 	StorageCap = 50,
 	StorageCapPerRebirth = 10,
@@ -26,7 +25,7 @@ local GameConfig = {
 	MaxLevel = 100,
 	ScalePerLevel = 0.12, -- Lv 100 = ~13x bigger than Lv 1
 	IncomePerLevel = 0.25, -- each level adds +25% of base income
-	SellSeconds = 40, -- selling gives this many seconds of the kaiju's income
+	SellSeconds = 40, -- selling gives this many seconds of the titan's income
 	FavoriteFoodBonus = 2, -- XP multiplier when fed a food in its Diet
 
 	-- Hatching
@@ -38,40 +37,30 @@ local GameConfig = {
 	RebirthCostGrowth = 4,
 	RebirthIncomeBonus = 0.5, -- +50% income per rebirth
 
-	-- Kaiju King (biggest kaiju on the server)
+	-- Titan King (biggest titan on the server)
 	KingIncomeBonus = 0.5,
 	KingMinLevel = 5,
 	KingCheckInterval = 3,
 
-	-- Map layout (used by the map generator; a hand-built map ignores these)
+	-- Island layout (used by the map generator; a hand-built map ignores these)
 	Map = {
 		Seed = 2026, -- change for a different random layout of props/spawns
-		Size = 1700, -- the whole land is Size x Size studs
-		HubRadius = 250, -- the zoo area in the middle
-		BiomeDistance = 600, -- how far biome centers are from the middle
-		BiomeRadius = 190,
+		IslandRadius = 330,
+		ArenaRadius = 95,
+		FieldInner = 120, -- food fields ring
+		FieldOuter = 195,
 	},
 
-	Zoo = {
-		PlotCount = 8, -- set the place's Max Players to this number
-		RingRadius = 165,
-		PlotSize = 90,
+	Plots = {
+		Count = 12, -- set the place's Max Players to this number (6 also works)
+		RingRadius = 262,
+		Size = 74,
 	},
 
 	Food = {
+		FieldSpawns = 60, -- food spawn spots in the fields
 		RespawnTime = { Common = 20, Rare = 35, Epic = 60, Legendary = 120, Mythic = 300, Secret = 600 },
 	},
-
-	Wild = {
-		WanderRadius = 40,
-		MoveSpeed = 8, -- studs per second
-		RespawnDelay = 15, -- seconds between spawn checks per biome
-		Lifetime = { Min = 180, Max = 300 }, -- wild kaiju wander off after this
-		MutationChance = 0.02, -- chance a wild kaiju spawns already mutated
-		CatchDistance = 20, -- server-side distance check for catching
-	},
-
-	BiomeCheckInterval = 1, -- how often the server checks players aren't in locked biomes
 
 	Steal = {
 		HoldTime = 1.5,
@@ -85,18 +74,63 @@ local GameConfig = {
 		MaxGuardChance = 0.6,
 	},
 
+	Battle = {
+		Countdown = 3,
+		MaxDuration = 90,
+		ResultsTime = 4,
+		RequestTimeout = 15,
+		ChallengeCooldown = 10, -- seconds between challenges per player
+		AttackCooldown = 0.7,
+		AttackRange = 8, -- + titan size bonus (see shared/Game/Battle.lua)
+		MaxSpeed = 34,
+		-- Duel rewards
+		WinTrophies = 10,
+		LoseTrophies = 5,
+		WinCashSeconds = 60, -- seconds of the winner's income
+		WinCashBonus = 500,
+		WinFoodShare = 0.15, -- winner takes this share of the loser's food
+		-- Titan Clash (free-for-all event)
+		ClashJoinTime = 20,
+		ClashWinTrophies = 25,
+		ClashWinCashSeconds = 180,
+		ClashWinFood = { StarFood = 1 },
+		ClashParticipateCashSeconds = 30,
+	},
+
 	Events = {
-		FirstDelay = 180,
-		Interval = 420,
+		FirstDelay = 150,
+		Interval = 300,
 		MeteorFoodCount = 30,
 		BloodMoonDuration = 90,
 		BloodMoonGrowthMult = 2,
 	},
 
-	Data = {
-		StoreName = "KaijuKeepers_v1",
-		AutosaveInterval = 120,
+	Offline = {
+		MinSeconds = 60,
+		MaxSeconds = 8 * 3600,
+		Rate = 0.25,
+		VipRate = 0.5,
 	},
+
+	Social = {
+		FriendBoost = 0.1, -- +10% income per friend in the server
+		MaxFriendBoost = 0.5,
+	},
+
+	Data = {
+		StoreName = "TitanClash_v1",
+		AutosaveInterval = 120,
+		MaxReceipts = 100, -- purchase receipts remembered per player
+	},
+
+	Leaderboards = {
+		RefreshInterval = 90,
+		Size = 10,
+	},
+
+	-- Players who can use the admin panel (user ids). The game's creator and
+	-- anyone testing in Studio are always admins.
+	Admins = {},
 
 	-- Removes the default "Baseplate" part so the generated map is used.
 	ReplaceBaseplate = true,

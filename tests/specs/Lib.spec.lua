@@ -3,7 +3,6 @@ return function(t)
 	local Signal = t.require(t.Shared.Lib.Signal)
 	local Trove = t.require(t.Shared.Lib.Trove)
 	local WeightedRandom = t.require(t.Shared.Lib.WeightedRandom)
-	local Zones = t.require(t.Shared.Game.Zones)
 
 	t.test("Guard rejects bad client input", function()
 		t.expect(Guard.Check("Meat", "string")).toBe(true)
@@ -84,13 +83,5 @@ return function(t)
 		t.expect(WeightedRandom.Pick({}, function()
 			return 1
 		end)).toBe(nil)
-	end)
-
-	t.test("round zones contain points by XZ distance", function()
-		local zone = { Biome = "Forest", Center = Vector3.new(100, 0, 0), Radius = 50 }
-		t.expect(Zones.Contains(zone, Vector3.new(140, 999, 0))).toBe(true)
-		t.expect(Zones.Contains(zone, Vector3.new(160, 0, 0))).toBe(false)
-		t.expect(Zones.Find({ zone }, Vector3.new(100, 0, 49))).toBe("Forest")
-		t.expect(Zones.Find({ zone }, Vector3.new(0, 0, 0))).toBe(nil)
 	end)
 end
