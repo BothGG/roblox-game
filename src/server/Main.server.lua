@@ -1,79 +1,60 @@
 --[[
-	Server entry point. Loads every service, then handles players.
+	Server entry point.
 
-	Service pattern (see docs/ARCHITECTURE.md):
-	  Service:Init(services)  -- grab other services, no yielding
-	  Service:Start()         -- start loops / connect remotes
-	  Service:OnPlayerReady(player) / :OnPlayerRemoving(player)  -- optional
+	1. Validates all config files (content mistakes show up in Output).
+	2. Loader finds every "*Service" module in Services/ and runs
+	   Init(registry) then Start(), ordered by each service's Priority.
+	3. Player lifecycle:
+	     join  -> DataService:Load -> ZooService:Assign -> OnPlayerReady(player) on every service
+	     leave -> OnPlayerRemoving(player) on every service (reverse order) -> save & release
+
+	See docs/ARCHITECTURE.md.
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ServicesFolder = script.Parent:WaitForChild("Services")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local ConfigValidator = require(Shared.Game.ConfigValidator)
+local Loader = require(Shared.Lib.Loader)
+local Log = require(Shared.Lib.Log)
 
--- Order matters: services start in this order.
-local ORDER = {
-	"DataService",
-	"FxService",
-	"WorldService",
-	"FoodService",
-	"CreatureService",
-	"KingService",
-	"StealService",
-	"EggService",
-	"RebirthService",
-	"EventService",
-}
+local log = Log.new("Main")
 
-local services = {}
-for _, name in ORDER do
-	services[name] = require(ServicesFolder:WaitForChild(name))
+local configErrors = ConfigValidator.Validate()
+for _, message in configErrors do
+	log:Error("CONFIG:", message)
 end
-for _, name in ORDER do
-	local service = services[name]
-	if service.Init then
-		service:Init(services)
-	end
-end
-for _, name in ORDER do
-	local service = services[name]
-	if service.Start then
-		service:Start()
-	end
+
+local registry, ordered = Loader.Boot(script.Parent:WaitForChild("Services"), "Service")
+local Data = registry.DataService
+local Zoo = registry.ZooService
+
+local reversed = table.clone(ordered)
+for i = 1, #reversed // 2 do
+	reversed[i], reversed[#reversed - i + 1] = reversed[#reversed - i + 1], reversed[i]
 end
 
 local function onPlayerAdded(player: Player)
-	local data = services.DataService:Load(player)
+	local data = Data:Load(player)
 	if not data or not player.Parent then
 		return
 	end
-	local plot = services.WorldService:Assign(player)
-	if not plot then
+	if not Zoo:Assign(player) then
 		player:Kick("This server is full. Please join another one!")
 		return
 	end
-	for _, name in ORDER do
-		local service = services[name]
-		if service.OnPlayerReady then
-			service:OnPlayerReady(player)
-		end
-	end
-	services.DataService:Changed(player)
+	Loader.Each(ordered, "OnPlayerReady", player)
+	Data:Changed(player)
 end
 
 local function onPlayerRemoving(player: Player)
-	if not services.DataService:Get(player) then
+	if not Data:IsLoaded(player) then
 		return
 	end
-	-- Reverse order, DataService last so it saves the final state.
-	for i = #ORDER, 1, -1 do
-		local service = services[ORDER[i]]
-		if service.OnPlayerRemoving and service ~= services.DataService then
-			service:OnPlayerRemoving(player)
-		end
-	end
-	services.WorldService:Release(player)
-	services.DataService:Release(player)
+	Loader.Each(reversed, "OnPlayerRemoving", player)
+	Zoo:Release(player)
+	Data:Release(player)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

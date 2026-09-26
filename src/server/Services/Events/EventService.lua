@@ -14,14 +14,16 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local Net = require(Shared.Net)
 
-local EventService = {}
+local EventService = {
+	Priority = 60,
+}
 
-local Food, World
+local Food, Zoo
 
 local EVENTS = {}
 
 function EVENTS.MeteorFeast()
-	Net.Announce("☄️ METEOR FEAST", "Food is falling from the sky! Run to the middle!", Color3.fromRGB(255, 150, 50))
+	Net.Announce("☄️ METEOR FEAST", "Food is falling on the Forest! Run!", Color3.fromRGB(255, 150, 50))
 	task.wait(3)
 	Food:MeteorShower(GameConfig.Events.MeteorFoodCount)
 	task.wait(GameConfig.Events.MeteorFoodCount * 0.15 + 3)
@@ -45,7 +47,7 @@ function EVENTS.BloodMoon()
 	local oldClock = Lighting.ClockTime
 	TweenService:Create(tint, info, { TintColor = Color3.fromRGB(255, 150, 150) }):Play()
 	TweenService:Create(Lighting, info, { ClockTime = 0 }):Play()
-	for _, plot in World.Plots do
+	for _, plot in Zoo.Plots do
 		plot.StealPrompt.HoldDuration = GameConfig.Steal.HoldTime / 2
 	end
 
@@ -54,7 +56,7 @@ function EVENTS.BloodMoon()
 	Workspace:SetAttribute("GrowthMult", nil)
 	TweenService:Create(tint, info, { TintColor = Color3.new(1, 1, 1) }):Play()
 	TweenService:Create(Lighting, info, { ClockTime = oldClock }):Play()
-	for _, plot in World.Plots do
+	for _, plot in Zoo.Plots do
 		plot.StealPrompt.HoldDuration = GameConfig.Steal.HoldTime
 	end
 	Net.Announce("🌅 The Blood Moon is over", "", Color3.fromRGB(255, 200, 150))
@@ -62,9 +64,9 @@ function EVENTS.BloodMoon()
 	tint:Destroy()
 end
 
-function EventService:Init(services)
-	Food = services.FoodService
-	World = services.WorldService
+function EventService:Init(registry)
+	Food = registry.FoodService
+	Zoo = registry.ZooService
 end
 
 function EventService:Start()

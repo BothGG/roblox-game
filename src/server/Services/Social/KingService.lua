@@ -7,24 +7,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
-local CreatureMath = require(Shared.CreatureMath)
+local CreatureMath = require(Shared.Game.CreatureMath)
 local Net = require(Shared.Net)
 
 local GOLD = Color3.fromRGB(255, 200, 40)
 
 local KingService = {
+	Priority = 30,
 	Current = nil :: { Player: Player, Uid: string }?,
 	_crown = nil :: Model?,
 	_highlight = nil :: Highlight?,
 }
 
-local Data, Creatures, Fx, World
+local Data, Creatures, Fx, Map
 
-function KingService:Init(services)
-	Data = services.DataService
-	Creatures = services.CreatureService
-	Fx = services.FxService
-	World = services.WorldService
+function KingService:Init(registry)
+	Data = registry.DataService
+	Creatures = registry.CreatureService
+	Fx = registry.FxService
+	Map = registry.MapService
 end
 
 function KingService:Start()
@@ -59,7 +60,8 @@ local function buildCrown(size: number): Model
 		local angle = i / 5 * math.pi * 2
 		local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * size * 0.4
 		piece(Vector3.new(size * 0.18, size * 0.45, size * 0.18), CFrame.new(offset + Vector3.new(0, size * 0.35, 0)))
-		local jewel = piece(Vector3.one * size * 0.16, CFrame.new(offset + Vector3.new(0, size * 0.62, 0)), Enum.PartType.Ball)
+		local jewel =
+			piece(Vector3.one * size * 0.16, CFrame.new(offset + Vector3.new(0, size * 0.62, 0)), Enum.PartType.Ball)
 		jewel.Material = Enum.Material.Neon
 		jewel.Color = Color3.fromRGB(255, 60, 90)
 	end
@@ -108,7 +110,12 @@ function KingService:Evaluate()
 			local model = Creatures:GetModel(best.Player, best.Uid)
 			Net.Announce(
 				"👑 NEW " .. string.upper(GameConfig.CreatureName) .. " KING",
-				string.format("%s's %s (Lv.%d)", best.Player.DisplayName, CreatureMath.DisplayName(creature), creature.Level),
+				string.format(
+					"%s's %s (Lv.%d)",
+					best.Player.DisplayName,
+					CreatureMath.DisplayName(creature),
+					creature.Level
+				),
 				GOLD
 			)
 			Fx:PlayAll("NewKing", {
@@ -137,16 +144,19 @@ function KingService:UpdateCrown()
 	end
 	local extents = model:GetExtentsSize()
 	local size = math.clamp(extents.X * 0.4, 2, 30)
-	if not self._crown or math.abs(((self._crown.PrimaryPart :: BasePart).Size.Y) - size) > 0.01 then
+	if not self._crown or math.abs((self._crown.PrimaryPart :: BasePart).Size.Y - size) > 0.01 then
 		if self._crown then
 			self._crown:Destroy()
 		end
 		self._crown = buildCrown(size)
 	end
 	local crown = self._crown :: Model
-	crown.Parent = World.Folder
+	crown.Parent = Map.Map or workspace
 	-- The crown's base is a cylinder lying on its side, so rotate it upright.
-	crown:PivotTo(CFrame.new(model:GetPivot().Position + Vector3.new(0, extents.Y + size * 0.3, 0)) * CFrame.Angles(0, 0, math.rad(90)))
+	crown:PivotTo(
+		CFrame.new(model:GetPivot().Position + Vector3.new(0, extents.Y + size * 0.3, 0))
+			* CFrame.Angles(0, 0, math.rad(90))
+	)
 
 	if not self._highlight or self._highlight.Parent ~= model then
 		if self._highlight then

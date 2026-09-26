@@ -1,6 +1,7 @@
 --[[
-	HatchReveal: the egg-opening animation.
-	Egg shakes (faster for rarer kaiju) -> flash -> card with the result.
+	HatchReveal: the egg-opening / catch reveal.
+	Egg: shakes (more for rarer kaiju) -> flash -> card with the result.
+	Catch (info.Source == "Catch"): straight to the card, titled "CAUGHT!".
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,7 +12,7 @@ local Creatures = require(Shared.Config.Creatures)
 local Eggs = require(Shared.Config.Eggs)
 local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
-local CreatureMath = require(Shared.CreatureMath)
+local CreatureMath = require(Shared.Game.CreatureMath)
 local Fx = require(Shared.Fx)
 local Theme = require(script.Parent.Theme)
 
@@ -50,6 +51,7 @@ local function play(info)
 	})
 	Theme.AutoScale(holder)
 
+	local isCatch = info.Source == "Catch"
 	local eggFrame = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
@@ -59,7 +61,7 @@ local function play(info)
 	}, { Theme.Corner(75), Theme.Stroke(Color3.new(0, 0, 0), 4) })
 
 	-- Shake: more shakes for rarer results builds suspense.
-	local shakes = 2 + rarity.Order
+	local shakes = if isCatch then 0 else 2 + rarity.Order
 	for i = 1, shakes do
 		local speed = math.max(0.05, 0.16 - i * 0.012)
 		local angle = if i % 2 == 0 then 15 else -15
@@ -81,7 +83,7 @@ local function play(info)
 	Theme.Label({
 		Position = UDim2.fromOffset(10, 16),
 		Size = UDim2.new(1, -20, 0, 34),
-		Text = string.upper(def.Rarity),
+		Text = (if isCatch then "🎯 CAUGHT!  " else "") .. string.upper(def.Rarity),
 		TextColor3 = rarity.Color,
 		Parent = card,
 	})

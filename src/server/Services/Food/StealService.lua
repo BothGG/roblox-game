@@ -16,8 +16,8 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
 local Foods = require(Shared.Config.Foods)
-local CreatureMath = require(Shared.CreatureMath)
-local WeightedRandom = require(Shared.Util.WeightedRandom)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local WeightedRandom = require(Shared.Lib.WeightedRandom)
 local Net = require(Shared.Net)
 
 local RED = Color3.fromRGB(255, 80, 80)
@@ -35,20 +35,21 @@ type Carry = {
 }
 
 local StealService = {
+	Priority = 35,
 	Carriers = {} :: { [Player]: Carry },
 }
 
-local Data, World, Fx, Food
+local Data, Zoo, Fx, Food
 
-function StealService:Init(services)
-	Data = services.DataService
-	World = services.WorldService
-	Fx = services.FxService
-	Food = services.FoodService
+function StealService:Init(registry)
+	Data = registry.DataService
+	Zoo = registry.ZooService
+	Fx = registry.FxService
+	Food = registry.FoodService
 end
 
 function StealService:Start()
-	for _, plot in World.Plots do
+	for _, plot in Zoo.Plots do
 		plot.StealPrompt.Triggered:Connect(function(thief)
 			self:TryStart(thief, plot)
 		end)
@@ -268,7 +269,7 @@ function StealService:_tick()
 			self:ReturnFood(thief, "died")
 			continue
 		end
-		local home = World:GetPlot(thief)
+		local home = Zoo:GetPlot(thief)
 		if home and (root.Position - home.Crate.Position).Magnitude <= GameConfig.Steal.DepositDistance then
 			self:_deposit(thief, home)
 			continue
@@ -277,7 +278,7 @@ function StealService:_tick()
 		if
 			plot.Owner == carry.Victim
 			and t - carry.LastGuardCheck >= GameConfig.Steal.GuardCheckInterval
-			and World:IsInside(plot, root.Position)
+			and Zoo:IsInside(plot, root.Position)
 		then
 			carry.LastGuardCheck = t
 			if math.random() < self:_guardChance(carry.Victim) then

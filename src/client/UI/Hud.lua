@@ -1,18 +1,21 @@
 --[[
-	Hud: always-on-screen UI. Cash, income, menu buttons, food bar,
-	storage/pen info, king badge, event timer and "carrying" banner.
+	Hud: always-on-screen UI. Cash, income, current area, menu buttons,
+	food bar, storage/zoo info, king badge, event timer, "carrying" banner
+	and the big area-name banner when you walk into a biome.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Biomes = require(Shared.Config.Biomes)
 local Foods = require(Shared.Config.Foods)
 local GameConfig = require(Shared.Config.GameConfig)
-local CreatureMath = require(Shared.CreatureMath)
-local Format = require(Shared.Util.Format)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Format = require(Shared.Lib.Format)
 local Net = require(Shared.Net)
 local Fx = require(Shared.Fx)
 local Theme = require(script.Parent.Theme)
@@ -59,14 +62,24 @@ local function buildTop(gui: ScreenGui)
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 1, 6),
 		Size = UDim2.fromOffset(340, 26),
-		Text = "👑 You own the " .. GameConfig.CreatureName .. " King! +" .. math.round(GameConfig.KingIncomeBonus * 100) .. "% income",
+		Text = "👑 You own the " .. GameConfig.CreatureName .. " King! +" .. math.round(
+			GameConfig.KingIncomeBonus * 100
+		) .. "% income",
 		TextColor3 = Theme.Gold,
 		Visible = false,
 		Parent = top,
 	})
-	refs.Event = Theme.Label({
+	refs.Area = Theme.Label({
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 1, 34),
+		Size = UDim2.fromOffset(300, 24),
+		Text = "📍 Zoo",
+		TextColor3 = Theme.Text,
+		Parent = top,
+	})
+	refs.Event = Theme.Label({
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 1, 60),
 		Size = UDim2.fromOffset(300, 24),
 		Text = "",
 		TextColor3 = Color3.fromRGB(255, 140, 120),
@@ -78,7 +91,7 @@ local function buildMenu(gui: ScreenGui, shop)
 	local menu = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 10, 0.5, 0),
-		Size = UDim2.fromOffset(130, 290),
+		Size = UDim2.fromOffset(130, 430),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	}, {
@@ -86,18 +99,48 @@ local function buildMenu(gui: ScreenGui, shop)
 	})
 	Theme.AutoScale(menu)
 	local buttons = {
-		{ "🥚 Eggs", Theme.Gold, function()
-			shop.Open("Eggs")
-		end },
-		{ "🍖 Food", Theme.Red, function()
-			shop.Open("Food")
-		end },
-		{ "🌟 Rebirth", Theme.Purple, function()
-			shop.Open("Rebirth")
-		end },
-		{ "🔒 Lock", Theme.Blue, function()
-			Net.Get("LockStorage"):FireServer()
-		end },
+		{
+			"🥚 Eggs",
+			Theme.Gold,
+			function()
+				shop.Open("Eggs")
+			end,
+		},
+		{
+			"🍖 Food",
+			Theme.Red,
+			function()
+				shop.Open("Food")
+			end,
+		},
+		{
+			"🗺️ Areas",
+			Theme.Green,
+			function()
+				shop.Open("Areas")
+			end,
+		},
+		{
+			"🌟 Rebirth",
+			Theme.Purple,
+			function()
+				shop.Open("Rebirth")
+			end,
+		},
+		{
+			"🏠 Home",
+			Color3.fromRGB(120, 120, 140),
+			function()
+				Net.Send("TeleportHome")
+			end,
+		},
+		{
+			"🔒 Lock",
+			Theme.Blue,
+			function()
+				Net.Send("LockStorage")
+			end,
+		},
 	}
 	for i, info in buttons do
 		local button = Theme.Button({
@@ -108,7 +151,7 @@ local function buildMenu(gui: ScreenGui, shop)
 			Parent = menu,
 		})
 		button.Activated:Connect(info[3])
-		if i == 4 then
+		if i == #buttons then
 			refs.LockButton = button
 		end
 	end
@@ -118,7 +161,7 @@ local function buildFoodBar(gui: ScreenGui)
 	local bottom = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -12),
-		Size = UDim2.fromOffset(620, 120),
+		Size = UDim2.fromOffset(800, 116),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	})
@@ -130,7 +173,7 @@ local function buildFoodBar(gui: ScreenGui)
 	})
 	local bar = Theme.New("Frame", {
 		Position = UDim2.fromOffset(0, 32),
-		Size = UDim2.new(1, 0, 0, 84),
+		Size = UDim2.new(1, 0, 0, 80),
 		BackgroundColor3 = Theme.Background,
 		BackgroundTransparency = 0.2,
 		Parent = bottom,
@@ -147,7 +190,7 @@ local function buildFoodBar(gui: ScreenGui)
 	for i, id in Foods.Order do
 		local def = Foods[id]
 		local button = Theme.Button({
-			Size = UDim2.fromOffset(92, 70),
+			Size = UDim2.fromOffset(80, 66),
 			Text = "",
 			BackgroundColor3 = Theme.Panel,
 			LayoutOrder = i,
@@ -177,7 +220,7 @@ local function buildFoodBar(gui: ScreenGui)
 			Parent = button,
 		})
 		button.Activated:Connect(function()
-			Net.Get("SelectFood"):FireServer(id)
+			Net.Send("SelectFood", id)
 			if state then
 				state.SelectedFood = id
 				Hud.RefreshFoodBar()
@@ -217,6 +260,15 @@ function Hud.Start(shop)
 	buildMenu(gui, shop)
 	buildFoodBar(gui)
 	buildCarrying(gui)
+	refs.AreaBanner = Theme.Label({
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.3),
+		Size = UDim2.fromOffset(600, 70),
+		Text = "",
+		TextTransparency = 1,
+		Parent = gui,
+	})
+	Theme.AutoScale(refs.AreaBanner)
 
 	-- Timers (event countdown, lock cooldown) update every frame-ish.
 	local elapsed = 0
@@ -278,7 +330,7 @@ function Hud.Update(snapshot)
 	lastCash = snapshot.Cash
 
 	refs.Info.Text = string.format(
-		"📦 Food %d/%d   •   🐾 %s %d/%d   •   🌟 Rebirth %d",
+		"📦 Food %d/%d   •   🏠 %s %d/%d   •   🌟 Rebirth %d",
 		CreatureMath.CountFood(snapshot.Food),
 		snapshot.StorageCap,
 		GameConfig.CreatureNamePlural,
@@ -288,6 +340,32 @@ function Hud.Update(snapshot)
 	)
 	Hud.RefreshFoodBar()
 	Hud.RefreshTimers()
+end
+
+-- Called when the player walks into a different area.
+function Hud.SetBiome(biomeId: string?)
+	local biome = biomeId and Biomes[biomeId]
+	refs.Area.Text = if biome then "📍 " .. biome.Icon .. " " .. biome.Name else "📍 Zoo"
+	if not biome then
+		return
+	end
+	local banner = refs.AreaBanner :: TextLabel
+	banner.Text = biome.Icon .. " " .. biome.Name
+	banner.TextColor3 = biome.Color
+	banner.TextTransparency = 0
+	local stroke = banner:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		stroke.Transparency = 0
+	end
+	Fx.Primitives.Pop(banner, 0.3)
+	task.delay(2, function()
+		if banner.Text == biome.Icon .. " " .. biome.Name then
+			TweenService:Create(banner, TweenInfo.new(0.8), { TextTransparency = 1 }):Play()
+			if stroke then
+				TweenService:Create(stroke, TweenInfo.new(0.8), { Transparency = 1 }):Play()
+			end
+		end
+	end)
 end
 
 return Hud

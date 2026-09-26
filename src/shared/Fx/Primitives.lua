@@ -22,7 +22,13 @@ local Primitives = {}
 
 local FONT = Enum.Font.FredokaOne
 
-local function tween(instance: Instance, time: number, props: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
+local function tween(
+	instance: Instance,
+	time: number,
+	props: { [string]: any },
+	style: Enum.EasingStyle?,
+	direction: Enum.EasingDirection?
+)
 	local t = TweenService:Create(
 		instance,
 		TweenInfo.new(time, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out),
@@ -142,7 +148,10 @@ function Primitives.Burst(position: Vector3, opts: BurstOptions?)
 end
 
 -- A flat shockwave that expands outward and fades.
-function Primitives.Ring(position: Vector3, opts: { Color: Color3?, Radius: number?, Duration: number?, Thickness: number? }?)
+function Primitives.Ring(
+	position: Vector3,
+	opts: { Color: Color3?, Radius: number?, Duration: number?, Thickness: number? }?
+)
 	local o = opts or {}
 	local radius = o.Radius or 12
 	local duration = o.Duration or 0.5
@@ -159,7 +168,10 @@ function Primitives.Ring(position: Vector3, opts: { Color: Color3?, Radius: numb
 end
 
 -- A vertical beam of light (great for rare hatches, new king, mutations).
-function Primitives.Pillar(position: Vector3, opts: { Color: Color3?, Height: number?, Width: number?, Duration: number? }?)
+function Primitives.Pillar(
+	position: Vector3,
+	opts: { Color: Color3?, Height: number?, Width: number?, Duration: number? }?
+)
 	local o = opts or {}
 	local height = o.Height or 60
 	local width = o.Width or 6
@@ -171,12 +183,21 @@ function Primitives.Pillar(position: Vector3, opts: { Color: Color3?, Height: nu
 	pillar.Transparency = 0.3
 	pillar.Size = Vector3.new(height, width, width)
 	pillar.CFrame = CFrame.new(position + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
-	tween(pillar, duration, { Size = Vector3.new(height, 0.1, 0.1), Transparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	tween(
+		pillar,
+		duration,
+		{ Size = Vector3.new(height, 0.1, 0.1), Transparency = 1 },
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.In
+	)
 	Debris:AddItem(pillar, duration + 0.1)
 end
 
 -- A short flash of light that lights up nearby objects.
-function Primitives.Light(position: Vector3, opts: { Color: Color3?, Brightness: number?, Range: number?, Duration: number? }?)
+function Primitives.Light(
+	position: Vector3,
+	opts: { Color: Color3?, Brightness: number?, Range: number?, Duration: number? }?
+)
 	local o = opts or {}
 	local holder = holderPart(position)
 	local light = Instance.new("PointLight")
@@ -191,7 +212,11 @@ function Primitives.Light(position: Vector3, opts: { Color: Color3?, Brightness:
 end
 
 -- Text that pops up and floats away ("+XP", "LEVEL 10!", "+$500").
-function Primitives.FloatText(position: Vector3, text: string, opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number? }?)
+function Primitives.FloatText(
+	position: Vector3,
+	text: string,
+	opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number? }?
+)
 	local o = opts or {}
 	local size = o.Size or 2.5
 	local duration = o.Duration or 1.2
@@ -393,6 +418,13 @@ function Primitives.Knockback(velocity: Vector3)
 	if humanoid and root then
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 		root.AssemblyLinearVelocity = velocity
+	end
+end
+
+-- Makes a zoo kaiju do a little jump (animated by ZooAnimController).
+function Primitives.Bounce(model: Instance?)
+	if model and model.Parent then
+		model:SetAttribute("ClientBounce", os.clock())
 	end
 end
 

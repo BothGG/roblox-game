@@ -2,3 +2,5 @@
 # then run `aftman install` in this folder.
 [tools]
 rojo = "rojo-rbx/rojo@7.4.4"
+stylua = "JohnnyMorganz/StyLua@2.5.2"
+luau-lsp = "JohnnyMorganz/luau-lsp@1.70.0"

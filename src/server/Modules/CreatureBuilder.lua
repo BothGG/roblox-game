@@ -49,13 +49,26 @@ local function eyes(model: Model, headCf: CFrame, headSize: Vector3)
 	for _, side in { -1, 1 } do
 		local eyeCf = headCf * CFrame.new(side * headSize.X * 0.25, headSize.Y * 0.12, -headSize.Z / 2)
 		part(model, "Eye", Vector3.one * eyeSize, eyeCf, WHITE, Enum.PartType.Ball)
-		part(model, "Eye", Vector3.one * eyeSize * 0.5, eyeCf * CFrame.new(0, 0, -eyeSize * 0.3), BLACK, Enum.PartType.Ball)
+		part(
+			model,
+			"Eye",
+			Vector3.one * eyeSize * 0.5,
+			eyeCf * CFrame.new(0, 0, -eyeSize * 0.3),
+			BLACK,
+			Enum.PartType.Ball
+		)
 	end
 end
 
 local function spikes(model: Model, fromY: number, z: number, count: number, color: Color3)
 	for i = 0, count - 1 do
-		part(model, "Accent", Vector3.new(0.7, 0.7, 0.7), CFrame.new(0, fromY - i * 1.1, z) * CFrame.Angles(math.rad(45), 0, 0), color)
+		part(
+			model,
+			"Accent",
+			Vector3.new(0.7, 0.7, 0.7),
+			CFrame.new(0, fromY - i * 1.1, z) * CFrame.Angles(math.rad(45), 0, 0),
+			color
+		)
 	end
 end
 
@@ -67,7 +80,13 @@ local function quadBody(model: Model, def, body: Color3, accent: Color3, scaleBo
 			part(model, "Accent", Vector3.new(0.9, 1.6, 0.9) * s, CFrame.new(x * s, 0.8 * s, z * s), accent)
 		end
 	end
-	part(model, "Body", Vector3.new(0.6, 0.6, 1.8) * s, CFrame.new(0, 2.8 * s, 3.2 * s) * CFrame.Angles(math.rad(-20), 0, 0), body)
+	part(
+		model,
+		"Body",
+		Vector3.new(0.6, 0.6, 1.8) * s,
+		CFrame.new(0, 2.8 * s, 3.2 * s) * CFrame.Angles(math.rad(-20), 0, 0),
+		body
+	)
 	local heads = def.Heads or 1
 	for h = 1, heads do
 		local x = (h - (heads + 1) / 2) * 1.8 * s
@@ -79,7 +98,13 @@ local function quadBody(model: Model, def, body: Color3, accent: Color3, scaleBo
 		part(model, "Body", headSize, headCf, body)
 		eyes(model, headCf, headSize)
 		if def.Horn then
-			part(model, "Accent", Vector3.new(0.5, 1.6, 0.5) * s, headCf * CFrame.new(0, headSize.Y * 0.6, -headSize.Z * 0.3) * CFrame.Angles(math.rad(-25), 0, 0), accent)
+			part(
+				model,
+				"Accent",
+				Vector3.new(0.5, 1.6, 0.5) * s,
+				headCf * CFrame.new(0, headSize.Y * 0.6, -headSize.Z * 0.3) * CFrame.Angles(math.rad(-25), 0, 0),
+				accent
+			)
 		end
 	end
 end
@@ -89,7 +114,13 @@ local BUILDERS = {}
 function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
 	for _, side in { -1, 1 } do
 		part(model, "Accent", Vector3.new(1.2, 2.4, 1.2), CFrame.new(side * 0.9, 1.2, 0), accent)
-		part(model, "Body", Vector3.new(0.9, 2.2, 0.9), CFrame.new(side * 2.05, 4.2, -0.3) * CFrame.Angles(math.rad(-20), 0, 0), body)
+		part(
+			model,
+			"Body",
+			Vector3.new(0.9, 2.2, 0.9),
+			CFrame.new(side * 2.05, 4.2, -0.3) * CFrame.Angles(math.rad(-20), 0, 0),
+			body
+		)
 	end
 	part(model, "Body", Vector3.new(3.2, 3.2, 2.4), CFrame.new(0, 4, 0), body)
 	part(model, "Accent", Vector3.new(2.2, 2.2, 0.2), CFrame.new(0, 3.8, -1.25), accent)
@@ -101,8 +132,20 @@ function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
 	part(model, "Body", Vector3.new(1, 1, 2.4), CFrame.new(0, 2.6, 1.9) * CFrame.Angles(math.rad(25), 0, 0), body)
 	spikes(model, 5.4, 1.25, 3, accent)
 	if def.Horn then
-		part(model, "Accent", Vector3.new(0.5, 1.4, 0.5), headCf * CFrame.new(-0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(20)), accent)
-		part(model, "Accent", Vector3.new(0.5, 1.4, 0.5), headCf * CFrame.new(0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(-20)), accent)
+		part(
+			model,
+			"Accent",
+			Vector3.new(0.5, 1.4, 0.5),
+			headCf * CFrame.new(-0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(20)),
+			accent
+		)
+		part(
+			model,
+			"Accent",
+			Vector3.new(0.5, 1.4, 0.5),
+			headCf * CFrame.new(0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(-20)),
+			accent
+		)
 	end
 end
 
@@ -136,7 +179,13 @@ end
 function BUILDERS.Winged(model: Model, def, body: Color3, accent: Color3)
 	quadBody(model, def, body, accent, 0.9)
 	for _, side in { -1, 1 } do
-		part(model, "Accent", Vector3.new(4.5, 0.3, 2.8), CFrame.new(side * 3.4, 4, 0.2) * CFrame.Angles(0, 0, math.rad(side * 25)), accent)
+		part(
+			model,
+			"Accent",
+			Vector3.new(4.5, 0.3, 2.8),
+			CFrame.new(side * 3.4, 4, 0.2) * CFrame.Angles(0, 0, math.rad(side * 25)),
+			accent
+		)
 	end
 	spikes(model, 4.2, 1.8, 2, accent)
 end

@@ -3,7 +3,7 @@
 	and the client (numbers shown in the UI), so they always match.
 ]]
 
-local Config = script.Parent.Config
+local Config = script.Parent.Parent.Config
 local GameConfig = require(Config.GameConfig)
 local Creatures = require(Config.Creatures)
 local Mutations = require(Config.Mutations)
@@ -61,7 +61,9 @@ function CreatureMath.GuardChance(creature: CreatureData): number
 end
 
 function CreatureMath.SellPrice(creature: CreatureData, rebirths: number): number
-	return math.floor(CreatureMath.BaseIncome(creature) * GameConfig.SellSeconds * CreatureMath.PlayerMultiplier(rebirths))
+	return math.floor(
+		CreatureMath.BaseIncome(creature) * GameConfig.SellSeconds * CreatureMath.PlayerMultiplier(rebirths)
+	)
 end
 
 function CreatureMath.RebirthCost(rebirths: number): number

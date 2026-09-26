@@ -10,11 +10,14 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Net = require(Shared.Net)
 local Fx = require(Shared.Fx)
+local Tags = require(Shared.Game.Tags)
 
-local FxController = {}
+local FxController = {
+	Priority = 5,
+}
 
-function FxController.Start()
-	Net.Get("Fx").OnClientEvent:Connect(function(name, params)
+function FxController:Start()
+	Net.Listen("Fx", function(name, params)
 		Fx.Play(name, params)
 	end)
 
@@ -27,7 +30,7 @@ function FxController.Start()
 		end
 		elapsed = 0
 		local hue = (os.clock() * 0.2) % 1
-		for _, model in CollectionService:GetTagged("AnimatedMutation") do
+		for _, model in CollectionService:GetTagged(Tags.AnimatedMutation) do
 			for _, d in model:GetDescendants() do
 				if d:IsA("BasePart") then
 					local paint = d:GetAttribute("Paint")

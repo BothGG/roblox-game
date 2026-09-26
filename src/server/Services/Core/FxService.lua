@@ -11,19 +11,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Net = require(ReplicatedStorage:WaitForChild("Shared").Net)
 
-local FxService = {}
-
-function FxService:Init(services)
-	self.Services = services
-	self.Remote = Net.Get("Fx")
-end
+local FxService = {
+	Priority = 2,
+}
 
 function FxService:PlayAll(name: string, params: { [string]: any }?)
-	self.Remote:FireAllClients(name, params or {})
+	Net.FireAll("Fx", name, params or {})
 end
 
 function FxService:PlayFor(player: Player, name: string, params: { [string]: any }?)
-	self.Remote:FireClient(player, name, params or {})
+	Net.Fire(player, "Fx", name, params or {})
 end
 
 -- Only sends to players whose character is within `radius` (saves bandwidth).
@@ -32,7 +29,7 @@ function FxService:PlayNear(position: Vector3, radius: number, name: string, par
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		if root and (root.Position - position).Magnitude <= radius then
-			self.Remote:FireClient(player, name, params or {})
+			Net.Fire(player, "Fx", name, params or {})
 		end
 	end
 end

@@ -1,5 +1,5 @@
 --[[
-	CreatureService: owns the kaiju in each player's pen.
+	CreatureService: owns the kaiju in each player's zoo.
 	Feeding, growing, mutating, selling, income and the 3D models.
 
 	  CreatureService:Add(player, creatureId, mutation?) -> uid?
@@ -9,7 +9,9 @@
 	  CreatureService:GetIncome(player)
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -18,24 +20,26 @@ local Creatures = require(Shared.Config.Creatures)
 local Foods = require(Shared.Config.Foods)
 local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
-local CreatureMath = require(Shared.CreatureMath)
-local Format = require(Shared.Util.Format)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Rules = require(Shared.Game.Rules)
+local Format = require(Shared.Lib.Format)
 local Net = require(Shared.Net)
 
-local CreatureBuilder = require(script.Parent.Parent.Modules.CreatureBuilder)
+local CreatureBuilder = require(ServerScriptService:WaitForChild("Server").Modules.CreatureBuilder)
 
 local CreatureService = {
+	Priority = 25,
 	Models = {} :: { [Player]: { [string]: Model } },
 }
 
-local Data, World, Fx, Food, King
+local Data, Zoo, Fx, Food, King
 
-function CreatureService:Init(services)
-	Data = services.DataService
-	World = services.WorldService
-	Fx = services.FxService
-	Food = services.FoodService
-	King = services.KingService
+function CreatureService:Init(registry)
+	Data = registry.DataService
+	Zoo = registry.ZooService
+	Fx = registry.FxService
+	Food = registry.FoodService
+	King = registry.KingService
 
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.Income = player:GetAttribute("Income") or 0
@@ -148,7 +152,7 @@ end
 
 function CreatureService:_spawnModel(player: Player, uid: string)
 	local data = Data:Get(player)
-	local plot = World:GetPlot(player)
+	local plot = Zoo:GetPlot(player)
 	local creature = data.Creatures[uid]
 	if not plot or not creature then
 		return
@@ -158,6 +162,7 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 	model:SetAttribute("OwnerUserId", player.UserId)
 	model:SetAttribute("Uid", uid)
 	model.Parent = plot.CreatureFolder
+	CollectionService:AddTag(model, "ZooCreature") -- client idle animation
 	self.Models[player][uid] = model
 
 	local root = model.PrimaryPart :: BasePart
@@ -269,24 +274,30 @@ function CreatureService:_refreshTag(player: Player, uid: string)
 	local tag = root:FindFirstChild("Tag") :: BillboardGui
 	local nameLabel = tag:FindFirstChild("NameLabel") :: TextLabel
 	nameLabel.Text = CreatureMath.DisplayName(creature)
-	nameLabel.TextColor3 = if creature.Mutation
-		then Mutations[creature.Mutation].Color
-		else Rarities[def.Rarity].Color
-	local income = CreatureMath.BaseIncome(creature) * CreatureMath.PlayerMultiplier(data.Rebirths, player:GetAttribute("IsKing") == true)
+	nameLabel.TextColor3 = if creature.Mutation then Mutations[creature.Mutation].Color else Rarities[def.Rarity].Color
+	local income = CreatureMath.BaseIncome(creature)
+		* CreatureMath.PlayerMultiplier(data.Rebirths, player:GetAttribute("IsKing") == true)
 	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
 	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
 	local fill = tag:FindFirstChild("XpBar"):FindFirstChild("Fill") :: Frame
-	local progress = if creature.Level >= GameConfig.MaxLevel then 1 else creature.Xp / CreatureMath.XpToNext(creature.Level)
+	local progress = if creature.Level >= GameConfig.MaxLevel
+		then 1
+		else creature.Xp / CreatureMath.XpToNext(creature.Level)
 	fill.Size = UDim2.fromScale(math.clamp(progress, 0, 1), 1)
 	local sell = root:FindFirstChild("SellPrompt") :: ProximityPrompt
 	sell.ObjectText = Format.Money(CreatureMath.SellPrice(creature, data.Rebirths))
 	local feed = root:FindFirstChild("FeedPrompt") :: ProximityPrompt
+	local loves = {}
+	for _, foodId in def.Diet or {} do
+		table.insert(loves, Foods[foodId].Name)
+	end
 	feed.ObjectText = CreatureMath.DisplayName(creature)
+		.. (if #loves > 0 then " ❤️ " .. table.concat(loves, ", ") else "")
 end
 
 function CreatureService:_layout(player: Player)
 	local data = Data:Get(player)
-	local plot = World:GetPlot(player)
+	local plot = Zoo:GetPlot(player)
 	if not data or not plot then
 		return
 	end
@@ -295,6 +306,7 @@ function CreatureService:_layout(player: Player)
 		local slot = plot.Slots[i]
 		if model and slot then
 			model:PivotTo(slot)
+			model:SetAttribute("Home", slot) -- client animates around this
 		end
 	end
 end
@@ -366,19 +378,13 @@ function CreatureService:Feed(player: Player, uid: string)
 		return
 	end
 
-	-- Use the selected food, or the first food the player has.
-	local foodId = player:GetAttribute("SelectedFood")
-	if not foodId or (data.Food[foodId] or 0) <= 0 then
-		foodId = nil
-		for _, id in Foods.Order do
-			if (data.Food[id] or 0) > 0 then
-				foodId = id
-				break
-			end
-		end
-	end
+	local foodId = Rules.PickFood(data.Food, player:GetAttribute("SelectedFood") :: string?)
 	if not foodId then
-		Net.Notify(player, "No food! Grab some in the middle... or steal some 😈", Color3.fromRGB(255, 170, 60))
+		Net.Notify(
+			player,
+			"No food! Explore the biomes to find some... or steal some 😈",
+			Color3.fromRGB(255, 170, 60)
+		)
 		return
 	end
 	local food = Foods[foodId]
@@ -386,18 +392,9 @@ function CreatureService:Feed(player: Player, uid: string)
 	data.Food[foodId] -= 1
 	data.Stats.FoodEaten += 1
 
-	local growthMult = (1 + CreatureMath.Trait(creature, "Growth")) * (Workspace:GetAttribute("GrowthMult") or 1)
-	local xp = math.floor(food.Growth * growthMult)
-	creature.Xp += xp
-	local leveledUp = false
-	while creature.Level < GameConfig.MaxLevel and creature.Xp >= CreatureMath.XpToNext(creature.Level) do
-		creature.Xp -= CreatureMath.XpToNext(creature.Level)
-		creature.Level += 1
-		leveledUp = true
-	end
-	if creature.Level >= GameConfig.MaxLevel then
-		creature.Xp = 0
-	end
+	local favorite = Rules.IsFavorite(creature.Id, foodId)
+	local xp = Rules.FeedXp(creature, foodId, Workspace:GetAttribute("GrowthMult"))
+	local leveledUp = Rules.AddXp(creature, xp) > 0
 
 	local mutated = false
 	if food.Mutation then
@@ -422,7 +419,10 @@ function CreatureService:Feed(player: Player, uid: string)
 	if model then
 		local ground = model:GetPivot().Position
 		local mid = ground + Vector3.new(0, model:GetExtentsSize().Y * 0.6, 0)
-		Fx:PlayAll("Feed", { Position = mid, Color = food.Color, Owner = player.UserId, Xp = xp })
+		Fx:PlayAll(
+			"Feed",
+			{ Position = mid, Color = food.Color, Owner = player.UserId, Xp = xp, Favorite = favorite, Model = model }
+		)
 		if leveledUp then
 			Fx:PlayAll("LevelUp", {
 				Position = mid,
@@ -444,7 +444,12 @@ function CreatureService:Feed(player: Player, uid: string)
 				Owner = player.UserId,
 			})
 			Net.NotifyAll(
-				string.format("🧬 %s's %s mutated into %s!", player.DisplayName, Creatures[creature.Id].Name, string.upper(mutation.Name)),
+				string.format(
+					"🧬 %s's %s mutated into %s!",
+					player.DisplayName,
+					Creatures[creature.Id].Name,
+					string.upper(mutation.Name)
+				),
 				mutation.Color
 			)
 		end

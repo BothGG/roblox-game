@@ -7,32 +7,34 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
-local CreatureMath = require(Shared.CreatureMath)
-local Format = require(Shared.Util.Format)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Format = require(Shared.Lib.Format)
 local Net = require(Shared.Net)
 
-local RebirthService = {}
+local RebirthService = {
+	Priority = 55,
+}
 
-local Data, CreatureService, Food, Steal, Fx, World
+local Data, CreatureService, Food, Steal, Fx, Zoo
 
-function RebirthService:Init(services)
-	Data = services.DataService
-	CreatureService = services.CreatureService
-	Food = services.FoodService
-	Steal = services.StealService
-	Fx = services.FxService
-	World = services.WorldService
+function RebirthService:Init(registry)
+	Data = registry.DataService
+	CreatureService = registry.CreatureService
+	Food = registry.FoodService
+	Steal = registry.StealService
+	Fx = registry.FxService
+	Zoo = registry.ZooService
 end
 
 function RebirthService:Start()
-	Net.Get("Rebirth").OnServerEvent:Connect(function(player)
+	Net.On("Rebirth", function(player)
 		self:Rebirth(player)
 	end)
 end
 
 function RebirthService:Rebirth(player: Player)
 	local data = Data:Get(player)
-	if not data or not Net.Throttle(player, "Rebirth", 2) then
+	if not data then
 		return
 	end
 	local cost = CreatureMath.RebirthCost(data.Rebirths)
@@ -46,14 +48,19 @@ function RebirthService:Rebirth(player: Player)
 	data.Food = Data.DeepCopy(GameConfig.StartingFood)
 	data.Rebirths += 1
 
-	local plot = World:GetPlot(player)
+	local plot = Zoo:GetPlot(player)
 	Fx:PlayAll("Rebirth", {
 		Position = plot and plot.CFrame.Position,
 		Owner = player.UserId,
 	})
-	Net.Announce("🌟 REBIRTH!", player.DisplayName .. " reached Rebirth " .. data.Rebirths .. "!", Color3.fromRGB(190, 130, 255))
+	Net.Announce(
+		"🌟 REBIRTH!",
+		player.DisplayName .. " reached Rebirth " .. data.Rebirths .. "!",
+		Color3.fromRGB(190, 130, 255)
+	)
 
 	CreatureService:Add(player, GameConfig.StarterCreature)
+	Zoo:RefreshEnclosures(player)
 	Food:RefreshStorage(player)
 	Data:Changed(player)
 end

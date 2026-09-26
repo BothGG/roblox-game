@@ -1,176 +1,185 @@
 # Architecture
 
-How Kaiju Keepers is put together, and **recipes** for adding things.
+Kaiju Keepers is built to grow for months: many systems, lots of content, several people
+working on it. This doc explains how it's organized and how to add things.
 
-## The big picture
+## Folder map
 
 ```
-            ┌──────────────────── shared (ReplicatedStorage.Shared) ───────────────────┐
-            │ Config/*  (content & balance)   CreatureMath   Net   Fx/*   Util/*       │
-            └───────────────▲─────────────────────────────────────────▲────────────────┘
-                            │ require                                 │ require
-┌─────────── server (ServerScriptService.Server) ───┐   ┌──── client (StarterPlayerScripts.Client) ────┐
-│ Main.server.lua → starts Services in order        │   │ Main.client.lua                               │
-│  DataService      save/load + snapshot to client ─┼──►│  Hud / Shop  (DataUpdate snapshot)            │
-│  FxService        "play effect X" ────────────────┼──►│  FxController → Fx.Play(preset)               │
-│  WorldService     map, plots, lighting            │   │  PromptController (who sees which prompt)     │
-│  CreatureService  feed, grow, sell, income        │   │  Toasts (Notify / Announce)                   │
-│  FoodService      wild food, shop, storage, lock  │◄──┼─ BuyEgg, BuyFood, SelectFood, LockStorage,    │
-│  StealService     steal / take back / guards      │   │  Rebirth (client → server requests)           │
-│  KingService      biggest kaiju, crown            │   │  HatchReveal (Hatched)                        │
-│  EggService       buy + hatch eggs                │   └───────────────────────────────────────────────┘
-│  RebirthService   reset for bonuses               │
-│  EventService     Meteor Feast, Blood Moon        │
-└───────────────────────────────────────────────────┘
+src/
+  shared/                      → ReplicatedStorage.Shared (server + client)
+    Config/                    ⭐ ALL content & balance. Most changes happen here.
+      GameConfig  Biomes  Creatures  Foods  Eggs  Mutations  Rarities  Sounds
+    Game/                      pure game logic (no Instances) → unit tested
+      Rules  CreatureMath  ConfigValidator  Zones  Tags
+    Lib/                       reusable libraries
+      Loader  Signal  Trove  Log  Guard  Format  WeightedRandom
+    Net/                       typed networking (Remotes.lua = every remote)
+    Fx/                        effects: Primitives, Presets, Auras, Textures
+    Types.lua                  shared type definitions
+  server/                      → ServerScriptService.Server
+    Main.server.lua            boot + player lifecycle
+    Data/                      Schema (versions/migrations), SessionStore (session locking)
+    Services/                  one service per system, grouped by domain
+      Core/    DataService, FxService
+      World/   MapService, BiomeService
+      Zoo/     ZooService, CreatureService
+      Food/    FoodService, StealService
+      Wild/    WildService
+      Economy/ EggService, RebirthService
+      Social/  KingService
+      Events/  EventService
+    Modules/                   builders used by services
+      CreatureBuilder  FoodBuilder  Map/MapGenerator  Map/Props
+  client/                      → StarterPlayerScripts.Client
+    Main.client.lua            boots controllers
+    State/ClientState.lua      latest server snapshot + current biome (Signals)
+    Controllers/               State, UI, Fx, Prompt, Biome, Wild, ZooAnim, Food
+    UI/                        Theme, Hud, Shop, Toasts, HatchReveal
+tests/                         unit tests (run without Studio)
+scripts/check.sh               format + build + type check + tests
 ```
 
-### Rules the code follows
+## Core ideas
 
-1. **Server decides, client shows.** The client only *asks* (remotes like `BuyEgg`).
-   The server checks everything (cash, slots, distance, cooldowns) and changes the data.
-2. **Content is data.** Kaiju, foods, eggs, mutations and balance numbers live in `shared/Config`.
-   Adding content almost never needs new code.
-3. **One service per system.** Each service owns one job and talks to others via the
-   `services` table passed into `Init`.
-4. **Effects are named presets.** Gameplay code never builds particles itself. It calls
-   `FxService:PlayAll("LevelUp", {...})` and the client plays the preset.
+1. **Server decides, client shows.** Clients only *ask* through remotes. The server checks
+   everything (types, cash, distance, cooldowns, unlocks) before changing data.
+2. **Content is data.** Kaiju, foods, biomes, eggs and balance live in `shared/Config`.
+   `ConfigValidator` checks they fit together on every server start and in tests.
+3. **Rules are pure and tested.** Formulas and decisions (XP, unlocks, food picking) live in
+   `shared/Game/Rules.lua` and `CreatureMath.lua`, with no Instances, so they're unit tested
+   and shared by the server (decides) and UI (displays the same numbers).
+4. **One service per system**, found automatically by the Loader.
+5. **Effects are named presets.** Gameplay code says `FxService:PlayAll("LevelUp", ...)`,
+   and the client decides how it looks.
+6. **The map is a contract.** Gameplay finds the world through **tags** (`Game/Tags.lua`),
+   so the generated map can be swapped for a hand-built one (see MAP_GUIDE.md).
 
-### Service lifecycle
+## Services (server) and controllers (client)
+
+The **Loader** (`Lib/Loader.lua`) finds every ModuleScript whose name ends in `Service`
+(server) or `Controller` (client), then calls `Init(registry)` on all of them, then
+`Start()`, ordered by `Priority` (lower first).
 
 ```lua
-local MyService = {}
+local MyService = { Priority = 45 }
 
-function MyService:Init(services)   -- get other services here. Don't yield.
-    self.Data = services.DataService
+function MyService:Init(registry)        -- grab other services. Don't yield here.
+    self.Data = registry.DataService
 end
 
-function MyService:Start()          -- start loops, connect remotes
-end
+function MyService:Start() end           -- loops, remotes (Net.On), connections
 
-function MyService:OnPlayerReady(player)     -- optional: data + plot are ready
-end
-
-function MyService:OnPlayerRemoving(player)  -- optional: clean up
-end
+function MyService:OnPlayerReady(player) end     -- server: data loaded + zoo assigned
+function MyService:OnPlayerRemoving(player) end  -- server: before the final save
 
 return MyService
 ```
 
-Register it by adding its name to `ORDER` in `src/server/Main.server.lua`.
+Just create the file in `server/Services/<Domain>/` and it runs. No registration needed.
 
-### Data flow
-
-- `DataService:Get(player)` returns the player's saved table. Change it directly, then call
-  `DataService:Changed(player)`. That sends one batched **snapshot** to the client's UI.
-- Need extra UI info that isn't saved? `DataService:AddSnapshotHook(function(player, snapshot) ... end)`.
-- New saved field? Add it to `newData()` in `DataService.lua`. Old saves get the default automatically.
-
----
-
-## ✨ The effects system (`src/shared/Fx`)
-
-Three layers:
-
-| Layer | File | What it is |
+| Priority | Service | Job |
 |---|---|---|
-| **Primitives** | `Fx/Primitives.lua` | Building blocks: `Burst`, `Ring`, `Pillar`, `Light`, `FloatText`, `Sound`, `Highlight`, `Shake`, `Flash`, `Vignette`, `Confetti`, `Pop`, `Knockback` |
-| **Presets** | `Fx/Presets.lua` | Named effects made of primitives: `Feed`, `LevelUp`, `Mutation`, `Spawn`, `Pickup`, `StealStart`, `StealAlert`, `Deposit`, `GuardKnock`, `TakeBack`, `Sell`, `MeteorImpact`, `MeteorWarning`, `NewKing`, `Rebirth`, `HatchReveal`, `Lock` |
-| **Auras** | `Fx/Auras.lua` | Effects that *stay* on a kaiju (mutation embers, sparkles, smoke, glow) |
+| 1 | DataService | load/save (session locked), snapshots to the client |
+| 2 | FxService | send effect presets to clients |
+| 5 | MapService | generate/load the map, index tagged markers, biome zones |
+| 10 | ZooService | build zoos, assign one per player |
+| 15 | BiomeService | unlock gates, keep players out of locked biomes |
+| 20 | FoodService | food growing in biomes, shop, storage, lock, meteors |
+| 25 | CreatureService | zoo kaiju: feed, grow, mutate, sell, income |
+| 30 | KingService | biggest kaiju → crown + bonus |
+| 35 | StealService | steal / take back / guards |
+| 40 | WildService | wild kaiju roaming + catching |
+| 50 | EggService | eggs + starter kaiju |
+| 55 | RebirthService | rebirth |
+| 60 | EventService | Meteor Feast, Blood Moon |
 
-Plus two config files that change how everything looks and sounds:
-`Fx/Textures.lua` (particle images) and `Config/Sounds.lua` (sound ids).
+## Data
 
-### Playing an effect
+- `DataService:Get(player)` → the save table (`Types.PlayerData`). Change it, then call
+  `DataService:Changed(player)`. Changes are batched into one snapshot per frame.
+- Extra UI values that aren't saved: `DataService:AddSnapshotHook(function(player, snapshot) ... end)`.
+- **Session locking** (`Data/SessionStore.lua`): only one server can own a save. A second server
+  waits, then takes over an abandoned lock. If a server loses its lock it stops saving and kicks
+  the player, which prevents duplication and rollback exploits.
+- **Changing the save format**: edit `Schema.Template()`, bump `CURRENT_VERSION`, add
+  `Migrations[oldVersion]`, and add a test in `tests/specs/Data.spec.lua`.
+
+## Networking
+
+Every remote is declared in `shared/Net/Remotes.lua`:
 
 ```lua
--- server
-FxService:PlayAll("LevelUp", { Position = pos, Level = 10, Owner = player.UserId })
-FxService:PlayFor(player, "StealAlert", {})
-FxService:PlayNear(pos, 300, "MeteorImpact", { Position = pos, Color = color })
-
--- client (UI code etc.)
-Fx.Play("HatchReveal", { Color = color, RarityOrder = 4 })
-Fx.Primitives.Pop(someButton)
+BuyEgg = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.4 },
 ```
 
-`Owner` / `Target` are user ids. Presets use `P.IsMe(p.Owner)` to add screen effects
-(shake, flash, big text) only for the player it's about.
+- Server: `Net.On("BuyEgg", function(player, eggId) ... end)`. Argument types and rate limits
+  are enforced **before** your handler runs (NaN/inf, wrong types and extra args are rejected).
+- Still validate meaning yourself: `Guard.IsConfigKey(Eggs, eggId)`, cash, distance...
+- Server → client: `Net.Fire(player, name, ...)`, `Net.FireAll`, `Net.Notify`, `Net.Announce`.
+- Client: `Net.Send(name, ...)`, `Net.Listen(name, fn)`.
+- Cosmetic remotes (`Fx`) are **unreliable**, so they're cheap and fine to drop under load.
 
-### Recipe: make a new effect
+## Effects (`shared/Fx`)
 
-1. Open `src/shared/Fx/Presets.lua` and add:
-   ```lua
-   function Presets.Evolve(p, P)
-       if P.Distance(p.Position) > FAR then return end   -- skip if far away
-       P.Pillar(p.Position, { Color = p.Color, Height = 100 })
-       P.Ring(p.Position, { Color = p.Color, Radius = 20 })
-       P.Burst(p.Position, { Color = p.Color, Count = 50, Speed = 40 })
-       if P.IsMe(p.Owner) then
-           P.Shake(0.4, 0.5)
-           P.FloatText(p.Position, "EVOLVED!", { Color = p.Color, Size = 4 })
-       end
-   end
-   ```
-2. Play it from the server: `FxService:PlayAll("Evolve", { Position = pos, Color = c, Owner = player.UserId })`.
+| Layer | What |
+|---|---|
+| `Primitives.lua` | building blocks: Burst, Ring, Pillar, Light, FloatText, Sound, Highlight, Shake, Flash, Vignette, Confetti, Pop, Bounce, Knockback |
+| `Presets.lua` | named effects: Feed, LevelUp, Mutation, Spawn, Pickup, Steal*, Deposit, GuardKnock, Sell, MeteorImpact, NewKing, Rebirth, HatchReveal, Unlock, RareSpawn, CatchSuccess, CatchFail, Poof, Lock |
+| `Auras.lua` | effects that stay on kaiju/food (embers, sparkles, smoke, glow) |
+| `Textures.lua`, `Config/Sounds.lua` | swap images/sounds here to upgrade every effect |
 
-### Recipe: make a new primitive
+New effect: add `function Presets.MyEffect(p, P) ... end`, then
+`FxService:PlayAll("MyEffect", { Position = pos, Owner = player.UserId })`.
+Use `P.IsMe(p.Owner)` for screen effects that only the involved player should see.
 
-Add a function to `Primitives.lua`. Put temporary world parts in the `LocalFx` folder
-(use `holderPart(position)`) and clean them up with `Debris:AddItem`.
+## Client animation pattern
 
-### Recipe: make effects look better
-
-- Swap the particle images in `Fx/Textures.lua` for nicer ones from the Creator Store
-  (search "particle texture", then use `rbxassetid://ID`).
-- Swap the sounds in `Config/Sounds.lua`.
-- Every preset updates automatically.
+Moving things smoothly for everyone without heavy networking:
+- **Wild kaiju**: the server writes `MoveFrom/MoveTo/MoveStart/MoveDuration` attributes and
+  snaps the model at the end; `WildController` interpolates every frame.
+- **Zoo kaiju**: the server sets a `Home` attribute; `ZooAnimController` adds breathing/sway and
+  a bounce when fed.
+- **Food**: `FoodController` spins/bobs anything tagged `FoodPickup`.
 
 ---
 
-## Recipes: adding content
+## Recipes
 
 ### New kaiju
-1. `Config/Creatures.lua`: copy an entry, change the key/name/colors/income/traits.
-2. `Config/Eggs.lua`: add `{ Creature = "YourId", Weight = 5 }` to an egg.
-
-### Custom 3D model for a kaiju
-1. Build the model in Studio. Set its **PrimaryPart** at the **feet**, facing **-Z** (forward).
-2. Give parts an attribute `Paint` = `"Body"` or `"Accent"` so mutations recolor them (optional).
-3. Put it in `ServerStorage/CreatureModels/` named exactly like the kaiju Id (e.g. `Rex`).
-   It's used automatically instead of the placeholder.
+1. `Config/Creatures.lua`: add an entry (rarity, income, style, colors, `Diet`, `Traits`).
+2. Make it obtainable: add it to a biome's `Wild` list (`Config/Biomes.lua`) and/or an egg.
+3. `scripts/check.sh` (the validator catches typos).
+4. Optional custom model: `ServerStorage/CreatureModels/<Id>` (PrimaryPart at the feet, facing -Z;
+   parts can have attribute `Paint = "Body" | "Accent"` for mutation colors).
 
 ### New food
-`Config/Foods.lua`: add an entry **and** add its id to `Foods.Order`.
+`Config/Foods.lua`: add an entry **and** add it to `Foods.Order`. Put it in a biome's `Foods` list
+or give it a `Price`. Optional model: `ServerStorage/FoodModels/<Id>` with a PrimaryPart named `Hitbox`.
 
-### New mutation
-1. `Config/Mutations.lua`: add an entry (color, material, income multiplier, `Aura`).
-2. Make a food use it (`Mutation = { Id = "YourMutation", Chance = 0.05 }`), or add it to `HatchPool`.
+### New biome
+1. `Config/Biomes.lua`: add an entry + add it to `Biomes.Order`.
+2. Generated map: optionally add terrain in `MapGenerator` (`BIOME_TERRAIN.<Id>`) and props.
+   Hand-built map: add the tagged markers (see MAP_GUIDE.md).
 
-### New egg
-`Config/Eggs.lua`: add an entry **and** add its id to `Eggs.Order`. It shows up in the shop.
+### New mutation / egg / rarity
+Add to the config file (and its `Order` list if it has one). The validator tells you what's missing.
+
+### New remote
+Add to `Net/Remotes.lua` with `Args` and `RateLimit`, then use `Net.On` / `Net.Send`.
+
+### New system (e.g. Daily Rewards)
+1. `server/Services/Rewards/DailyRewardService.lua` using the lifecycle above.
+2. Saved fields → `Data/Schema.lua` (+ migration + test).
+3. Rules/formulas → `shared/Game/` (+ tests in `tests/specs/`).
+4. UI → a module in `client/UI/`, started from `UIController`, reading `ClientState`.
 
 ### New server event
-`Services/EventService.lua`: add a function to `EVENTS`. Announce it, do the thing, wait, clean up.
-Also add a display name to `EVENT_NAMES` in `client/UI/Hud.lua`.
+Add a function to `EVENTS` in `Services/Events/EventService.lua` and a display name in `Hud.lua`.
 
-### New remote (client ↔ server message)
-Add the name to `REMOTES` in `shared/Net.lua`, then use `Net.Get("Name")`.
-**Always validate on the server** (types, cash, cooldown with `Net.Throttle`).
+## Tests & checks
 
-### New system (e.g. Daily Rewards, Trading, Clans)
-1. Create `src/server/Services/DailyRewardService.lua` using the lifecycle above.
-2. Add it to `ORDER` in `Main.server.lua`.
-3. Store its data in `newData()`, expose UI info with a snapshot hook.
-4. Add a UI module in `src/client/UI/` and start it in `Main.client.lua`.
-
----
-
-## Checking the code
-
-```bash
-rojo build -o build/KaijuKeepers.rbxlx         # builds the place (fails on broken project files)
-rojo sourcemap default.project.json -o sourcemap.json
-luau-lsp analyze --definitions=globalTypes.d.luau --sourcemap=sourcemap.json src   # type check
-```
-
-GitHub Actions runs both on every push (`.github/workflows/ci.yml`) and uploads the built place file.
+- `python3 tests/run.py` runs `tests/specs/*.spec.lua` in plain Luau with a small fake Roblox
+  (instances, require, Color3/Enum, an in-memory DataStore). Great for rules, configs and data.
+- `scripts/check.sh` = StyLua format check + Rojo build + luau-lsp type check + tests.
+- CI (`.github/workflows/ci.yml`) runs `scripts/check.sh` on every push and uploads the place file.

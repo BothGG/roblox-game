@@ -53,6 +53,10 @@ local Mutations = {
 }
 
 -- Mutations a kaiju can randomly hatch with (weights)
+for id, def in Mutations do
+	def.Id = id
+end
+
 Mutations.HatchPool = {
 	{ Id = "Lava", Weight = 45 },
 	{ Id = "Crystal", Weight = 35 },

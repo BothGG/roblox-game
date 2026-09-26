@@ -22,8 +22,15 @@ function Presets.Feed(p, P)
 	end
 	P.Burst(p.Position, { Color = p.Color, Count = 12, Speed = 12, Size = 0.6 })
 	P.Sound("Pop", p.Position, 0.5, 1 + math.random() * 0.2)
+	P.Bounce(p.Model)
+	if p.Favorite then
+		P.Burst(p.Position, { Color = Color3.fromRGB(255, 90, 140), Count = 8, Speed = 8, Size = 1, Gravity = 6 })
+	end
 	if P.IsMe(p.Owner) then
 		local text = if p.Xp then "+" .. tostring(p.Xp) .. " XP" else "+XP"
+		if p.Favorite then
+			text ..= " ❤️"
+		end
 		P.FloatText(p.Position, text, { Color = p.Color, Size = 1.6 })
 	end
 end
@@ -67,7 +74,11 @@ function Presets.Mutation(p, P)
 	if P.IsMe(p.Owner) then
 		P.Flash(color, 0.6, 0.2)
 		P.Shake(0.4, 0.5)
-		P.FloatText(p.Position + Vector3.new(0, 4, 0), string.upper(p.Name or "MUTATION") .. "!", { Color = color, Size = 4, Duration = 2 })
+		P.FloatText(
+			p.Position + Vector3.new(0, 4, 0),
+			string.upper(p.Name or "MUTATION") .. "!",
+			{ Color = color, Size = 4, Duration = 2 }
+		)
 	end
 end
 
@@ -159,7 +170,15 @@ function Presets.MeteorImpact(p, P)
 	end
 	P.Ring(p.Position, { Color = Color3.fromRGB(255, 140, 40), Radius = 16, Duration = 0.5 })
 	P.Burst(p.Position, { Color = p.Color, Count = 25, Speed = 30, Size = 1 })
-	P.Burst(p.Position, { Color = Color3.fromRGB(80, 80, 80), Count = 10, Speed = 10, Size = 3, Lifetime = 1.5, Gravity = 5, LightEmission = 0 })
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(80, 80, 80),
+		Count = 10,
+		Speed = 10,
+		Size = 3,
+		Lifetime = 1.5,
+		Gravity = 5,
+		LightEmission = 0,
+	})
 	P.Light(p.Position, { Color = Color3.fromRGB(255, 150, 50), Brightness = 8, Range = 30 })
 	P.Sound("Impact", p.Position, 0.7, 0.8 + math.random() * 0.3)
 	if distance < 80 then
@@ -206,6 +225,66 @@ function Presets.HatchReveal(p, P)
 		P.Confetti(80)
 		P.Shake(0.3, 0.4)
 	end
+end
+
+-- Biome unlocked (only the unlocking player sees the screen part).
+function Presets.Unlock(p, P)
+	local color = p.Color or GOLD
+	if p.Position then
+		P.Pillar(p.Position, { Color = color, Height = 90, Width = 16, Duration = 1.5 })
+		P.Ring(p.Position, { Color = color, Radius = 30, Duration = 0.8 })
+		P.Burst(p.Position, { Color = color, Count = 50, Speed = 35, Size = 1.2 })
+	end
+	P.Flash(color, 0.5, 0.3)
+	P.Confetti(70, { color, WHITE, GOLD })
+	P.Sound("Fanfare", nil, 0.8)
+end
+
+-- A rare wild kaiju spawned (seen by everyone nearby).
+function Presets.RareSpawn(p, P)
+	if P.Distance(p.Position) > FAR * 2 then
+		return
+	end
+	P.Pillar(p.Position, { Color = p.Color, Height = 120, Width = 8, Duration = 2.5 })
+	P.Ring(p.Position, { Color = p.Color, Radius = 20, Duration = 0.8 })
+end
+
+-- Caught a wild kaiju.
+function Presets.CatchSuccess(p, P)
+	if P.Distance(p.Position) <= FAR then
+		P.Ring(p.Position, { Color = p.Color, Radius = 14, Duration = 0.5 })
+		P.Burst(p.Position + Vector3.new(0, 2, 0), { Color = p.Color, Count = 40, Speed = 30, Size = 1 })
+		P.Light(p.Position, { Color = p.Color, Brightness = 8, Range = 25 })
+	end
+	if P.IsMe(p.Owner) then
+		P.FloatText(p.Position + Vector3.new(0, 4, 0), "CAUGHT!", { Color = p.Color, Size = 3.5 })
+		P.Shake(0.2, 0.3)
+	end
+end
+
+-- Catch failed: it runs away in a puff of smoke.
+function Presets.CatchFail(p, P)
+	Presets.Poof(p, P)
+	if P.IsMe(p.Target) then
+		P.FloatText(p.Position + Vector3.new(0, 3, 0), "It got away!", { Color = RED, Size = 2.5 })
+	end
+end
+
+-- Puff of smoke (wild kaiju leaving).
+function Presets.Poof(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position + Vector3.new(0, 2, 0), {
+		Color = Color3.fromRGB(230, 230, 230),
+		Count = 20,
+		Speed = 10,
+		Size = 3,
+		Lifetime = 1.2,
+		Gravity = 4,
+		LightEmission = 0,
+	})
+	P.Sound("Whoosh", p.Position, 0.5)
 end
 
 -- Storage lock turned on.

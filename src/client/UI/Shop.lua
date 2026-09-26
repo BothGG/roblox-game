@@ -1,20 +1,21 @@
 --[[
-	Shop: the pop-up window with Eggs, Food and Rebirth pages.
-	Shop.Open("Eggs" | "Food" | "Rebirth"), Shop.Close()
+	Shop: the pop-up window with Eggs, Food, Areas and Rebirth pages.
+	Shop.Open("Eggs" | "Food" | "Areas" | "Rebirth"), Shop.Close()
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Biomes = require(Shared.Config.Biomes)
 local Creatures = require(Shared.Config.Creatures)
 local Eggs = require(Shared.Config.Eggs)
 local Foods = require(Shared.Config.Foods)
 local GameConfig = require(Shared.Config.GameConfig)
 local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
-local CreatureMath = require(Shared.CreatureMath)
-local Format = require(Shared.Util.Format)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Format = require(Shared.Lib.Format)
 local Net = require(Shared.Net)
 local Theme = require(script.Parent.Theme)
 
@@ -25,11 +26,13 @@ local titleLabel: TextLabel
 local pages: { [string]: ScrollingFrame } = {}
 local priceButtons: { { Button: TextButton, Price: () -> number } } = {}
 local rebirthRefs: { [string]: any } = {}
+local areaRefs: { [string]: { Button: TextButton, Status: TextLabel } } = {}
 local state: any = nil
 
 local TITLES = {
 	Eggs = "🥚 Egg Shop",
 	Food = "🍖 Food Shop",
+	Areas = "🗺️ Areas",
 	Rebirth = "🌟 Rebirth",
 }
 
@@ -116,7 +119,7 @@ local function buildEggs()
 			Parent = r,
 		})
 		buy.Activated:Connect(function()
-			Net.Get("BuyEgg"):FireServer(eggId)
+			Net.Send("BuyEgg", eggId)
 		end)
 		table.insert(priceButtons, {
 			Button = buy,
@@ -173,7 +176,7 @@ local function buildFood()
 				Parent = r,
 			})
 			buy.Activated:Connect(function()
-				Net.Get("BuyFood"):FireServer(foodId, amount)
+				Net.Send("BuyFood", foodId, amount)
 			end)
 			table.insert(priceButtons, {
 				Button = buy,
@@ -187,11 +190,75 @@ local function buildFood()
 	hint.BackgroundTransparency = 1
 	Theme.Label({
 		Size = UDim2.fromScale(1, 1),
-		Text = "Rare foods like Shadow Shroom and Star Food can't be bought. Find them... or steal them!",
+		Text = "Rare foods can't be bought. Explore the Areas to find them... or steal them!",
 		TextWrapped = true,
 		TextColor3 = Theme.Muted,
 		Parent = hint,
 	})
+end
+
+local function buildAreas()
+	local p = page("Areas")
+	for i, biomeId in Biomes.Order do
+		local biome = Biomes[biomeId]
+		local r = row(p, i, 112)
+		Theme.New("Frame", {
+			Position = UDim2.fromOffset(12, 12),
+			Size = UDim2.new(0, 8, 1, -24),
+			BackgroundColor3 = biome.Color,
+			Parent = r,
+		}, { Theme.Corner(4) })
+		Theme.Label({
+			Position = UDim2.fromOffset(30, 8),
+			Size = UDim2.new(1, -200, 0, 32),
+			Text = biome.Icon .. " " .. biome.Name,
+			TextColor3 = biome.Color,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local foods, wild = {}, {}
+		for _, entry in biome.Foods do
+			table.insert(foods, Foods[entry.Food].Name)
+		end
+		for _, entry in biome.Wild do
+			local def = Creatures[entry.Creature]
+			table.insert(
+				wild,
+				string.format('<font color="#%s">%s</font>', Rarities[def.Rarity].Color:ToHex(), def.Name)
+			)
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(30, 44),
+			Size = UDim2.new(1, -200, 0, 58),
+			Text = "🍖 " .. table.concat(foods, ", ") .. "\n🐾 " .. table.concat(wild, ", "),
+			RichText = true,
+			TextWrapped = true,
+			TextColor3 = Theme.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			Parent = r,
+		})
+		local button = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -12, 0, 16),
+			Size = UDim2.fromOffset(160, 50),
+			Text = "",
+			BackgroundColor3 = Theme.Green,
+			Parent = r,
+		})
+		button.Activated:Connect(function()
+			Net.Send("UnlockBiome", biomeId)
+		end)
+		local status = Theme.Label({
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -12, 0, 72),
+			Size = UDim2.fromOffset(160, 26),
+			Text = "",
+			TextColor3 = Color3.fromRGB(255, 170, 120),
+			Parent = r,
+		})
+		areaRefs[biomeId] = { Button = button, Status = status }
+	end
 end
 
 local function buildRebirth()
@@ -208,7 +275,7 @@ local function buildRebirth()
 		Position = UDim2.fromOffset(0, 44),
 		Size = UDim2.new(1, 0, 0, 100),
 		Text = string.format(
-			"You get forever:\n+%d%% income  •  +%d %s slot  •  +%d food storage",
+			"You get forever:\n+%d%% income  •  +%d %s enclosure  •  +%d food storage\nNew Areas need Rebirths to unlock!",
 			math.round(GameConfig.RebirthIncomeBonus * 100),
 			GameConfig.SlotsPerRebirth,
 			GameConfig.CreatureName,
@@ -221,7 +288,9 @@ local function buildRebirth()
 	Theme.Label({
 		Position = UDim2.fromOffset(0, 150),
 		Size = UDim2.new(1, 0, 0, 50),
-		Text = "⚠️ You lose your " .. GameConfig.CreatureNamePlural .. ", cash and food.\nYour collection (Index) is kept.",
+		Text = "⚠️ You lose your "
+			.. GameConfig.CreatureNamePlural
+			.. ", cash and food.\nUnlocked Areas and your collection (Index) are kept.",
 		TextWrapped = true,
 		TextColor3 = Color3.fromRGB(255, 170, 120),
 		Parent = r,
@@ -235,7 +304,7 @@ local function buildRebirth()
 		Parent = r,
 	})
 	button.Activated:Connect(function()
-		Net.Get("Rebirth"):FireServer()
+		Net.Send("Rebirth")
 		Shop.Close()
 	end)
 	rebirthRefs.Button = button
@@ -271,6 +340,7 @@ function Shop.Start()
 
 	buildEggs()
 	buildFood()
+	buildAreas()
 	buildRebirth()
 end
 
@@ -285,7 +355,8 @@ function Shop.Open(name: string)
 	titleLabel.Text = TITLES[name] or name
 	window.Visible = true
 	window.Position = UDim2.fromScale(0.5, 0.56)
-	TweenService:Create(window, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.5) }):Play()
+	TweenService:Create(window, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Position = UDim2.fromScale(0.5, 0.5) })
+		:Play()
 end
 
 function Shop.Close()
@@ -297,6 +368,24 @@ function Shop.Update(snapshot)
 	for _, entry in priceButtons do
 		local affordable = state.Cash >= entry.Price()
 		entry.Button.BackgroundColor3 = if affordable then Theme.Green else Color3.fromRGB(90, 90, 100)
+	end
+	for biomeId, refs in areaRefs do
+		local biome = Biomes[biomeId]
+		if state.Unlocks[biomeId] then
+			refs.Button.Text = "✓ Open"
+			refs.Button.BackgroundColor3 = Color3.fromRGB(70, 140, 90)
+			refs.Status.Text = ""
+		elseif state.Rebirths < biome.Unlock.Rebirths then
+			refs.Button.Text = "🔒"
+			refs.Button.BackgroundColor3 = Color3.fromRGB(90, 90, 100)
+			refs.Status.Text = "Needs Rebirth " .. biome.Unlock.Rebirths
+		else
+			refs.Button.Text = "Unlock " .. Format.Money(biome.Unlock.Cash)
+			refs.Button.BackgroundColor3 = if state.Cash >= biome.Unlock.Cash
+				then Theme.Green
+				else Color3.fromRGB(90, 90, 100)
+			refs.Status.Text = ""
+		end
 	end
 	rebirthRefs.Current.Text = "Rebirth " .. state.Rebirths .. " → " .. (state.Rebirths + 1)
 	local cost = CreatureMath.RebirthCost(state.Rebirths)

@@ -10,35 +10,42 @@ local Creatures = require(Shared.Config.Creatures)
 local Eggs = require(Shared.Config.Eggs)
 local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
-local CreatureMath = require(Shared.CreatureMath)
-local WeightedRandom = require(Shared.Util.WeightedRandom)
+local Rules = require(Shared.Game.Rules)
+local Guard = require(Shared.Lib.Guard)
+local WeightedRandom = require(Shared.Lib.WeightedRandom)
 local Net = require(Shared.Net)
 
 local RED = Color3.fromRGB(255, 90, 90)
 
-local EggService = {}
+local EggService = {
+	Priority = 50,
+}
 
 local Data, CreatureService
 
-function EggService:Init(services)
-	Data = services.DataService
-	CreatureService = services.CreatureService
+function EggService:Init(registry)
+	Data = registry.DataService
+	CreatureService = registry.CreatureService
 end
 
 function EggService:Start()
-	Net.Get("BuyEgg").OnServerEvent:Connect(function(player, eggId)
+	Net.On("BuyEgg", function(player, eggId)
 		self:Buy(player, eggId)
 	end)
 end
 
 function EggService:OnPlayerReady(player: Player)
 	local data = Data:Get(player)
-	if data and not data.Stats.StarterGiven and CreatureMath.Count(data.Creatures) == 0 then
+	if data and not data.Stats.StarterGiven and next(data.Creatures) == nil then
 		data.Stats.StarterGiven = true
 		task.delay(1.5, function()
 			if player.Parent then
 				CreatureService:Add(player, GameConfig.StarterCreature)
-				Net.Notify(player, "🥚 Here's your first " .. GameConfig.CreatureName .. "! Walk up to it and press E to feed it.", Color3.fromRGB(120, 220, 120))
+				Net.Notify(
+					player,
+					"🥚 Here's your first " .. GameConfig.CreatureName .. "! Walk up to it and press E to feed it.",
+					Color3.fromRGB(120, 220, 120)
+				)
 			end
 		end)
 	end
@@ -58,16 +65,13 @@ local function rollMutation(): string?
 	return nil
 end
 
-function EggService:Buy(player: Player, eggId: any)
-	if type(eggId) ~= "string" or not Net.Throttle(player, "BuyEgg", 0.5) then
+function EggService:Buy(player: Player, eggId: string)
+	local data = Data:Get(player)
+	if not data or not Guard.IsConfigKey(Eggs, eggId) then
 		return
 	end
 	local egg = Eggs[eggId]
-	local data = Data:Get(player)
-	if not egg or eggId == "Order" or not data then
-		return
-	end
-	if CreatureMath.Count(data.Creatures) >= CreatureMath.MaxSlots(data.Rebirths) then
+	if not Rules.HasFreeSlot(data) then
 		Net.Notify(player, "Your pen is full! Sell a " .. GameConfig.CreatureName .. " or Rebirth for more slots.", RED)
 		return
 	end
@@ -92,14 +96,17 @@ function EggService:Buy(player: Player, eggId: any)
 
 	local def = Creatures[pick.Creature]
 	local rarity = Rarities[def.Rarity]
-	Net.Get("Hatched"):FireClient(player, {
+	Net.Fire(player, "Hatched", {
 		CreatureId = pick.Creature,
 		Mutation = mutation,
 		EggId = eggId,
 	})
 	if rarity.Order >= Rarities.Legendary.Order or mutation then
 		local name = (if mutation then Mutations[mutation].Name .. " " else "") .. def.Name
-		Net.NotifyAll(string.format("🥚 %s hatched a %s %s!", player.DisplayName, string.upper(def.Rarity), name), rarity.Color)
+		Net.NotifyAll(
+			string.format("🥚 %s hatched a %s %s!", player.DisplayName, string.upper(def.Rarity), name),
+			rarity.Color
+		)
 	end
 	Data:Changed(player)
 end
