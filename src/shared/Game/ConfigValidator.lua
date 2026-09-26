@@ -37,6 +37,7 @@ ConfigValidator.Events = {
 	Earned = true,
 	Rebirthed = true,
 	Equipped = true,
+	Tamed = true,
 }
 
 local STYLES = { Biped = true, Quad = true, Blob = true, Winged = true }

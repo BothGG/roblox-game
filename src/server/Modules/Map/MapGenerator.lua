@@ -297,6 +297,18 @@ local function buildFields(ctx: Context)
 			end
 		end
 	end
+	-- Wild titan spawn spots, spread evenly around the fields.
+	for i = 1, 16 do
+		local angle = (i - 0.5) / 16 * 360 + ctx.Rng:NextNumber(-6, 6)
+		if nearGate(angle, 6) then
+			angle += 12
+		end
+		local p = polar(angle, ctx.Rng:NextNumber(MAP.FieldInner + 20, MAP.FieldOuter - 20))
+		local ground = groundAt(p.X, p.Z)
+		if ground then
+			marker(ctx, Tags.WildSpawn, CFrame.new(ground + Vector3.new(0, 1, 0)), Vector3.one)
+		end
+	end
 	for _ = 1, 40 do
 		local angle = ctx.Rng:NextNumber(0, 360)
 		if not nearGate(angle, 6) then

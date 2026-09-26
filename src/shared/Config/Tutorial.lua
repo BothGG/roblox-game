@@ -2,7 +2,7 @@
 	Tutorial steps, in order. Each step completes when its Event happens
 	Count times (with an optional MinLevel for LevelUp).
 	Target tells the client where to point the arrow:
-	  "MyTitan" | "Food" | "Menu:Eggs" | "Menu:Titans" | "Arena"
+	  "MyTitan" | "Food" | "Wild" | "Menu:Eggs" | "Menu:Titans" | "Arena"
 ]]
 
 return {
@@ -10,7 +10,12 @@ return {
 	Steps = {
 		{ Text = "Walk to your titan and press E to feed it", Event = "Fed", Count = 1, Target = "MyTitan" },
 		{ Text = "Grab 3 food in the fields around the arena", Event = "FoodPicked", Count = 3, Target = "Food" },
-		{ Text = "Buy an egg from the 🥚 Eggs menu", Event = "Hatched", Count = 1, Target = "Menu:Eggs" },
+		{
+			Text = "Find a wild titan in the fields, hold E to tame it with food",
+			Event = "Tamed",
+			Count = 1,
+			Target = "Wild",
+		},
 		{
 			Text = "Feed your titans until one reaches Lv.5",
 			Event = "LevelUp",

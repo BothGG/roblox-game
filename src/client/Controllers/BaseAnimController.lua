@@ -2,12 +2,23 @@
 	BaseAnimController: makes titans in bases feel alive (client only, no network).
 	- gentle breathing bob + looking around
 	- a bounce when fed (Fx primitive P.Bounce sets "ClientBounce")
-	Only animates titan near the camera.
+	- "+$" money popping off YOUR titans every few seconds
+	- moving shine on rarity badges (RarityTag "Shine" gradients)
+	Only animates titans near the camera.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Fx = require(Shared.Fx)
+local RarityTag = require(Shared.Fx.RarityTag)
+local Format = require(Shared.Lib.Format)
+
+local player = Players.LocalPlayer
 
 local BaseAnimController = {
 	Priority = 30,
@@ -15,6 +26,35 @@ local BaseAnimController = {
 
 local MAX_DISTANCE = 200
 local BOUNCE_TIME = 0.35
+local INCOME_EVERY = 3 -- seconds between money popups per titan
+local INCOME_DISTANCE = 120
+
+local nextIncome: { [Model]: number } = {}
+
+local function incomePopups(model: Model, home: CFrame, t: number, camera: Camera)
+	if model:GetAttribute("OwnerUserId") ~= player.UserId then
+		return
+	end
+	local income = model:GetAttribute("Income")
+	if type(income) ~= "number" or income <= 0 then
+		return
+	end
+	local due = nextIncome[model]
+	if not due then
+		-- Stagger titans so the popups ripple instead of all firing at once.
+		nextIncome[model] = t + math.random() * INCOME_EVERY
+		return
+	end
+	if t < due then
+		return
+	end
+	nextIncome[model] = t + INCOME_EVERY
+	if (home.Position - camera.CFrame.Position).Magnitude > INCOME_DISTANCE then
+		return
+	end
+	local top = home.Position + Vector3.new(0, model:GetExtentsSize().Y + 1, 0)
+	Fx.Play("Income", { Position = top, Text = "+" .. Format.Money(income * INCOME_EVERY) })
+end
 
 function BaseAnimController:Start()
 	local elapsed = 0
@@ -34,7 +74,11 @@ function BaseAnimController:Start()
 				continue
 			end
 			local home = model:GetAttribute("Home")
-			if typeof(home) ~= "CFrame" or (home.Position - camera.CFrame.Position).Magnitude > MAX_DISTANCE then
+			if typeof(home) ~= "CFrame" then
+				continue
+			end
+			incomePopups(model, home, t, camera)
+			if (home.Position - camera.CFrame.Position).Magnitude > MAX_DISTANCE then
 				continue
 			end
 			local scale = model:GetScale()
@@ -47,6 +91,16 @@ function BaseAnimController:Start()
 			end
 			model:PivotTo(home * CFrame.new(0, bob, 0) * CFrame.Angles(0, yaw, 0))
 		end
+		-- Shine sweeping across rarity badges.
+		local shine = ((t * 0.6) % 2) - 1
+		for _, gradient in CollectionService:GetTagged(RarityTag.ShineTag) do
+			if gradient:IsA("UIGradient") then
+				gradient.Offset = Vector2.new(shine, 0)
+			end
+		end
+	end)
+	CollectionService:GetInstanceRemovedSignal("BaseTitan"):Connect(function(model)
+		nextIncome[model] = nil
 	end)
 end
 

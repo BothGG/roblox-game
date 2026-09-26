@@ -86,4 +86,40 @@ return function(t)
 		t.expect(CreatureMath.BaseIncome({ Id = "Gloop", Level = 1, Xp = 0 })).toBe(3)
 		t.expect(CreatureMath.BaseIncome({ Id = "Gloop", Level = 1, Xp = 0, Mutation = "Lava" })).toBe(6)
 	end)
+
+	t.test("wild pool: common titans are far more likely than legendary ones", function()
+		local Creatures = t.require(t.Shared.Config.Creatures)
+		local Rarities = t.require(t.Shared.Config.Rarities)
+		local total = { Common = 0, Legendary = 0 }
+		local all = 0
+		for _, entry in Rules.WildPool() do
+			local rarity = Creatures[entry.Creature].Rarity
+			total[rarity] = (total[rarity] or 0) + entry.Weight
+			all += entry.Weight
+		end
+		t.expect(total.Common).toBeCloseTo(Rarities.Common.WildWeight, 1e-6)
+		t.expect(total.Common).toBeGreaterThan(total.Legendary * 10)
+		-- luck only boosts Epic+ titans
+		local lucky = 0
+		for _, entry in Rules.WildPool(3) do
+			lucky += entry.Weight
+		end
+		t.expect(lucky).toBeGreaterThan(all)
+	end)
+
+	t.test("taming uses favorite food first and needs enough food", function()
+		-- Gloop (Common) needs 1 food and loves Meat
+		local plan, favorite = Rules.TameFoodPlan({ Fish = 5, Meat = 1 }, "Gloop")
+		t.expect(plan and plan.Meat).toBe(1)
+		t.expect(favorite).toBe(true)
+		-- Rhinobug (Rare) needs 2 food; no favorites -> no bonus
+		local need = Rules.TameFood("Rhinobug")
+		t.expect(need).toBe(2)
+		local plan2, favorite2 = Rules.TameFoodPlan({ Meat = 5 }, "Rhinobug")
+		t.expect(plan2 and plan2.Meat).toBe(2)
+		t.expect(favorite2).toBe(false)
+		t.expect((Rules.TameFoodPlan({ Meat = 1 }, "Rhinobug"))).toBe(nil)
+		t.expect(Rules.TameChance("Rhinobug", true)).toBeGreaterThan(Rules.TameChance("Rhinobug", false))
+		t.expect(Rules.TameChance("Gloop", true) <= 1).toBe(true)
+	end)
 end

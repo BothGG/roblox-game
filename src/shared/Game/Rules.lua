@@ -182,6 +182,79 @@ function Rules.PickFood(food: { [string]: number }, selected: string?): string?
 	return nil
 end
 
+-- Wild titans ----------------------------------------------------------------
+
+-- Spawn odds for wild titans. Each rarity's WildWeight is shared by the
+-- titans of that rarity; luck multiplies the LuckBoosted (Epic+) ones.
+function Rules.WildPool(luck: number?): { { Creature: string, Weight: number } }
+	local perRarity: { [string]: number } = {}
+	local all: { [string]: any } = Creatures :: any
+	for _, def in all do
+		perRarity[def.Rarity] = (perRarity[def.Rarity] or 0) + 1
+	end
+	local pool: { { Creature: string, Weight: number } } = {}
+	for id, def in all do
+		local rarity = Rarities[def.Rarity]
+		local weight = rarity.WildWeight / perRarity[def.Rarity]
+		if rarity.LuckBoosted then
+			weight *= luck or 1
+		end
+		if weight > 0 then
+			table.insert(pool, { Creature = id, Weight = weight })
+		end
+	end
+	table.sort(pool, function(a, b)
+		return a.Creature < b.Creature
+	end)
+	return pool
+end
+
+function Rules.TameTime(creatureId: string): number
+	return Rarities[Creatures[creatureId].Rarity].TameTime
+end
+
+function Rules.TameFood(creatureId: string): number
+	return Rarities[Creatures[creatureId].Rarity].TameFood
+end
+
+-- Which food taming uses: favorites first, then the rest in menu order.
+-- Returns nil if the player doesn't have enough food, and whether a
+-- favorite food was used (it raises the chance).
+function Rules.TameFoodPlan(food: { [string]: number }, creatureId: string): ({ [string]: number }?, boolean)
+	local need = Rules.TameFood(creatureId)
+	local order = {}
+	for _, id in Creatures[creatureId].Diet or {} do
+		table.insert(order, id)
+	end
+	for _, id in Foods.Order do
+		if not table.find(order, id) then
+			table.insert(order, id)
+		end
+	end
+	local plan: { [string]: number } = {}
+	local favorite = false
+	for _, id in order do
+		if need <= 0 then
+			break
+		end
+		local take = math.min(need, food[id] or 0)
+		if take > 0 then
+			plan[id] = take
+			need -= take
+			favorite = favorite or Rules.IsFavorite(creatureId, id)
+		end
+	end
+	if need > 0 then
+		return nil, false
+	end
+	return plan, favorite
+end
+
+function Rules.TameChance(creatureId: string, favorite: boolean): number
+	local base = Rarities[Creatures[creatureId].Rarity].TameChance
+	return math.min(1, base + (if favorite then GameConfig.Wild.FavoriteBonus else 0))
+end
+
 -- Battle titan -----------------------------------------------------------------
 
 -- The titan used in battles: the chosen one, or the highest level one.

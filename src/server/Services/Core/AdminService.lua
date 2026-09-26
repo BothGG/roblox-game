@@ -5,7 +5,8 @@
 
 	  cash <amount>            food <FoodId> <amount>     trophies <amount>
 	  give <TitanId> [Mutation] level <1-100>              boost <Id> <minutes>
-	  event <TitanClash|MeteorFeast|BloodMoon>             practice
+	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
+	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
 	  tutorial                 daily                      quests
 ]]
 
@@ -30,7 +31,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle
+local Data, Creature, Food, Event, Battle, Wild
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -38,6 +39,7 @@ function AdminService:Init(registry)
 	Food = registry.FoodService
 	Event = registry.EventService
 	Battle = registry.BattleService
+	Wild = registry.WildService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -94,6 +96,11 @@ function AdminService:Run(player: Player, text: string): string?
 		if not Creature:Add(player, args[2], mutation) then
 			return "No free pen!"
 		end
+	elseif command == "wild" then
+		local id = if Creatures[args[2] or ""] then args[2] else nil
+		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
+		Wild:Spawn(id, mutation)
+		return "Spawned a wild " .. (id or "titan")
 	elseif command == "level" and number then
 		for uid in data.Creatures do
 			Creature:SetLevel(player, uid, number)

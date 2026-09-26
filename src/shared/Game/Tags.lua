@@ -8,6 +8,7 @@
 return {
 	Plot = "Plot", -- anchor part per base. Attribute PlotIndex (number). Front (-Z) faces the arena.
 	FoodSpawn = "FoodSpawn", -- where food grows.
+	WildSpawn = "WildSpawn", -- where wild titans appear and roam around.
 	Arena = "Arena", -- arena center part. Attribute Radius (fighting area).
 	ArenaSpawn = "ArenaSpawn", -- fighter start points (at least 2, around the arena edge).
 	Stands = "Stands", -- where spectators get moved during a match.
@@ -19,4 +20,5 @@ return {
 	AnimatedMutation = "AnimatedMutation",
 	BaseTitan = "BaseTitan",
 	FoodPickup = "FoodPickup",
+	WildTitan = "WildTitan",
 }

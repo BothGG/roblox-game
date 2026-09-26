@@ -244,7 +244,9 @@ local function applyMutation(model: Model, mutationId: string)
 	for _, d in model:GetDescendants() do
 		if d:IsA("BasePart") and d ~= model.PrimaryPart then
 			local paint = d:GetAttribute("Paint") or "Body"
-			if paint == "Body" then
+			if paint == "Fx" then
+				continue
+			elseif paint == "Body" then
 				d.Color = mutation.Color
 				d.Material = mutation.Material
 				d.Transparency = mutation.Transparency or d.Transparency
@@ -268,8 +270,10 @@ function CreatureBuilder.Build(creature): Model
 	local model = buildCustom(creature.Id) or buildPlaceholder(def)
 	if creature.Mutation then
 		applyMutation(model, creature.Mutation)
-	elseif def and Rarities[def.Rarity].Order >= Rarities.Legendary.Order then
-		Auras.RarityGlow(mainPart(model), Rarities[def.Rarity].Color)
+	end
+	if def then
+		local rarity = Rarities[def.Rarity]
+		Auras.Rarity(model, rarity.Order, rarity.Color, mainPart(model))
 	end
 	model:SetAttribute("CreatureId", creature.Id)
 	model:SetAttribute("Mutation", creature.Mutation)

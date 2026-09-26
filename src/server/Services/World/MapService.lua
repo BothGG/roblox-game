@@ -7,6 +7,7 @@
 
 	  MapService.PlotAnchors  -> { BasePart } sorted by PlotIndex
 	  MapService.FoodSpawns   -> { BasePart }
+	  MapService.WildSpawns   -> { BasePart } (falls back to FoodSpawns)
 	  MapService.Arena        -> { Center: Vector3, Radius: number }
 	  MapService.ArenaSpawns  -> { CFrame }
 	  MapService.Stands       -> { CFrame }
@@ -34,6 +35,7 @@ local MapService = {
 	Priority = 5,
 	PlotAnchors = {} :: { BasePart },
 	FoodSpawns = {} :: { BasePart },
+	WildSpawns = {} :: { BasePart },
 	Arena = { Center = Vector3.zero, Radius = 90 },
 	ArenaSpawns = {} :: { CFrame },
 	Stands = {} :: { CFrame },
@@ -68,13 +70,14 @@ local function setupLighting()
 	atmosphere.Glare = 0.2
 	atmosphere.Haze = 1.5
 	local bloom = ensure("BloomEffect", Lighting) :: BloomEffect
-	bloom.Intensity = 0.8
-	bloom.Size = 24
-	bloom.Threshold = 1.2
+	-- Low threshold = Neon parts, auras and effects glow (the "shiny" look).
+	bloom.Intensity = 1
+	bloom.Size = 28
+	bloom.Threshold = 0.95
 	local color = ensure("ColorCorrectionEffect", Lighting) :: ColorCorrectionEffect
 	color.Name = "BaseColor"
-	color.Saturation = 0.15
-	color.Contrast = 0.05
+	color.Saturation = 0.25
+	color.Contrast = 0.08
 	local rays = ensure("SunRaysEffect", Lighting) :: SunRaysEffect
 	rays.Intensity = 0.05
 end
@@ -112,6 +115,11 @@ function MapService:Start()
 		return (a:GetAttribute("PlotIndex") or 0) < (b:GetAttribute("PlotIndex") or 0)
 	end)
 	self.FoodSpawns = parts(Tags.FoodSpawn)
+	self.WildSpawns = parts(Tags.WildSpawn)
+	if #self.WildSpawns == 0 then
+		log:Warn("map has no WildSpawn markers; wild titans use food spawns")
+		self.WildSpawns = self.FoodSpawns
+	end
 	self.MeteorZones = parts(Tags.MeteorZone)
 	self.Leaderboards = parts(Tags.Leaderboard)
 

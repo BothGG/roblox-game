@@ -27,6 +27,13 @@ return {
 			Reward = { CashSeconds = 120, Cash = 500 },
 		},
 		{
+			Id = "Tame",
+			Text = "Tame %d wild titans",
+			Event = "Tamed",
+			Goal = { 1, 3 },
+			Reward = { Boost = { Id = "Luck", Minutes = 10 }, Cash = 800 },
+		},
+		{
 			Id = "Steal",
 			Text = "Steal food %d times",
 			Event = "Stole",

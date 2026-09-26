@@ -60,6 +60,8 @@ local function targetPosition(): Vector3?
 		end)
 	elseif step.Target == "Food" then
 		return nearest(Tags.FoodPickup)
+	elseif step.Target == "Wild" then
+		return nearest(Tags.WildTitan)
 	elseif step.Target == "Arena" then
 		local arena = CollectionService:GetTagged(Tags.Arena)[1]
 		return if arena and arena:IsA("BasePart") then arena.Position else Vector3.new(0, 2, 0)

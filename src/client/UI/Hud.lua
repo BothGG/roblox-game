@@ -31,6 +31,7 @@ local window
 
 local EVENT_NAMES = {
 	MeteorFeast = "☄️ Meteor Feast",
+	WildRush = "🌟 Wild Rush",
 	BloodMoon = "🩸 Blood Moon",
 	TitanClash = "⚔️ Titan Clash",
 }

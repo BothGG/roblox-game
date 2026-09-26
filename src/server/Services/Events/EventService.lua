@@ -2,6 +2,7 @@
 	EventService: random server events that keep things fresh.
 
 	  TitanClash  - free-for-all battle in the arena (BattleService)
+	  WildRush    - lots of wild titans appear, rare ones 3x more likely
 	  MeteorFeast - food falls on the fields
 	  BloodMoon   - 2x growth, faster stealing
 
@@ -27,12 +28,23 @@ local EventService = {
 	Running = nil :: string?,
 }
 
-local Food, Base, Battle
+local Food, Base, Battle, Wild
 
 local EVENTS = {}
 
 function EVENTS.TitanClash()
 	Battle:RunClash()
+end
+
+function EVENTS.WildRush()
+	local duration = GameConfig.Events.WildRushDuration
+	Net.Announce(
+		"🌟 WILD RUSH",
+		"Wild titans are everywhere and rare ones are 3x more common! Go tame them!",
+		Color3.fromRGB(120, 255, 150)
+	)
+	Workspace:SetAttribute("EventEndsAt", Workspace:GetServerTimeNow() + duration)
+	Wild:Rush(duration)
 end
 
 function EVENTS.MeteorFeast()
@@ -78,12 +90,13 @@ function EVENTS.BloodMoon()
 end
 
 -- The Titan Clash comes up more often: it's the main event.
-local ROTATION = { "TitanClash", "MeteorFeast", "TitanClash", "BloodMoon" }
+local ROTATION = { "TitanClash", "WildRush", "TitanClash", "MeteorFeast", "TitanClash", "BloodMoon" }
 
 function EventService:Init(registry)
 	Food = registry.FoodService
 	Base = registry.BaseService
 	Battle = registry.BattleService
+	Wild = registry.WildService
 end
 
 function EventService:Start()

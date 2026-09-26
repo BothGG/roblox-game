@@ -509,6 +509,20 @@ local GameConfig = {
 		RespawnTime = { Common = 20, Rare = 35, Epic = 60, Legendary = 120, Mythic = 300, Secret = 600 },
 	},
 
+	-- Wild titans roaming the fields: find them and tame them with food.
+	-- Per-rarity odds / tame time / food cost are in Rarities.lua.
+	Wild = {
+		MaxWild = 8, -- wild titans on the island at once
+		RespawnDelay = 12, -- seconds between spawns (randomized a bit)
+		Lifetime = { Min = 120, Max = 240 }, -- then it wanders off
+		WanderRadius = 28,
+		MoveSpeed = 7,
+		TameDistance = 14,
+		MutationChance = 0.04,
+		FavoriteBonus = 0.2, -- + tame chance when fed a favorite food
+		EventLuck = 3, -- rare weight multiplier during the Wild Rush event
+	},
+
 	Steal = {
 		HoldTime = 1.5,
 		CarryWalkSpeed = 11,
@@ -550,6 +564,7 @@ local GameConfig = {
 		MeteorFoodCount = 30,
 		BloodMoonDuration = 90,
 		BloodMoonGrowthMult = 2,
+		WildRushDuration = 90,
 	},
 
 	Offline = {
@@ -666,7 +681,7 @@ local Mutations = {
 		Color = rgb(255, 0, 0),
 		AccentColor = rgb(255, 255, 255),
 		Material = Enum.Material.Neon,
-		Aura = { Color = rgb(255, 255, 255), Light = true, Particles = "Sparkles" },
+		Aura = { Color = rgb(255, 255, 255), Light = true, Particles = "Rainbow" },
 		Animated = true, -- the client cycles its colors
 	},
 }
@@ -716,6 +731,13 @@ return {
 			Goal = { 10, 30 },
 			Field = "Amount",
 			Reward = { CashSeconds = 120, Cash = 500 },
+		},
+		{
+			Id = "Tame",
+			Text = "Tame %d wild titans",
+			Event = "Tamed",
+			Goal = { 1, 3 },
+			Reward = { Boost = { Id = "Luck", Minutes = 10 }, Cash = 800 },
 		},
 		{
 			Id = "Steal",
@@ -773,8 +795,13 @@ return {
             <string name="Source"><![CDATA[--!strict
 --[[
 	Rarities.
-	Announce    = tell the whole server when someone hatches one.
+	Announce    = tell the whole server when someone hatches / finds one.
 	LuckBoosted = egg weights of this rarity are multiplied by the player's luck.
+	WildWeight  = how often wild titans of this rarity appear (shared by all
+	              titans of that rarity).
+	TameTime    = seconds to hold the Tame prompt.
+	TameFood    = food it eats to be tamed.
+	TameChance  = chance taming works (favorite food adds GameConfig.Wild.FavoriteBonus).
 ]]
 
 export type Rarity = {
@@ -783,21 +810,41 @@ export type Rarity = {
 	Color: Color3,
 	LuckBoosted: boolean,
 	Announce: boolean,
+	WildWeight: number,
+	TameTime: number,
+	TameFood: number,
+	TameChance: number,
 }
 
+local function rarity(
+	id: string,
+	order: number,
+	color: Color3,
+	lucky: boolean,
+	announce: boolean,
+	wild: { number }
+): Rarity
+	return {
+		Id = id,
+		Order = order,
+		Color = color,
+		LuckBoosted = lucky,
+		Announce = announce,
+		WildWeight = wild[1],
+		TameTime = wild[2],
+		TameFood = wild[3],
+		TameChance = wild[4],
+	}
+end
+
+--                                                                  { WildWeight, TameTime, TameFood, TameChance }
 local Rarities: { [string]: Rarity } = {
-	Common = { Id = "Common", Order = 1, Color = Color3.fromRGB(200, 200, 200), LuckBoosted = false, Announce = false },
-	Rare = { Id = "Rare", Order = 2, Color = Color3.fromRGB(70, 150, 255), LuckBoosted = false, Announce = false },
-	Epic = { Id = "Epic", Order = 3, Color = Color3.fromRGB(175, 90, 255), LuckBoosted = true, Announce = false },
-	Legendary = {
-		Id = "Legendary",
-		Order = 4,
-		Color = Color3.fromRGB(255, 175, 0),
-		LuckBoosted = true,
-		Announce = true,
-	},
-	Mythic = { Id = "Mythic", Order = 5, Color = Color3.fromRGB(255, 60, 95), LuckBoosted = true, Announce = true },
-	Secret = { Id = "Secret", Order = 6, Color = Color3.fromRGB(20, 255, 200), LuckBoosted = true, Announce = true },
+	Common = rarity("Common", 1, Color3.fromRGB(200, 200, 200), false, false, { 60, 1, 1, 1 }),
+	Rare = rarity("Rare", 2, Color3.fromRGB(70, 150, 255), false, false, { 26, 2, 2, 0.85 }),
+	Epic = rarity("Epic", 3, Color3.fromRGB(175, 90, 255), true, false, { 10, 3, 4, 0.7 }),
+	Legendary = rarity("Legendary", 4, Color3.fromRGB(255, 175, 0), true, true, { 3, 4.5, 6, 0.55 }),
+	Mythic = rarity("Mythic", 5, Color3.fromRGB(255, 60, 95), true, true, { 0.8, 6, 10, 0.4 }),
+	Secret = rarity("Secret", 6, Color3.fromRGB(20, 255, 200), true, true, { 0.2, 8, 15, 0.3 }),
 }
 
 return Rarities
@@ -953,7 +1000,7 @@ return Store
 	Tutorial steps, in order. Each step completes when its Event happens
 	Count times (with an optional MinLevel for LevelUp).
 	Target tells the client where to point the arrow:
-	  "MyTitan" | "Food" | "Menu:Eggs" | "Menu:Titans" | "Arena"
+	  "MyTitan" | "Food" | "Wild" | "Menu:Eggs" | "Menu:Titans" | "Arena"
 ]]
 
 return {
@@ -961,7 +1008,12 @@ return {
 	Steps = {
 		{ Text = "Walk to your titan and press E to feed it", Event = "Fed", Count = 1, Target = "MyTitan" },
 		{ Text = "Grab 3 food in the fields around the arena", Event = "FoodPicked", Count = 3, Target = "Food" },
-		{ Text = "Buy an egg from the 🥚 Eggs menu", Event = "Hatched", Count = 1, Target = "Menu:Eggs" },
+		{
+			Text = "Find a wild titan in the fields, hold E to tame it with food",
+			Event = "Tamed",
+			Count = 1,
+			Target = "Wild",
+		},
 		{
 			Text = "Feed your titans until one reaches Lv.5",
 			Event = "LevelUp",
@@ -1050,72 +1102,109 @@ return Fx
           <Properties>
             <string name="Name">Auras</string>
             <string name="Source"><![CDATA[--[[
-	Auras: effects that stay attached to a titan (mutation glow, rare sparkle).
-	Used by the server when it builds a titan model, so every player sees them.
+	Auras: effects that stay on a titan so rare and mutated ones LOOK rare
+	from across the map (like the glowing rare pets in top Roblox games).
+	Added by the server when it builds a titan model, so everyone sees them.
 
-	Add a new particle style: add a function to PARTICLES below and use its
-	name in Config/Mutations.lua  (Aura = { Particles = "YourStyle" }).
+	Rarity auras (Auras.Rarity):
+	  Rare       glowing ground ring + a few sparkles
+	  Epic       + rising sparkles and a soft light
+	  Legendary  + a light beam into the sky
+	  Mythic     + a colored outline (Highlight) and more sparkles
+	  Secret     + a swirling vortex
+
+	Mutation auras (Auras.Apply) use PARTICLES below. Add a new style there
+	and use its name in Config/Mutations.lua (Aura = { Particles = "Name" }).
+
+	Every part added here has Paint = "Fx" so mutation paint skips it.
 ]]
 
 local Textures = require(script.Parent.Textures)
 
 local Auras = {}
 
-local function emitter(parent: Instance, color: Color3): ParticleEmitter
+local function kp(time: number, value: number): NumberSequenceKeypoint
+	return NumberSequenceKeypoint.new(time, value)
+end
+
+local function emitter(parent: Instance, color: Color3 | ColorSequence): ParticleEmitter
 	local e = Instance.new("ParticleEmitter")
 	e.Name = "Aura"
-	e.Color = ColorSequence.new(color)
+	e.Color = if typeof(color) == "ColorSequence" then color else ColorSequence.new(color :: Color3)
 	e.LightEmission = 1
+	e.LightInfluence = 0
 	e.Rotation = NumberRange.new(0, 360)
 	e.RotSpeed = NumberRange.new(-90, 90)
 	e.Parent = parent
 	return e
 end
 
+local RAINBOW = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 70, 70)),
+	ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 200, 60)),
+	ColorSequenceKeypoint.new(0.4, Color3.fromRGB(90, 230, 110)),
+	ColorSequenceKeypoint.new(0.6, Color3.fromRGB(70, 180, 255)),
+	ColorSequenceKeypoint.new(0.8, Color3.fromRGB(170, 90, 255)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 70, 170)),
+})
+
 local PARTICLES = {
+	-- Glowing embers rising off the body + a flicker of flame.
 	Embers = function(parent: Instance, color: Color3)
-		local e = emitter(parent, color)
-		e.Texture = Textures.Sparkle
-		e.Rate = 10
-		e.Lifetime = NumberRange.new(1.2, 2.2)
-		e.Speed = NumberRange.new(1, 3)
-		e.Acceleration = Vector3.new(0, 4, 0)
-		e.SpreadAngle = Vector2.new(60, 60)
-		e.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.4),
-			NumberSequenceKeypoint.new(1, 0),
-		})
+		local e = emitter(parent, ColorSequence.new(Color3.fromRGB(255, 230, 120), color))
+		e.Texture = Textures.Sparks
+		e.Rate = 14
+		e.Lifetime = NumberRange.new(1, 1.8)
+		e.Speed = NumberRange.new(2, 5)
+		e.Acceleration = Vector3.new(0, 6, 0)
+		e.SpreadAngle = Vector2.new(50, 50)
+		e.Size = NumberSequence.new({ kp(0, 0.5), kp(1, 0) })
+		local flame = emitter(parent, color)
+		flame.Texture = Textures.Fire
+		flame.Rate = 6
+		flame.Lifetime = NumberRange.new(0.5, 0.9)
+		flame.Speed = NumberRange.new(1, 2)
+		flame.Acceleration = Vector3.new(0, 5, 0)
+		flame.Size = NumberSequence.new({ kp(0, 1.2), kp(1, 0) })
+		flame.Transparency = NumberSequence.new({ kp(0, 0.4), kp(1, 1) })
 	end,
+	-- Twinkling star sparkles around the body.
 	Sparkles = function(parent: Instance, color: Color3)
 		local e = emitter(parent, color)
 		e.Texture = Textures.Sparkle
-		e.Rate = 6
-		e.Lifetime = NumberRange.new(1, 2)
+		e.Rate = 8
+		e.Lifetime = NumberRange.new(0.8, 1.6)
 		e.Speed = NumberRange.new(0.5, 1.5)
 		e.SpreadAngle = Vector2.new(180, 180)
-		e.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.5, 0.6),
-			NumberSequenceKeypoint.new(1, 0),
-		})
+		e.Size = NumberSequence.new({ kp(0, 0), kp(0.5, 0.9), kp(1, 0) })
 	end,
+	-- Dark wisps + purple glints.
 	Smoke = function(parent: Instance, color: Color3)
-		local e = emitter(parent, color)
+		local e = emitter(parent, Color3.fromRGB(40, 20, 60))
 		e.Texture = Textures.Smoke
 		e.LightEmission = 0
-		e.Rate = 5
-		e.Lifetime = NumberRange.new(2, 3)
+		e.Rate = 6
+		e.Lifetime = NumberRange.new(1.5, 2.5)
 		e.Speed = NumberRange.new(0.5, 1.5)
-		e.Acceleration = Vector3.new(0, 1, 0)
-		e.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.3, 0.5),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-		e.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1.5),
-			NumberSequenceKeypoint.new(1, 3),
-		})
+		e.Acceleration = Vector3.new(0, 1.5, 0)
+		e.Transparency = NumberSequence.new({ kp(0, 1), kp(0.3, 0.4), kp(1, 1) })
+		e.Size = NumberSequence.new({ kp(0, 1.5), kp(1, 3.5) })
+		local glint = emitter(parent, color)
+		glint.Texture = Textures.Sparkle
+		glint.Rate = 5
+		glint.Lifetime = NumberRange.new(0.6, 1)
+		glint.Speed = NumberRange.new(0.5, 1)
+		glint.Size = NumberSequence.new({ kp(0, 0), kp(0.5, 0.7), kp(1, 0) })
+	end,
+	-- Rainbow sparkles (for the Rainbow mutation).
+	Rainbow = function(parent: Instance, _color: Color3)
+		local e = emitter(parent, RAINBOW)
+		e.Texture = Textures.Sparkle
+		e.Rate = 16
+		e.Lifetime = NumberRange.new(1, 1.6)
+		e.Speed = NumberRange.new(1, 3)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.Size = NumberSequence.new({ kp(0, 0), kp(0.4, 1.1), kp(1, 0) })
 	end,
 }
 
@@ -1125,8 +1214,8 @@ export type AuraDef = {
 	Particles: string?,
 }
 
--- Adds the aura to a part (usually the titan's body). Call before scaling
--- the model, so Model:ScaleTo scales the particles and light with it.
+-- Adds a mutation aura to a part (usually the titan's body). Call before
+-- scaling the model, so Model:ScaleTo scales the particles and light with it.
 function Auras.Apply(part: BasePart, aura: AuraDef)
 	if aura.Particles and PARTICLES[aura.Particles] then
 		PARTICLES[aura.Particles](part, aura.Color)
@@ -1141,7 +1230,132 @@ function Auras.Apply(part: BasePart, aura: AuraDef)
 	end
 end
 
--- Subtle sparkle for Legendary+ titan so rare ones stand out.
+local function fxPart(model: Model, size: Vector3, cf: CFrame): Part
+	local p = Instance.new("Part")
+	p.Name = "AuraFx"
+	p:SetAttribute("Paint", "Fx")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Size = size
+	p.CFrame = cf
+	p.Parent = model
+	return p
+end
+
+-- Rarity aura. `order` is Rarities[x].Order (2 = Rare ... 6 = Secret).
+-- Call on a freshly built model (scale 1, pivot at the feet, at the origin).
+function Auras.Rarity(model: Model, order: number, color: Color3, body: BasePart)
+	if order < 2 then
+		return
+	end
+	local pivot = model:GetPivot()
+	local extents = model:GetExtentsSize()
+	local footprint = math.max(extents.X, extents.Z) * 1.25 + 1
+
+	-- Glowing ring on the ground.
+	local ring = fxPart(
+		model,
+		Vector3.new(0.1, footprint, footprint),
+		pivot * CFrame.new(0, 0.1, 0) * CFrame.Angles(0, 0, math.rad(90))
+	)
+	ring.Name = "AuraRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Material = Enum.Material.Neon
+	ring.Color = color
+	ring.Transparency = 0.55
+	local inner = fxPart(
+		model,
+		Vector3.new(0.12, footprint * 0.8, footprint * 0.8),
+		pivot * CFrame.new(0, 0.11, 0) * CFrame.Angles(0, 0, math.rad(90))
+	)
+	inner.Shape = Enum.PartType.Cylinder
+	inner.Material = Enum.Material.SmoothPlastic
+	inner.Color = color:Lerp(Color3.new(0, 0, 0), 0.5)
+	inner.Transparency = 0.35
+
+	-- Sparkles rising from the ring.
+	local rise = emitter(ring, color)
+	rise.Texture = Textures.Sparkle
+	rise.Shape = Enum.ParticleEmitterShape.Disc
+	rise.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+	rise.EmissionDirection = Enum.NormalId.Right -- the cylinder's axis points up
+	rise.Rate = 2 + order * 2
+	rise.Lifetime = NumberRange.new(1, 2)
+	rise.Speed = NumberRange.new(2, 4 + order)
+	rise.Size = NumberSequence.new({ kp(0, 0), kp(0.3, 0.5 + order * 0.1), kp(1, 0) })
+
+	if order >= 3 then
+		local light = Instance.new("PointLight")
+		light.Name = "AuraLight"
+		light.Color = color
+		light.Brightness = 1 + order * 0.3
+		light.Range = 8 + order * 2
+		light.Parent = body
+	end
+
+	if order >= 4 then
+		-- A light beam into the sky: rare titans can be spotted from far away.
+		local bottom = Instance.new("Attachment")
+		bottom.Name = "BeamBottom"
+		bottom.Parent = ring
+		local top = Instance.new("Attachment")
+		top.Name = "BeamTop"
+		top.Parent = ring
+		top.WorldPosition = ring.Position + Vector3.new(0, 30 + order * 5, 0)
+		local beam = Instance.new("Beam")
+		beam.Name = "AuraBeam"
+		beam.Attachment0 = bottom
+		beam.Attachment1 = top
+		beam.FaceCamera = true
+		beam.Texture = Textures.Glow
+		beam.TextureMode = Enum.TextureMode.Stretch
+		beam.LightEmission = 1
+		beam.LightInfluence = 0
+		beam.Brightness = 2
+		beam.Color = ColorSequence.new(color, Color3.new(1, 1, 1))
+		beam.Transparency = NumberSequence.new({ kp(0, 0.25), kp(0.6, 0.7), kp(1, 1) })
+		beam.Width0 = footprint * 0.9
+		beam.Width1 = footprint * 0.4
+		beam.Segments = 1
+		beam.Parent = ring
+	end
+
+	if order >= 5 then
+		local h = Instance.new("Highlight")
+		h.Name = "AuraOutline"
+		h.FillTransparency = 1
+		h.OutlineColor = color
+		h.OutlineTransparency = 0.2
+		h.DepthMode = Enum.HighlightDepthMode.Occluded
+		h.Parent = model
+		local glints = emitter(body, color)
+		glints.Texture = Textures.Star
+		glints.Rate = 10
+		glints.Lifetime = NumberRange.new(0.6, 1.2)
+		glints.Speed = NumberRange.new(0.5, 2)
+		glints.SpreadAngle = Vector2.new(180, 180)
+		glints.Size = NumberSequence.new({ kp(0, 0), kp(0.5, 1.2), kp(1, 0) })
+	end
+
+	if order >= 6 then
+		local vortex = emitter(ring, color)
+		vortex.Texture = Textures.Vortex
+		vortex.Orientation = Enum.ParticleOrientation.VelocityPerpendicular
+		vortex.EmissionDirection = Enum.NormalId.Right
+		vortex.Speed = NumberRange.new(0.01)
+		vortex.SpreadAngle = Vector2.zero
+		vortex.Rate = 1.5
+		vortex.Lifetime = NumberRange.new(1.5)
+		vortex.RotSpeed = NumberRange.new(120)
+		vortex.Size = NumberSequence.new({ kp(0, footprint * 0.3), kp(1, footprint * 0.6) })
+		vortex.Transparency = NumberSequence.new({ kp(0, 1), kp(0.3, 0.3), kp(1, 1) })
+	end
+end
+
+-- Kept for older code: a small sparkle glow on a part.
 function Auras.RarityGlow(part: BasePart, color: Color3)
 	Auras.Apply(part, { Color = color, Light = true, Particles = "Sparkles" })
 end
@@ -1159,6 +1373,12 @@ return Auras
 	Each preset is  function(params, P)  where P = Primitives.
 	The server plays one with  FxService:PlayAll("Name", params).
 
+	Recipe for effects that feel good (used everywhere below):
+	  1. Anticipation: a quick ChargeUp / Glow before the moment.
+	  2. Impact: Glow (bright flash) + Shockwave (ring) + Sparks (streaks).
+	  3. Aftermath: slower Burst / smoke / Chunks, FloatText, sound.
+	  4. Only for YOU: Shake / FovPunch / Flash / Confetti.
+
 	To add a new effect: copy a preset, rename it, and mix primitives.
 	Keep far-away effects cheap: check P.Distance(position) first.
 ]]
@@ -1167,28 +1387,43 @@ local Textures = require(script.Parent.Textures)
 
 local GOLD = Color3.fromRGB(255, 210, 60)
 local RED = Color3.fromRGB(255, 60, 60)
+local GREEN = Color3.fromRGB(90, 230, 110)
 local WHITE = Color3.new(1, 1, 1)
 local FAR = 250 -- skip world effects farther than this from the camera
 
 local Presets = {}
+
+-- The standard "boom": flash + ring + streaks. Size ~ 1 for small, 3+ for huge.
+local function impact(P, position: Vector3, color: Color3, size: number)
+	P.Glow(position, { Color = color, Size = 6 * size, Duration = 0.3 + 0.05 * size })
+	P.Shockwave(position, { Color = color, Radius = 7 * size, Duration = 0.4 + 0.05 * size })
+	P.Sparks(position, { Color = color, Count = math.floor(10 + 6 * size), Speed = 30 + 10 * size })
+end
+
+--------------------------------------------------------------------------
+-- Titans at your base
+--------------------------------------------------------------------------
 
 -- Titan eats food.
 function Presets.Feed(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
 	end
-	P.Burst(p.Position, { Color = p.Color, Count = 12, Speed = 12, Size = 0.6 })
+	local color = p.Color or WHITE
+	P.Glow(p.Position, { Color = color, Size = 5, Duration = 0.25 })
+	P.Burst(p.Position, { Color = color, Count = 14, Speed = 14, Size = 0.7 })
+	P.Sparks(p.Position, { Color = color, Count = 8, Speed = 22, Size = 0.4 })
 	P.Sound("Pop", p.Position, 0.5, 1 + math.random() * 0.2)
 	P.Bounce(p.Model)
 	if p.Favorite then
-		P.Burst(p.Position, { Color = Color3.fromRGB(255, 90, 140), Count = 8, Speed = 8, Size = 1, Gravity = 6 })
+		P.Burst(p.Position, { Color = Color3.fromRGB(255, 90, 140), Count = 10, Speed = 8, Size = 1.1, Gravity = 6 })
 	end
 	if P.IsMe(p.Owner) then
 		local text = if p.Xp then "+" .. tostring(p.Xp) .. " XP" else "+XP"
 		if p.Favorite then
 			text ..= " ❤️"
 		end
-		P.FloatText(p.Position, text, { Color = p.Color, Size = 1.6 })
+		P.FloatText(p.Position, text, { Color = color, Size = 1.8 })
 	end
 end
 
@@ -1198,44 +1433,65 @@ function Presets.LevelUp(p, P)
 		return
 	end
 	local ground = p.Ground or p.Position
-	P.Ring(ground, { Color = GOLD, Radius = 10 + (p.Size or 0), Duration = 0.6 })
-	P.Burst(p.Position, { Color = GOLD, Count = 30, Speed = 30, Size = 0.9 })
-	P.Light(p.Position, { Color = GOLD, Brightness = 6, Range = 25 })
-	if p.Model then
-		P.Highlight(p.Model, { Color = GOLD, Duration = 0.5 })
-	end
-	P.Sound("LevelUp", p.Position, 0.7, 1.2)
-	if P.IsMe(p.Owner) then
-		P.FloatText(p.Position + Vector3.new(0, 2, 0), "LEVEL " .. tostring(p.Level) .. "!", { Color = GOLD, Size = 3 })
-		P.Shake(0.15, 0.25)
-	end
+	local size = p.Size or 0
+	P.ChargeUp(p.Position, { Color = GOLD, Size = 12 + size, Duration = 0.25 })
+	task.delay(0.22, function()
+		impact(P, p.Position, GOLD, 1.5)
+		P.Shockwave(ground, { Color = GOLD, Radius = 12 + size * 1.5, Duration = 0.6 })
+		P.Ring(ground, { Color = GOLD, Radius = 10 + size, Duration = 0.6 })
+		P.Beam(ground, { Color = GOLD, Height = 40 + size * 4, Width = 4 + size * 0.4, Duration = 1 })
+		P.Burst(p.Position, { Color = GOLD, Count = 24, Speed = 26, Size = 1, Texture = Textures.Star })
+		P.Light(p.Position, { Color = GOLD, Brightness = 6, Range = 25 })
+		if p.Model then
+			P.Highlight(p.Model, { Color = GOLD, Duration = 0.5 })
+		end
+		P.Sound("LevelUp", p.Position, 0.7, 1.2)
+		if P.IsMe(p.Owner) then
+			P.FloatText(
+				p.Position + Vector3.new(0, 2, 0),
+				"LEVEL " .. tostring(p.Level) .. "!",
+				{ Color = GOLD, Size = 3.2 }
+			)
+			P.Shake(0.15, 0.25)
+			P.FovPunch(-4, 0.35)
+		end
+	end)
 end
 
 -- Titan mutates (big moment!).
 function Presets.Mutation(p, P)
 	local color = p.Color or WHITE
+	local ground = p.Ground or p.Position
 	if P.Distance(p.Position) <= FAR then
-		local ground = p.Ground or p.Position
-		P.Pillar(ground, { Color = color, Height = 80, Width = 10, Duration = 1.5 })
-		P.Ring(ground, { Color = color, Radius = 25, Duration = 0.8 })
-		task.delay(0.15, function()
-			P.Ring(ground, { Color = WHITE, Radius = 18, Duration = 0.6 })
+		P.ChargeUp(p.Position, { Color = color, Size = 30, Duration = 0.5 })
+		P.Glow(p.Position, { Color = color, Size = 10, Duration = 0.5 })
+		task.delay(0.45, function()
+			impact(P, p.Position, color, 3)
+			P.Beam(ground, { Color = color, Height = 120, Width = 12, Duration = 1.8 })
+			P.Shockwave(ground, { Color = color, Radius = 35, Duration = 0.8 })
+			P.Ring(ground, { Color = color, Radius = 25, Duration = 0.8 })
+			task.delay(0.15, function()
+				P.Ring(ground, { Color = WHITE, Radius = 18, Duration = 0.6 })
+			end)
+			P.Burst(p.Position, { Color = color, Count = 60, Speed = 40, Size = 1.3, Lifetime = 1.2 })
+			P.Light(p.Position, { Color = color, Brightness = 10, Range = 40, Duration = 1 })
+			if p.Model then
+				P.Highlight(p.Model, { Color = color, Duration = 1.2 })
+			end
+			P.Sound("Fanfare", p.Position, 0.8)
 		end)
-		P.Burst(p.Position, { Color = color, Count = 60, Speed = 40, Size = 1.2, Lifetime = 1.2 })
-		P.Light(p.Position, { Color = color, Brightness = 10, Range = 40, Duration = 1 })
-		if p.Model then
-			P.Highlight(p.Model, { Color = color, Duration = 1.2 })
-		end
-		P.Sound("Fanfare", p.Position, 0.8)
 	end
 	if P.IsMe(p.Owner) then
-		P.Flash(color, 0.6, 0.2)
-		P.Shake(0.4, 0.5)
-		P.FloatText(
-			p.Position + Vector3.new(0, 4, 0),
-			string.upper(p.Name or "MUTATION") .. "!",
-			{ Color = color, Size = 4, Duration = 2 }
-		)
+		task.delay(0.45, function()
+			P.Flash(color, 0.6, 0.2)
+			P.Shake(0.4, 0.5)
+			P.FovPunch(-8, 0.5)
+			P.FloatText(
+				p.Position + Vector3.new(0, 4, 0),
+				string.upper(p.Name or "MUTATION") .. "!",
+				{ Color = color, Size = 4.5, Duration = 2 }
+			)
+		end)
 	end
 end
 
@@ -1245,146 +1501,112 @@ function Presets.Spawn(p, P)
 		return
 	end
 	local color = p.Color or WHITE
+	impact(P, p.Position + Vector3.new(0, 2, 0), color, 1.2)
 	P.Ring(p.Position, { Color = color, Radius = 10, Duration = 0.5 })
 	P.Burst(p.Position + Vector3.new(0, 2, 0), { Color = color, Count = 25, Speed = 18 })
 	if p.Rare then
-		P.Pillar(p.Position, { Color = color, Height = 50, Width = 6 })
+		P.Beam(p.Position, { Color = color, Height = 70, Width = 8, Duration = 1.6 })
 	end
 end
 
--- Picked up wild food.
-function Presets.Pickup(p, P)
-	P.Burst(p.Position, { Color = p.Color, Count = 10, Speed = 10, Size = 0.5 })
-	P.Sound("Pop", p.Position, 0.5, 1.4)
-	if p.Text then
-		P.FloatText(p.Position, p.Text, { Color = p.Color, Size = 1.5 })
-	end
-end
-
--- Someone starts stealing from a food storage.
-function Presets.StealStart(p, P)
-	if P.Distance(p.Position) > FAR then
-		return
-	end
-	P.Burst(p.Position, { Color = RED, Count = 15, Speed = 15 })
-	P.Ring(p.Position, { Color = RED, Radius = 8, Duration = 0.4 })
-end
-
--- Shown only to the player being stolen from.
-function Presets.StealAlert(_p, P)
-	P.Vignette(RED, 1.5)
-	P.Sound("Alarm", nil, 0.6)
-end
-
--- Thief made it home with the food.
-function Presets.Deposit(p, P)
-	P.Burst(p.Position, { Color = p.Color, Count = 25, Speed = 20 })
-	P.Ring(p.Position, { Color = p.Color, Radius = 8 })
-	if P.IsMe(p.Owner) then
-		P.FloatText(p.Position, "STOLEN!", { Color = p.Color, Size = 2.5 })
-		P.Sound("Coin", nil, 0.6)
-	end
-end
-
--- A guard titan knocks a thief away.
-function Presets.GuardKnock(p, P)
-	if P.Distance(p.Position) > FAR then
-		return
-	end
-	P.Ring(p.Position, { Color = WHITE, Radius = 14, Duration = 0.4 })
-	P.Burst(p.Position, { Color = WHITE, Count = 20, Speed = 35 })
-	P.Sound("Impact", p.Position, 0.8)
-	if P.IsMe(p.Target) then
-		P.Shake(0.6, 0.4)
-		P.Flash(WHITE, 0.25, 0.4)
-		if p.Velocity then
-			P.Knockback(p.Velocity)
-		end
-	end
-end
-
--- Food taken back from a thief.
-function Presets.TakeBack(p, P)
-	P.Burst(p.Position, { Color = Color3.fromRGB(90, 220, 120), Count = 20, Speed = 20 })
-	P.Sound("Pop", p.Position, 0.6, 0.9)
+-- Money popping off your titans (client plays this locally, see BaseAnimController).
+function Presets.Income(p, P)
+	P.FloatText(p.Position, p.Text or "+$", { Color = GREEN, Size = p.Size or 1.6, Duration = 1.1, Rise = 4 })
 end
 
 -- Sold a titan.
 function Presets.Sell(p, P)
-	P.Burst(p.Position, { Color = GOLD, Count = 40, Speed = 25, Size = 0.8 })
+	impact(P, p.Position, GOLD, 1.5)
+	P.Burst(p.Position, { Color = GOLD, Count = 40, Speed = 25, Size = 0.9 })
 	P.Ring(p.Ground or p.Position, { Color = GOLD, Radius = 10 })
 	if P.IsMe(p.Owner) then
-		P.FloatText(p.Position, "+" .. (p.Text or ""), { Color = GOLD, Size = 2.5 })
+		P.FloatText(p.Position, "+" .. (p.Text or ""), { Color = GOLD, Size = 2.8 })
 		P.Sound("Coin", nil, 0.7)
 	end
 end
 
--- Meteor lands (Meteor Feast event).
-function Presets.MeteorImpact(p, P)
-	local distance = P.Distance(p.Position)
-	if distance > FAR * 1.5 then
+--------------------------------------------------------------------------
+-- Finding titans (wild)
+--------------------------------------------------------------------------
+
+-- A rare wild titan appeared: a tall beacon everyone on the island can see.
+function Presets.WildSpawn(p, P)
+	local color = p.Color or WHITE
+	local rare = (p.RarityOrder or 1) >= 4
+	P.Beam(p.Position, {
+		Color = color,
+		Height = if rare then 220 else 90,
+		Width = if rare then 16 else 8,
+		Duration = if rare then 3 else 1.6,
+	})
+	if P.Distance(p.Position) <= FAR then
+		impact(P, p.Position + Vector3.new(0, 3, 0), color, if rare then 3 else 1.5)
+		P.Burst(p.Position, {
+			Color = Color3.fromRGB(235, 235, 235),
+			Count = 14,
+			Speed = 10,
+			Size = 3,
+			Lifetime = 1.2,
+			Gravity = 3,
+			LightEmission = 0,
+			Texture = Textures.Dust,
+		})
+		P.Sound(if rare then "Fanfare" else "Pop", p.Position, 0.7)
+	end
+end
+
+-- Someone started taming a wild titan.
+function Presets.TameStart(p, P)
+	if P.Distance(p.Position) > FAR then
 		return
 	end
-	P.Ring(p.Position, { Color = Color3.fromRGB(255, 140, 40), Radius = 16, Duration = 0.5 })
-	P.Burst(p.Position, { Color = p.Color, Count = 25, Speed = 30, Size = 1 })
-	P.Burst(p.Position, {
-		Color = Color3.fromRGB(80, 80, 80),
-		Count = 10,
-		Speed = 10,
-		Size = 3,
-		Lifetime = 1.5,
-		Gravity = 5,
-		LightEmission = 0,
-	})
-	P.Light(p.Position, { Color = Color3.fromRGB(255, 150, 50), Brightness = 8, Range = 30 })
-	P.Sound("Impact", p.Position, 0.7, 0.8 + math.random() * 0.3)
-	if distance < 80 then
-		P.Shake(0.3 * (1 - distance / 80), 0.3)
-	end
+	local color = p.Color or WHITE
+	P.ChargeUp(p.Position, { Color = color, Size = 18, Duration = p.Duration or 1 })
+	P.Shockwave(p.Ground or p.Position, { Color = color, Radius = 10, Duration = 0.6 })
 end
 
--- Meteor streak while falling (attached by the server as a trail).
-function Presets.MeteorWarning(p, P)
-	P.Ring(p.Position, { Color = RED, Radius = 5, Duration = 1.2, Thickness = 0.15 })
-end
-
--- A new Titan King is crowned.
-function Presets.NewKing(p, P)
-	if p.Position and P.Distance(p.Position) <= FAR * 2 then
-		P.Pillar(p.Position, { Color = GOLD, Height = 150, Width = 14, Duration = 2 })
-		P.Ring(p.Position, { Color = GOLD, Radius = 40, Duration = 1 })
-		P.Burst(p.Position + Vector3.new(0, 10, 0), { Color = GOLD, Count = 60, Speed = 40, Size = 1.5 })
+-- Tamed! The titan flies to its new owner's base.
+function Presets.TameSuccess(p, P)
+	local color = p.Color or WHITE
+	if P.Distance(p.Position) <= FAR then
+		impact(P, p.Position, color, 2.5)
+		P.Beam(p.Ground or p.Position, { Color = color, Height = 90, Width = 10, Duration = 1.4 })
+		P.Burst(p.Position, { Color = color, Count = 50, Speed = 35, Size = 1.2, Texture = Textures.Star })
+		P.Burst(p.Position, { Color = GOLD, Count = 20, Speed = 20, Size = 0.8 })
+		P.Sound("Fanfare", p.Position, 0.8)
 	end
 	if P.IsMe(p.Owner) then
-		P.Confetti(80, { GOLD, WHITE, Color3.fromRGB(255, 170, 0) })
-		P.Flash(GOLD, 0.6, 0.3)
+		P.Flash(color, 0.5, 0.35)
+		P.FovPunch(-6, 0.4)
+		P.Shake(0.25, 0.3)
+		P.FloatText(p.Position + Vector3.new(0, 4, 0), "TAMED!", { Color = color, Size = 4, Duration = 1.6 })
+		if (p.RarityOrder or 1) >= 4 then
+			P.Confetti(90)
+		end
 	end
 end
 
--- Player rebirths.
-function Presets.Rebirth(p, P)
-	if p.Position and P.Distance(p.Position) <= FAR then
-		P.Pillar(p.Position, { Color = Color3.fromRGB(180, 120, 255), Height = 120, Width = 12, Duration = 2 })
-		P.Ring(p.Position, { Color = Color3.fromRGB(180, 120, 255), Radius = 30, Duration = 0.8 })
+-- Taming failed: the titan runs away in a puff.
+function Presets.TameFail(p, P)
+	if P.Distance(p.Position) <= FAR then
+		P.Burst(p.Position + Vector3.new(0, 2, 0), {
+			Color = Color3.fromRGB(230, 230, 230),
+			Count = 24,
+			Speed = 12,
+			Size = 4,
+			Lifetime = 1.3,
+			Gravity = 4,
+			LightEmission = 0,
+			Texture = Textures.Dust,
+		})
+		P.Sound("Whoosh", p.Position, 0.6)
 	end
-	if P.IsMe(p.Owner) then
-		P.Flash(WHITE, 1, 0)
-		P.Shake(0.8, 0.8)
-		P.Confetti(100)
-	end
-end
-
--- Egg hatch reveal (played by the hatch UI).
-function Presets.HatchReveal(p, P)
-	P.Flash(p.Color or WHITE, 0.5, 0.1)
-	P.Sound("Hatch", nil, 0.8)
-	if p.RarityOrder and p.RarityOrder >= 4 then
-		P.Confetti(80)
-		P.Shake(0.3, 0.4)
+	if P.IsMe(p.Target) then
+		P.FloatText(p.Position + Vector3.new(0, 3, 0), "IT GOT AWAY!", { Color = RED, Size = 3, Duration = 1.4 })
 	end
 end
 
--- Puff of smoke (wild titan leaving).
+-- Puff of smoke (wild titan leaving on its own).
 function Presets.Poof(p, P)
 	if P.Distance(p.Position) > FAR then
 		return
@@ -1397,8 +1619,158 @@ function Presets.Poof(p, P)
 		Lifetime = 1.2,
 		Gravity = 4,
 		LightEmission = 0,
+		Texture = Textures.Dust,
 	})
 	P.Sound("Whoosh", p.Position, 0.5)
+end
+
+--------------------------------------------------------------------------
+-- Food & stealing
+--------------------------------------------------------------------------
+
+-- Picked up food.
+function Presets.Pickup(p, P)
+	local color = p.Color or WHITE
+	P.Glow(p.Position, { Color = color, Size = 5, Duration = 0.25 })
+	P.Sparks(p.Position, { Color = color, Count = 10, Speed = 25, Size = 0.4, Gravity = -10 })
+	P.Burst(p.Position, { Color = color, Count = 10, Speed = 10, Size = 0.6 })
+	P.Sound("Pop", p.Position, 0.5, 1.4)
+	if p.Text then
+		P.FloatText(p.Position, p.Text, { Color = color, Size = 1.7 })
+	end
+end
+
+-- Someone starts stealing from a food storage.
+function Presets.StealStart(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Glow(p.Position, { Color = RED, Size = 8, Duration = 0.3 })
+	P.Shockwave(p.Position, { Color = RED, Radius = 10, Duration = 0.4 })
+	P.Burst(p.Position, { Color = RED, Count = 15, Speed = 15 })
+end
+
+-- Shown only to the player being stolen from.
+function Presets.StealAlert(_p, P)
+	P.Vignette(RED, 1.5)
+	P.Sound("Alarm", nil, 0.6)
+end
+
+-- Thief made it home with the food.
+function Presets.Deposit(p, P)
+	local color = p.Color or GOLD
+	impact(P, p.Position, color, 1.5)
+	P.Burst(p.Position, { Color = color, Count = 25, Speed = 20 })
+	if P.IsMe(p.Owner) then
+		P.FloatText(p.Position, "STOLEN!", { Color = color, Size = 3 })
+		P.Sound("Coin", nil, 0.6)
+		P.FovPunch(-3, 0.3)
+	end
+end
+
+-- A guard titan knocks a thief away.
+function Presets.GuardKnock(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	impact(P, p.Position, WHITE, 2)
+	P.Sound("Impact", p.Position, 0.8)
+	if P.IsMe(p.Target) then
+		P.Shake(0.6, 0.4)
+		P.Flash(WHITE, 0.25, 0.4)
+		if p.Velocity then
+			P.Knockback(p.Velocity)
+		end
+	end
+end
+
+-- Food taken back from a thief.
+function Presets.TakeBack(p, P)
+	impact(P, p.Position, GREEN, 1)
+	P.Sound("Pop", p.Position, 0.6, 0.9)
+end
+
+-- Meteor lands (Meteor Feast event).
+function Presets.MeteorImpact(p, P)
+	local distance = P.Distance(p.Position)
+	if distance > FAR * 1.5 then
+		return
+	end
+	local orange = Color3.fromRGB(255, 140, 40)
+	impact(P, p.Position, orange, 2.5)
+	P.Chunks(p.Position, { Count = 7, Size = 1.6, Distance = 14 })
+	P.Burst(p.Position, { Color = p.Color, Count = 20, Speed = 30, Size = 1 })
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(90, 80, 80),
+		Count = 10,
+		Speed = 10,
+		Size = 4,
+		Lifetime = 1.6,
+		Gravity = 5,
+		LightEmission = 0,
+		Texture = Textures.Dust,
+	})
+	P.Light(p.Position, { Color = orange, Brightness = 8, Range = 30 })
+	P.Sound("Impact", p.Position, 0.7, 0.8 + math.random() * 0.3)
+	if distance < 80 then
+		P.Shake(0.3 * (1 - distance / 80), 0.3)
+	end
+end
+
+-- Red target ring where a meteor will land.
+function Presets.MeteorWarning(p, P)
+	P.Ring(p.Position, { Color = RED, Radius = 5, Duration = 1.2, Thickness = 0.15 })
+	P.Shockwave(p.Position, { Color = RED, Radius = 6, Duration = 1.2 })
+end
+
+--------------------------------------------------------------------------
+-- Big moments
+--------------------------------------------------------------------------
+
+-- A new Titan King is crowned.
+function Presets.NewKing(p, P)
+	if p.Position and P.Distance(p.Position) <= FAR * 2 then
+		P.Beam(p.Position, { Color = GOLD, Height = 200, Width = 18, Duration = 2.5 })
+		impact(P, p.Position + Vector3.new(0, 10, 0), GOLD, 4)
+		P.Ring(p.Position, { Color = GOLD, Radius = 40, Duration = 1 })
+		P.Burst(p.Position + Vector3.new(0, 10, 0), { Color = GOLD, Count = 60, Speed = 40, Size = 1.6 })
+	end
+	if P.IsMe(p.Owner) then
+		P.Confetti(80, { GOLD, WHITE, Color3.fromRGB(255, 170, 0) })
+		P.Flash(GOLD, 0.6, 0.3)
+		P.FovPunch(-8, 0.6)
+	end
+end
+
+-- Player rebirths.
+function Presets.Rebirth(p, P)
+	local purple = Color3.fromRGB(180, 120, 255)
+	if p.Position and P.Distance(p.Position) <= FAR then
+		P.ChargeUp(p.Position, { Color = purple, Size = 40, Duration = 0.5 })
+		task.delay(0.45, function()
+			P.Beam(p.Position, { Color = purple, Height = 160, Width = 14, Duration = 2 })
+			impact(P, p.Position, purple, 4)
+			P.Ring(p.Position, { Color = purple, Radius = 30, Duration = 0.8 })
+		end)
+	end
+	if P.IsMe(p.Owner) then
+		task.delay(0.45, function()
+			P.Flash(WHITE, 1, 0)
+			P.Shake(0.8, 0.8)
+			P.Confetti(100)
+		end)
+	end
+end
+
+-- Egg hatch reveal (played by the hatch UI).
+function Presets.HatchReveal(p, P)
+	P.Flash(p.Color or WHITE, 0.5, 0.1)
+	P.Sound("Hatch", nil, 0.8)
+	if p.RarityOrder and p.RarityOrder >= 4 then
+		P.Confetti(80)
+		P.Shake(0.3, 0.4)
+		P.FovPunch(-6, 0.5)
+	end
 end
 
 --------------------------------------------------------------------------
@@ -1414,59 +1786,84 @@ function Presets.TitanAttack(p, P)
 	local range = p.Range or 10
 	local ground = p.Position - Vector3.new(0, 2, 0)
 	local color = p.Color or WHITE
+	local facing = CFrame.lookAt(p.Position, p.Position + look)
 	if p.Kind == "Attack" then
-		P.Burst(
-			p.Position + look * range * 0.6,
-			{ Color = color, Count = 14, Speed = 18, Size = 1.2, Lifetime = 0.4, Gravity = 0 }
-		)
+		-- Claw swipe: alternating tilt so combos look different.
+		P.Slash(facing, {
+			Color = color,
+			Radius = range * 0.7,
+			Width = 1 + range * 0.15,
+			Tilt = if math.random() < 0.5 then 25 else -25,
+		})
+		P.Sparks(p.Position + look * range * 0.6, { Color = color, Count = 8, Speed = 30, Direction = look })
 		P.Sound("Whoosh", p.Position, 0.5, 0.9 + math.random() * 0.3)
 	elseif p.Special == "Slam" then
+		P.ChargeUp(p.Position, { Color = color, Size = range * 1.5, Duration = 0.3 })
 		task.delay(0.3, function()
+			impact(P, ground, color, 2 + range * 0.1)
+			P.Shockwave(ground, { Color = Color3.fromRGB(200, 170, 120), Radius = range * 1.6, Duration = 0.6 })
 			P.Ring(ground, { Color = color, Radius = range * 1.5, Duration = 0.5, Thickness = 0.6 })
+			P.Chunks(ground, { Count = 10, Size = 1 + range * 0.1, Distance = range * 1.4 })
 			P.Burst(ground, {
-				Color = Color3.fromRGB(160, 130, 90),
-				Count = 30,
-				Speed = 30,
-				Size = 2.5,
+				Color = Color3.fromRGB(170, 145, 110),
+				Count = 18,
+				Speed = 18,
+				Size = 4,
+				Lifetime = 1.2,
 				LightEmission = 0,
-				Gravity = -30,
+				Gravity = 2,
+				Texture = Textures.Dust,
 			})
 			P.Sound("Impact", ground, 0.9, 0.7)
 			if P.Distance(ground) < range * 3 then
 				P.Shake(0.6, 0.35)
+				P.FovPunch(5, 0.3)
 			end
 		end)
 	elseif p.Special == "Charge" then
-		for i = 1, 5 do
+		P.Glow(p.Position, { Color = color, Size = range, Duration = 0.3 })
+		for i = 1, 6 do
 			task.delay(i * 0.05, function()
-				P.Burst(
-					ground + look * i * 4,
-					{ Color = Color3.fromRGB(170, 140, 100), Count = 8, Speed = 8, Size = 2, LightEmission = 0 }
-				)
+				local at = ground + look * i * range * 0.4
+				P.Burst(at, {
+					Color = Color3.fromRGB(190, 165, 125),
+					Count = 6,
+					Speed = 8,
+					Size = 3,
+					LightEmission = 0,
+					Texture = Textures.Dust,
+				})
+				P.Sparks(at + Vector3.new(0, 2, 0), { Color = color, Count = 5, Speed = 20, Direction = -look })
 			end)
 		end
 		P.Sound("Whoosh", p.Position, 0.8, 0.7)
 	elseif p.Special == "Bounce" then
 		task.delay(0.6, function()
+			impact(P, ground, color, 2 + range * 0.1)
 			P.Ring(ground, { Color = color, Radius = range * 1.4, Duration = 0.5, Thickness = 0.6 })
 			P.Burst(ground, { Color = color, Count = 30, Speed = 28, Size = 1.6 })
 			P.Sound("Impact", ground, 0.8, 1.1)
 		end)
 	elseif p.Special == "Breath" then
-		for i = 1, 8 do
-			task.delay(i * 0.04, function()
-				local at = p.Position + look * (range * 2.2) * (i / 8)
+		P.ChargeUp(p.Position + look * 2, { Color = Color3.fromRGB(255, 160, 40), Size = range, Duration = 0.2 })
+		for i = 1, 10 do
+			task.delay(0.1 + i * 0.04, function()
+				local at = p.Position + look * (range * 2.2) * (i / 10)
 				P.Burst(at, {
-					Color = ColorSequence.new(Color3.fromRGB(255, 220, 80), Color3.fromRGB(255, 60, 20)),
+					Color = ColorSequence.new(Color3.fromRGB(255, 230, 120), Color3.fromRGB(255, 60, 20)),
 					Count = 10,
 					Speed = 6 + i,
-					Size = 2 + i * 0.3,
+					Size = 2 + i * 0.4,
 					Lifetime = 0.5,
-					Gravity = 6,
+					Gravity = -6,
 					Texture = Textures.Fire,
 				})
 			end)
 		end
+		P.Sparks(
+			p.Position + look * 3,
+			{ Color = Color3.fromRGB(255, 180, 60), Count = 20, Speed = 50, Direction = look }
+		)
 		P.Light(p.Position + look * range, { Color = Color3.fromRGB(255, 140, 40), Brightness = 6, Range = range * 2 })
 		P.Sound("Whoosh", p.Position, 0.8, 0.6)
 	end
@@ -1475,15 +1872,18 @@ end
 -- A titan gets hit.
 function Presets.Hit(p, P)
 	if P.Distance(p.Position) <= FAR then
-		P.Burst(
-			p.Position,
-			{ Color = Color3.fromRGB(255, 240, 200), Count = 12, Speed = 25, Size = 1.2, Lifetime = 0.35 }
-		)
+		local away = if p.Velocity then Vector3.new(p.Velocity.X, 0, p.Velocity.Z) else nil
+		P.Glow(p.Position, { Color = Color3.fromRGB(255, 240, 200), Size = 7, Duration = 0.2 })
+		P.Sparks(p.Position, { Color = Color3.fromRGB(255, 230, 160), Count = 14, Speed = 45, Direction = away })
+		P.Shockwave(p.Position, { Color = WHITE, Radius = 6, Duration = 0.25, Upright = true })
 		P.FloatText(
 			p.Position + Vector3.new(0, 2, 0),
 			"-" .. tostring(p.Amount or ""),
-			{ Color = Color3.fromRGB(255, 90, 90), Size = 3, Duration = 0.9 }
+			{ Color = Color3.fromRGB(255, 80, 80), Size = 3.2, Duration = 0.9 }
 		)
+		if p.Model then
+			P.Highlight(p.Model, { Color = WHITE, Duration = 0.15 })
+		end
 		P.Sound("Hit", p.Position, 0.7, 0.9 + math.random() * 0.3)
 	end
 	if P.IsMe(p.Target) then
@@ -1498,19 +1898,22 @@ end
 -- A titan is knocked out.
 function Presets.KO(p, P)
 	if P.Distance(p.Position) <= FAR * 1.5 then
-		P.Pillar(p.Position, { Color = RED, Height = 60, Width = 10, Duration = 1 })
+		impact(P, p.Position, RED, 4)
+		P.Beam(p.Position, { Color = RED, Height = 80, Width = 10, Duration = 1.2 })
 		P.Ring(p.Position, { Color = RED, Radius = 25, Duration = 0.7 })
 		P.Burst(p.Position + Vector3.new(0, 4, 0), {
 			Color = Color3.fromRGB(220, 220, 220),
-			Count = 30,
+			Count = 24,
 			Speed = 20,
-			Size = 4,
+			Size = 5,
 			Lifetime = 1.4,
 			Gravity = 4,
 			LightEmission = 0,
+			Texture = Textures.Dust,
 		})
-		P.FloatText(p.Position + Vector3.new(0, 10, 0), "K.O.!", { Color = RED, Size = 5, Duration = 1.6 })
+		P.FloatText(p.Position + Vector3.new(0, 10, 0), "K.O.!", { Color = RED, Size = 6, Duration = 1.6 })
 		P.Sound("Impact", p.Position, 1, 0.5)
+		P.FovPunch(6, 0.5)
 	end
 	if P.IsMe(p.Target) then
 		P.Flash(RED, 0.6, 0.3)
@@ -1520,7 +1923,8 @@ end
 -- Match winner.
 function Presets.Victory(p, P)
 	if p.Position and P.Distance(p.Position) <= FAR * 2 then
-		P.Pillar(p.Position, { Color = GOLD, Height = 140, Width = 16, Duration = 2 })
+		P.Beam(p.Position, { Color = GOLD, Height = 200, Width = 16, Duration = 2.5 })
+		impact(P, p.Position + Vector3.new(0, 6, 0), GOLD, 4)
 		P.Ring(p.Position, { Color = GOLD, Radius = 40, Duration = 1 })
 		P.Burst(p.Position + Vector3.new(0, 10, 0), { Color = GOLD, Count = 60, Speed = 40, Size = 1.6 })
 	end
@@ -1545,8 +1949,9 @@ end
 
 -- Storage lock turned on.
 function Presets.Lock(p, P)
-	P.Ring(p.Position, { Color = Color3.fromRGB(90, 170, 255), Radius = 12, Duration = 0.5 })
-	P.Burst(p.Position, { Color = Color3.fromRGB(90, 170, 255), Count = 15 })
+	local blue = Color3.fromRGB(90, 170, 255)
+	impact(P, p.Position, blue, 1.5)
+	P.Ring(p.Position, { Color = blue, Radius = 12, Duration = 0.5 })
 end
 
 return Presets
@@ -1561,7 +1966,8 @@ return Presets
 	Presets combine these into named effects.
 
 	World effects:  Burst, Ring, Pillar, Light, FloatText, Sound, Highlight
-	Screen effects: Shake, Flash, Vignette, Confetti, Pop
+	Glow effects:   Glow, Shockwave, Sparks, ChargeUp, Slash, Beam, Chunks
+	Screen effects: Shake, Flash, Vignette, Confetti, Pop, FovPunch
 ]]
 
 local Players = game:GetService("Players")
@@ -1770,14 +2176,16 @@ function Primitives.Light(
 end
 
 -- Text that pops up and floats away ("+XP", "LEVEL 10!", "+$500").
+-- Shiny style: white-to-color gradient, thick outline and a bouncy pop.
 function Primitives.FloatText(
 	position: Vector3,
 	text: string,
-	opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number? }?
+	opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number?, Drift: number? }?
 )
 	local o = opts or {}
 	local size = o.Size or 2.5
 	local duration = o.Duration or 1.2
+	local color = o.Color or Color3.new(1, 1, 1)
 	local holder = holderPart(position)
 	local gui = Instance.new("BillboardGui")
 	gui.Size = UDim2.fromScale(size * 5, size)
@@ -1791,16 +2199,29 @@ function Primitives.FloatText(
 	label.Font = FONT
 	label.TextScaled = true
 	label.Text = text
-	label.TextColor3 = o.Color or Color3.new(1, 1, 1)
+	label.TextColor3 = Color3.new(1, 1, 1)
 	label.Parent = gui
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, color:Lerp(Color3.new(1, 1, 1), 0.65)),
+		ColorSequenceKeypoint.new(0.5, color),
+		ColorSequenceKeypoint.new(1, color:Lerp(Color3.new(0, 0, 0), 0.25)),
+	})
+	gradient.Rotation = 90
+	gradient.Parent = label
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 2
+	stroke.Thickness = 3
+	stroke.Color = color:Lerp(Color3.new(0, 0, 0), 0.8)
 	stroke.Parent = label
 	local scale = Instance.new("UIScale")
 	scale.Scale = 0
 	scale.Parent = label
-	tween(scale, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
-	tween(gui, duration, { StudsOffset = Vector3.new(0, o.Rise or 5, 0) })
+	tween(scale, 0.12, { Scale = 1.35 }, Enum.EasingStyle.Quad)
+	task.delay(0.12, function()
+		tween(scale, 0.2, { Scale = 1 }, Enum.EasingStyle.Back)
+	end)
+	local drift = o.Drift or (math.random() - 0.5) * 2
+	tween(gui, duration, { StudsOffset = Vector3.new(drift, o.Rise or 5, 0) })
 	task.delay(duration * 0.6, function()
 		tween(label, duration * 0.4, { TextTransparency = 1 })
 		tween(stroke, duration * 0.4, { Transparency = 1 })
@@ -1835,6 +2256,286 @@ function Primitives.Sound(sound: string, position: Vector3?, volume: number?, pi
 		SoundService:PlayLocalSound(s)
 		s:Destroy()
 	end
+end
+
+--------------------------------------------------------------------------
+-- Glow effects (these are what make hits and rare moments "pop")
+--------------------------------------------------------------------------
+
+local function kp(time: number, value: number): NumberSequenceKeypoint
+	return NumberSequenceKeypoint.new(time, value)
+end
+
+local function glowEmitter(holder: BasePart, texture: string, color: Color3 | ColorSequence): ParticleEmitter
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = texture
+	e.Color = toSequence(color)
+	e.LightEmission = 1
+	e.LightInfluence = 0
+	e.Brightness = 2
+	e.Speed = NumberRange.new(0)
+	e.Rate = 0
+	e.Rotation = NumberRange.new(0, 360)
+	e.Parent = holder
+	return e
+end
+
+-- A soft, bright flash of light: the "pop" in the middle of an impact.
+function Primitives.Glow(
+	position: Vector3,
+	opts: { Color: Color3?, Size: number?, Duration: number?, Texture: string? }?
+)
+	local o = opts or {}
+	local size = math.min(o.Size or 8, 100)
+	local duration = o.Duration or 0.35
+	local holder = holderPart(position)
+	local e = glowEmitter(holder, o.Texture or Textures.Glow, o.Color or Color3.new(1, 1, 1))
+	e.Lifetime = NumberRange.new(duration)
+	e.Size = NumberSequence.new({ kp(0, size * 0.3), kp(0.2, size), kp(1, size * 1.15) })
+	e.Transparency = NumberSequence.new({ kp(0, 0), kp(0.3, 0.2), kp(1, 1) })
+	e.ZOffset = 2
+	e:Emit(1)
+	-- A white-hot core on top of the colored glow.
+	local core = glowEmitter(holder, Textures.Core, Color3.new(1, 1, 1))
+	core.Lifetime = NumberRange.new(duration * 0.6)
+	core.Size = NumberSequence.new({ kp(0, size * 0.5), kp(1, size * 0.1) })
+	core.Transparency = NumberSequence.new({ kp(0, 0.1), kp(1, 1) })
+	core.ZOffset = 3
+	core:Emit(1)
+	Debris:AddItem(holder, duration + 0.5)
+end
+
+-- A textured shockwave ring lying flat on the ground (or facing the camera
+-- with Upright = true). Looks much softer than the neon Ring.
+function Primitives.Shockwave(
+	position: Vector3,
+	opts: {
+		Color: Color3?,
+		Radius: number?,
+		Duration: number?,
+		Upright: boolean?,
+		Texture: string?,
+	}?
+)
+	local o = opts or {}
+	local radius = math.min(o.Radius or 12, 50)
+	local duration = o.Duration or 0.45
+	local holder = holderPart(position + Vector3.new(0, 0.3, 0))
+	local e = glowEmitter(holder, o.Texture or Textures.Shockwave, o.Color or Color3.new(1, 1, 1))
+	if not o.Upright then
+		-- Particles face their velocity; a tiny upward speed lays them flat.
+		e.Orientation = Enum.ParticleOrientation.VelocityPerpendicular
+		e.EmissionDirection = Enum.NormalId.Top
+		e.Speed = NumberRange.new(0.01)
+		e.SpreadAngle = Vector2.zero
+		e.Rotation = NumberRange.new(0)
+	end
+	e.Lifetime = NumberRange.new(duration)
+	e.Size = NumberSequence.new({ kp(0, radius * 0.15), kp(0.35, radius * 0.8), kp(1, radius) })
+	e.Transparency = NumberSequence.new({ kp(0, 0), kp(0.5, 0.3), kp(1, 1) })
+	e:Emit(1)
+	Debris:AddItem(holder, duration + 0.5)
+end
+
+-- Fast bright streaks that fly out (hits, sparks, level up).
+-- Direction = aim them (e.g. away from the attacker), otherwise all around.
+function Primitives.Sparks(
+	position: Vector3,
+	opts: {
+		Color: (Color3 | ColorSequence)?,
+		Count: number?,
+		Speed: number?,
+		Size: number?,
+		Lifetime: number?,
+		Gravity: number?,
+		Direction: Vector3?,
+		Spread: number?,
+	}?
+)
+	local o = opts or {}
+	local lifetime = o.Lifetime or 0.45
+	local speed = o.Speed or 45
+	local holder = holderPart(position)
+	if o.Direction and o.Direction.Magnitude > 0.01 then
+		holder.CFrame = CFrame.lookAt(position, position + o.Direction)
+	end
+	local e = glowEmitter(holder, Textures.Sparks, o.Color or Color3.fromRGB(255, 240, 180))
+	e.Orientation = Enum.ParticleOrientation.VelocityParallel
+	e.EmissionDirection = if o.Direction then Enum.NormalId.Front else Enum.NormalId.Top
+	local spread = o.Spread or (if o.Direction then 55 else 180)
+	e.SpreadAngle = Vector2.new(spread, spread)
+	e.Speed = NumberRange.new(speed * 0.5, speed)
+	e.Drag = 5
+	e.Acceleration = Vector3.new(0, -(o.Gravity or 20), 0)
+	e.Lifetime = NumberRange.new(lifetime * 0.5, lifetime)
+	e.Rotation = NumberRange.new(0)
+	e.Squash = NumberSequence.new(2) -- stretched into streaks along their flight
+	local size = o.Size or 0.6
+	e.Size = NumberSequence.new({ kp(0, size), kp(1, 0) })
+	e.Transparency = NumberSequence.new({ kp(0, 0), kp(1, 0.6) })
+	e:Emit(o.Count or 16)
+	Debris:AddItem(holder, lifetime + 0.5)
+end
+
+-- A swirl that shrinks inward: "charging up" before a big move.
+function Primitives.ChargeUp(position: Vector3, opts: { Color: Color3?, Size: number?, Duration: number? }?)
+	local o = opts or {}
+	local size = math.min(o.Size or 14, 100)
+	local duration = o.Duration or 0.35
+	local holder = holderPart(position)
+	local e = glowEmitter(holder, Textures.Implode, o.Color or Color3.new(1, 1, 1))
+	e.Lifetime = NumberRange.new(duration)
+	e.RotSpeed = NumberRange.new(360)
+	e.Size = NumberSequence.new({ kp(0, size), kp(1, 0) })
+	e.Transparency = NumberSequence.new({ kp(0, 1), kp(0.3, 0.1), kp(1, 0) })
+	e:Emit(1)
+	Debris:AddItem(holder, duration + 0.5)
+end
+
+-- A glowing crescent swipe in front of `cf` (an attacker's CFrame).
+function Primitives.Slash(
+	cf: CFrame,
+	opts: {
+		Color: Color3?,
+		Radius: number?,
+		Arc: number?,
+		Width: number?,
+		Duration: number?,
+		Tilt: number?,
+	}?
+)
+	local o = opts or {}
+	local radius = o.Radius or 8
+	local arc = math.rad(o.Arc or 140)
+	local width = o.Width or 2
+	local duration = o.Duration or 0.25
+	local segments = 11
+	local base = cf * CFrame.Angles(0, 0, math.rad(o.Tilt or 0))
+	local segLength = radius * arc / segments * 1.35
+	for i = 1, segments do
+		local a = (i - 1) / (segments - 1)
+		local fat = 1 - math.abs(a - 0.5) * 1.6 -- thick middle, thin tips
+		local angle = arc / 2 - arc * a
+		local part = holderPart(cf.Position, Vector3.new(segLength, 0.25 * width * fat + 0.05, width * fat + 0.1))
+		part.Material = Enum.Material.Neon
+		part.Color = if i % 3 == 0 then Color3.new(1, 1, 1) else (o.Color or Color3.new(1, 1, 1))
+		part.CFrame = base * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, -radius)
+		task.delay(a * duration * 0.4, function()
+			part.Transparency = 0.05
+			tween(part, duration, { Transparency = 1, Size = part.Size * Vector3.new(1, 0.3, 0.2) })
+		end)
+		Debris:AddItem(part, duration * 1.5 + 0.2)
+	end
+end
+
+-- A vertical column of light with rising sparkles (rare spawns, level ups,
+-- mutations, victories). Width grows in, then fades out.
+function Primitives.Beam(
+	position: Vector3,
+	opts: { Color: Color3?, Height: number?, Width: number?, Duration: number? }?
+)
+	local o = opts or {}
+	local color = o.Color or Color3.new(1, 1, 1)
+	local height = o.Height or 80
+	local width = o.Width or 8
+	local duration = o.Duration or 1.4
+	local holder = holderPart(position, Vector3.new(width, 1, width))
+	local bottom = Instance.new("Attachment")
+	bottom.Parent = holder
+	local top = Instance.new("Attachment")
+	top.Position = Vector3.new(0, height, 0)
+	top.Parent = holder
+	local function beam(w: number, texture: string, transparency: NumberSequence)
+		local b = Instance.new("Beam")
+		b.Attachment0 = bottom
+		b.Attachment1 = top
+		b.FaceCamera = true
+		b.LightEmission = 1
+		b.LightInfluence = 0
+		b.Brightness = 3
+		b.Texture = texture
+		b.TextureMode = Enum.TextureMode.Stretch
+		b.TextureLength = 1
+		b.Color = ColorSequence.new(color, Color3.new(1, 1, 1))
+		b.Transparency = transparency
+		b.Width0 = 0
+		b.Width1 = 0
+		b.Segments = 1
+		b.Parent = holder
+		tween(b, 0.15, { Width0 = w, Width1 = w * 0.6 }, Enum.EasingStyle.Back)
+		task.delay(duration * 0.5, function()
+			tween(b, duration * 0.5, { Width0 = 0, Width1 = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		end)
+	end
+	beam(width * 2.2, Textures.Glow, NumberSequence.new({ kp(0, 0.1), kp(0.7, 0.5), kp(1, 1) }))
+	beam(width * 0.5, "", NumberSequence.new({ kp(0, 0), kp(0.8, 0.4), kp(1, 1) }))
+	local e = glowEmitter(holder, Textures.Sparkle, color)
+	e.Shape = Enum.ParticleEmitterShape.Disc
+	e.EmissionDirection = Enum.NormalId.Top
+	e.Speed = NumberRange.new(height * 0.4, height * 0.8)
+	e.Lifetime = NumberRange.new(0.8, 1.4)
+	e.Size = NumberSequence.new({ kp(0, 0), kp(0.2, math.max(1, width * 0.2)), kp(1, 0) })
+	e.Transparency = NumberSequence.new(0)
+	e:Emit(math.floor(20 + width * 2))
+	Debris:AddItem(holder, duration + 1.6)
+end
+
+-- Chunks of rock/dirt thrown out of a ground impact.
+function Primitives.Chunks(
+	position: Vector3,
+	opts: {
+		Color: Color3?,
+		Count: number?,
+		Size: number?,
+		Distance: number?,
+		Material: Enum.Material?,
+	}?
+)
+	local o = opts or {}
+	local size = o.Size or 1.5
+	local distance = o.Distance or 12
+	for _ = 1, o.Count or 8 do
+		local s = size * (0.5 + math.random() * 0.7)
+		local chunk = holderPart(position, Vector3.new(s, s * 0.8, s))
+		chunk.Transparency = 0
+		chunk.Material = o.Material or Enum.Material.Slate
+		chunk.Color = o.Color or Color3.fromRGB(140, 120, 95)
+		local angle = math.random() * math.pi * 2
+		local dir = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local d = distance * (0.5 + math.random() * 0.5)
+		local spin = CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6)
+		local peak = position + dir * d * 0.5 + Vector3.new(0, d * 0.6, 0)
+		local land = position + dir * d
+		tween(chunk, 0.25, { CFrame = CFrame.new(peak) * spin })
+		task.delay(0.25, function()
+			tween(
+				chunk,
+				0.3,
+				{ CFrame = CFrame.new(land) * spin * spin },
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.In
+			)
+			task.delay(0.6, function()
+				tween(chunk, 0.5, { Transparency = 1, Size = chunk.Size * 0.3 })
+			end)
+		end)
+		Debris:AddItem(chunk, 2)
+	end
+end
+
+-- Quick zoom punch of the camera (big hits, level ups).
+function Primitives.FovPunch(amount: number, duration: number?)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local base = camera:GetAttribute("BaseFov")
+	if type(base) ~= "number" then
+		base = camera.FieldOfView
+		camera:SetAttribute("BaseFov", base)
+	end
+	camera.FieldOfView = (base :: number) + amount
+	tween(camera, duration or 0.35, { FieldOfView = base }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 end
 
 -- Briefly makes a model glow.
@@ -2012,28 +2713,96 @@ return Primitives
         </Item>
         <Item class="ModuleScript" referent="21">
           <Properties>
-            <string name="Name">Textures</string>
+            <string name="Name">RarityTag</string>
             <string name="Source"><![CDATA[--[[
-	Particle textures used by effects. The defaults are textures built into
-	Roblox. Swap in nicer ones from the Creator Store ("rbxassetid://...")
-	and every effect that uses them updates automatically.
+	RarityTag: styles a TextLabel as a shiny rarity badge ("LEGENDARY").
+	Epic and up get a moving shine; Mythic and up get a rainbow.
+	The gradient is tagged "Shine" and animated by BaseAnimController.
+
+	  RarityTag.Add(label, "Legendary")
 ]]
 
+local CollectionService = game:GetService("CollectionService")
+
+local Rarities = require(script.Parent.Parent.Config.Rarities)
+
+local RarityTag = {}
+
+RarityTag.ShineTag = "Shine"
+
+function RarityTag.Add(label: TextLabel, rarityId: string)
+	local rarity = Rarities[rarityId]
+	if not rarity then
+		return
+	end
+	label.Text = string.upper(rarity.Id)
+	label.TextColor3 = Color3.new(1, 1, 1)
+	local gradient = Instance.new("UIGradient")
+	gradient.Name = "Shine"
+	if rarity.Order >= 5 then
+		gradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 80, 80)),
+			ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 220, 60)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(90, 240, 120)),
+			ColorSequenceKeypoint.new(0.75, Color3.fromRGB(80, 170, 255)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(230, 90, 255)),
+		})
+	elseif rarity.Order >= 3 then
+		local c = rarity.Color
+		gradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, c),
+			ColorSequenceKeypoint.new(0.42, c),
+			ColorSequenceKeypoint.new(0.5, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(0.58, c),
+			ColorSequenceKeypoint.new(1, c),
+		})
+	else
+		gradient.Color = ColorSequence.new(rarity.Color)
+	end
+	gradient.Parent = label
+	if rarity.Order >= 3 then
+		CollectionService:AddTag(gradient, RarityTag.ShineTag)
+	end
+end
+
+return RarityTag
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">Textures</string>
+            <string name="Source"><![CDATA[--[[
+	Particle / beam textures used by effects. The defaults are textures that
+	ship with Roblox (used by Explosion, ForceField and Fire), so everything
+	works with no uploads. To level up the look, swap any of them for a
+	Creator Store texture ("rbxassetid://...") and every effect updates.
+]]
+
+local P = "rbxasset://textures/particles/"
+
 return {
-	Sparkle = "rbxasset://textures/particles/sparkles_main.dds",
-	Fire = "rbxasset://textures/particles/fire_main.dds",
-	Smoke = "rbxasset://textures/particles/smoke_main.dds",
-	Star = "rbxasset://textures/particles/sparkles_main.dds",
+	Sparkle = P .. "sparkles_main.dds", -- 4-point star sparkle
+	Star = P .. "sparkles_main.dds",
+	Fire = P .. "fire_main.dds", -- soft flame
+	Sparks = P .. "fire_sparks_main.dds", -- small bright sparks (good for streaks)
+	Smoke = P .. "smoke_main.dds", -- soft puff
+	Core = P .. "explosion01_core_main.dds", -- bright round flash
+	Shockwave = P .. "explosion01_shockwave_main.dds", -- ring
+	Implode = P .. "explosion01_implosion_main.dds", -- swirl for charge-ups
+	Dust = P .. "explosion01_smoke_main.dds", -- dusty smoke
+	Glow = P .. "forcefield_glow_main.dds", -- soft round glow
+	Vortex = P .. "forcefield_vortex_main.dds", -- swirly ring
 }
 ]]></string>
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="22">
+      <Item class="Folder" referent="23">
         <Properties>
           <string name="Name">Game</string>
         </Properties>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">Battle</string>
             <string name="Source"><![CDATA[--!strict
@@ -2232,7 +3001,7 @@ return Battle
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">ConfigValidator</string>
             <string name="Source"><![CDATA[--[[
@@ -2274,6 +3043,7 @@ ConfigValidator.Events = {
 	Earned = true,
 	Rebirthed = true,
 	Equipped = true,
+	Tamed = true,
 }
 
 local STYLES = { Biped = true, Quad = true, Blob = true, Winged = true }
@@ -2453,7 +3223,7 @@ return ConfigValidator
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">CreatureMath</string>
             <string name="Source"><![CDATA[--[[
@@ -2599,7 +3369,7 @@ return CreatureMath
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">Progress</string>
             <string name="Source"><![CDATA[--[[
@@ -2893,7 +3663,7 @@ return Progress
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">Rules</string>
             <string name="Source"><![CDATA[--!strict
@@ -3080,6 +3850,79 @@ function Rules.PickFood(food: { [string]: number }, selected: string?): string?
 	return nil
 end
 
+-- Wild titans ----------------------------------------------------------------
+
+-- Spawn odds for wild titans. Each rarity's WildWeight is shared by the
+-- titans of that rarity; luck multiplies the LuckBoosted (Epic+) ones.
+function Rules.WildPool(luck: number?): { { Creature: string, Weight: number } }
+	local perRarity: { [string]: number } = {}
+	local all: { [string]: any } = Creatures :: any
+	for _, def in all do
+		perRarity[def.Rarity] = (perRarity[def.Rarity] or 0) + 1
+	end
+	local pool: { { Creature: string, Weight: number } } = {}
+	for id, def in all do
+		local rarity = Rarities[def.Rarity]
+		local weight = rarity.WildWeight / perRarity[def.Rarity]
+		if rarity.LuckBoosted then
+			weight *= luck or 1
+		end
+		if weight > 0 then
+			table.insert(pool, { Creature = id, Weight = weight })
+		end
+	end
+	table.sort(pool, function(a, b)
+		return a.Creature < b.Creature
+	end)
+	return pool
+end
+
+function Rules.TameTime(creatureId: string): number
+	return Rarities[Creatures[creatureId].Rarity].TameTime
+end
+
+function Rules.TameFood(creatureId: string): number
+	return Rarities[Creatures[creatureId].Rarity].TameFood
+end
+
+-- Which food taming uses: favorites first, then the rest in menu order.
+-- Returns nil if the player doesn't have enough food, and whether a
+-- favorite food was used (it raises the chance).
+function Rules.TameFoodPlan(food: { [string]: number }, creatureId: string): ({ [string]: number }?, boolean)
+	local need = Rules.TameFood(creatureId)
+	local order = {}
+	for _, id in Creatures[creatureId].Diet or {} do
+		table.insert(order, id)
+	end
+	for _, id in Foods.Order do
+		if not table.find(order, id) then
+			table.insert(order, id)
+		end
+	end
+	local plan: { [string]: number } = {}
+	local favorite = false
+	for _, id in order do
+		if need <= 0 then
+			break
+		end
+		local take = math.min(need, food[id] or 0)
+		if take > 0 then
+			plan[id] = take
+			need -= take
+			favorite = favorite or Rules.IsFavorite(creatureId, id)
+		end
+	end
+	if need > 0 then
+		return nil, false
+	end
+	return plan, favorite
+end
+
+function Rules.TameChance(creatureId: string, favorite: boolean): number
+	local base = Rarities[Creatures[creatureId].Rarity].TameChance
+	return math.min(1, base + (if favorite then GameConfig.Wild.FavoriteBonus else 0))
+end
+
 -- Battle titan -----------------------------------------------------------------
 
 -- The titan used in battles: the chosen one, or the highest level one.
@@ -3100,7 +3943,7 @@ return Rules
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">Tags</string>
             <string name="Source"><![CDATA[--!strict
@@ -3113,6 +3956,7 @@ return Rules
 return {
 	Plot = "Plot", -- anchor part per base. Attribute PlotIndex (number). Front (-Z) faces the arena.
 	FoodSpawn = "FoodSpawn", -- where food grows.
+	WildSpawn = "WildSpawn", -- where wild titans appear and roam around.
 	Arena = "Arena", -- arena center part. Attribute Radius (fighting area).
 	ArenaSpawn = "ArenaSpawn", -- fighter start points (at least 2, around the arena edge).
 	Stands = "Stands", -- where spectators get moved during a match.
@@ -3124,16 +3968,17 @@ return {
 	AnimatedMutation = "AnimatedMutation",
 	BaseTitan = "BaseTitan",
 	FoodPickup = "FoodPickup",
+	WildTitan = "WildTitan",
 }
 ]]></string>
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="29">
+      <Item class="Folder" referent="30">
         <Properties>
           <string name="Name">Lib</string>
         </Properties>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">Format</string>
             <string name="Source"><![CDATA[local Format = {}
@@ -3192,7 +4037,7 @@ return Format
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">Guard</string>
             <string name="Source"><![CDATA[--!strict
@@ -3255,7 +4100,7 @@ return Guard
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">Loader</string>
             <string name="Source"><![CDATA[--[[
@@ -3345,7 +4190,7 @@ return Loader
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">Log</string>
             <string name="Source"><![CDATA[--[[
@@ -3408,7 +4253,7 @@ return Log
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">Rng</string>
             <string name="Source"><![CDATA[--!strict
@@ -3452,7 +4297,7 @@ return Rng
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">Signal</string>
             <string name="Source"><![CDATA[--[[
@@ -3540,7 +4385,7 @@ return Signal
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">Trove</string>
             <string name="Source"><![CDATA[--[[
@@ -3608,7 +4453,7 @@ return Trove
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">WeightedRandom</string>
             <string name="Source"><![CDATA[local WeightedRandom = {}
@@ -3637,7 +4482,7 @@ return WeightedRandom
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="38">
+      <Item class="ModuleScript" referent="39">
         <Properties>
           <string name="Name">Net</string>
           <string name="Source"><![CDATA[--[[
@@ -3774,7 +4619,7 @@ end
 return Net
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">Remotes</string>
             <string name="Source"><![CDATA[--!strict
@@ -3841,7 +4686,7 @@ return Remotes
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="40">
+      <Item class="ModuleScript" referent="41">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
@@ -3867,6 +4712,7 @@ export type PlayerStats = {
 	PlayTime: number,
 	BattlesPlayed: number,
 	BattlesWon: number,
+	Tamed: number,
 	CashEarned: number,
 }
 
@@ -3935,19 +4781,19 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="41">
+  <Item class="ServerScriptService" referent="42">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="42">
+    <Item class="Folder" referent="43">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Folder" referent="43">
+      <Item class="Folder" referent="44">
         <Properties>
           <string name="Name">Data</string>
         </Properties>
-        <Item class="ModuleScript" referent="44">
+        <Item class="ModuleScript" referent="45">
           <Properties>
             <string name="Name">Schema</string>
             <string name="Source"><![CDATA[--!strict
@@ -4017,6 +4863,7 @@ function Schema.Template(): PlayerData
 			PlayTime = 0,
 			BattlesPlayed = 0,
 			BattlesWon = 0,
+			Tamed = 0,
 			CashEarned = 0,
 		},
 		LastOnline = 0,
@@ -4082,7 +4929,7 @@ return Schema
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="45">
+        <Item class="ModuleScript" referent="46">
           <Properties>
             <string name="Name">SessionStore</string>
             <string name="Source"><![CDATA[--[[
@@ -4213,7 +5060,7 @@ return SessionStore
           </Properties>
         </Item>
       </Item>
-      <Item class="Script" referent="46">
+      <Item class="Script" referent="47">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -4284,11 +5131,11 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="47">
+      <Item class="Folder" referent="48">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="48">
+        <Item class="ModuleScript" referent="49">
           <Properties>
             <string name="Name">CreatureBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -4537,7 +5384,9 @@ local function applyMutation(model: Model, mutationId: string)
 	for _, d in model:GetDescendants() do
 		if d:IsA("BasePart") and d ~= model.PrimaryPart then
 			local paint = d:GetAttribute("Paint") or "Body"
-			if paint == "Body" then
+			if paint == "Fx" then
+				continue
+			elseif paint == "Body" then
 				d.Color = mutation.Color
 				d.Material = mutation.Material
 				d.Transparency = mutation.Transparency or d.Transparency
@@ -4561,8 +5410,10 @@ function CreatureBuilder.Build(creature): Model
 	local model = buildCustom(creature.Id) or buildPlaceholder(def)
 	if creature.Mutation then
 		applyMutation(model, creature.Mutation)
-	elseif def and Rarities[def.Rarity].Order >= Rarities.Legendary.Order then
-		Auras.RarityGlow(mainPart(model), Rarities[def.Rarity].Color)
+	end
+	if def then
+		local rarity = Rarities[def.Rarity]
+		Auras.Rarity(model, rarity.Order, rarity.Color, mainPart(model))
 	end
 	model:SetAttribute("CreatureId", creature.Id)
 	model:SetAttribute("Mutation", creature.Mutation)
@@ -4573,7 +5424,7 @@ return CreatureBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="50">
           <Properties>
             <string name="Name">FoodBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -4745,7 +5596,7 @@ return FoodBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">GameEvents</string>
             <string name="Source"><![CDATA[--[[
@@ -4794,11 +5645,11 @@ return GameEvents
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="51">
+        <Item class="Folder" referent="52">
           <Properties>
             <string name="Name">Map</string>
           </Properties>
-          <Item class="ModuleScript" referent="52">
+          <Item class="ModuleScript" referent="53">
             <Properties>
               <string name="Name">MapGenerator</string>
               <string name="Source"><![CDATA[--[[
@@ -5100,6 +5951,18 @@ local function buildFields(ctx: Context)
 			end
 		end
 	end
+	-- Wild titan spawn spots, spread evenly around the fields.
+	for i = 1, 16 do
+		local angle = (i - 0.5) / 16 * 360 + ctx.Rng:NextNumber(-6, 6)
+		if nearGate(angle, 6) then
+			angle += 12
+		end
+		local p = polar(angle, ctx.Rng:NextNumber(MAP.FieldInner + 20, MAP.FieldOuter - 20))
+		local ground = groundAt(p.X, p.Z)
+		if ground then
+			marker(ctx, Tags.WildSpawn, CFrame.new(ground + Vector3.new(0, 1, 0)), Vector3.one)
+		end
+	end
 	for _ = 1, 40 do
 		local angle = ctx.Rng:NextNumber(0, 360)
 		if not nearGate(angle, 6) then
@@ -5205,7 +6068,7 @@ return MapGenerator
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="53">
+          <Item class="ModuleScript" referent="54">
             <Properties>
               <string name="Name">Props</string>
               <string name="Source"><![CDATA[--[[
@@ -5601,15 +6464,15 @@ return Props
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="54">
+      <Item class="Folder" referent="55">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="Folder" referent="55">
+        <Item class="Folder" referent="56">
           <Properties>
             <string name="Name">Base</string>
           </Properties>
-          <Item class="ModuleScript" referent="56">
+          <Item class="ModuleScript" referent="57">
             <Properties>
               <string name="Name">BaseService</string>
               <string name="Source"><![CDATA[--[[
@@ -6065,7 +6928,7 @@ return BaseService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="57">
+          <Item class="ModuleScript" referent="58">
             <Properties>
               <string name="Name">CreatureService</string>
               <string name="Source"><![CDATA[--[[
@@ -6097,6 +6960,7 @@ local Rules = require(Shared.Game.Rules)
 local Battle = require(Shared.Game.Battle)
 local Tags = require(Shared.Game.Tags)
 local Format = require(Shared.Lib.Format)
+local RarityTag = require(Shared.Fx.RarityTag)
 local Net = require(Shared.Net)
 
 local ServerModules = ServerScriptService:WaitForChild("Server").Modules
@@ -6259,7 +7123,7 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 
 	local tag = Instance.new("BillboardGui")
 	tag.Name = "Tag"
-	tag.Size = UDim2.fromOffset(210, 90)
+	tag.Size = UDim2.fromOffset(210, 112)
 	tag.LightInfluence = 0
 	tag.MaxDistance = 150
 	tag.Adornee = root
@@ -6279,13 +7143,14 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 		stroke.Parent = label
 		return label
 	end
-	line("NameLabel", 0, 0.32)
-	line("InfoLabel", 0.32, 0.24)
-	line("StatsLabel", 0.56, 0.24)
+	RarityTag.Add(line("RarityLabel", 0, 0.2), Creatures[creature.Id].Rarity)
+	line("NameLabel", 0.2, 0.28)
+	line("InfoLabel", 0.48, 0.2)
+	line("StatsLabel", 0.68, 0.18)
 	local bar = Instance.new("Frame")
 	bar.Name = "XpBar"
-	bar.Size = UDim2.new(0.7, 0, 0.1, 0)
-	bar.Position = UDim2.fromScale(0.15, 0.86)
+	bar.Size = UDim2.new(0.7, 0, 0.08, 0)
+	bar.Position = UDim2.fromScale(0.15, 0.89)
 	bar.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 	bar.BorderSizePixel = 0
 	bar.Parent = tag
@@ -6370,6 +7235,8 @@ function CreatureService:_refreshTag(player: Player, uid: string)
 	local income = CreatureMath.BaseIncome(creature) * Rules.IncomeMultiplier(data, self:IncomeContext(player))
 	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
 	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
+	info.TextColor3 = Color3.fromRGB(120, 255, 130)
+	model:SetAttribute("Income", income) -- client pops "+$" over your titans
 	local stats = Battle.Stats(creature)
 	local statsLabel = tag:FindFirstChild("StatsLabel") :: TextLabel
 	statsLabel.Text = string.format("❤️ %s   ⚔️ %s", Format.Number(stats.MaxHP), Format.Number(stats.Attack))
@@ -6641,11 +7508,11 @@ return CreatureService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="58">
+        <Item class="Folder" referent="59">
           <Properties>
             <string name="Name">Battle</string>
           </Properties>
-          <Item class="ModuleScript" referent="59">
+          <Item class="ModuleScript" referent="60">
             <Properties>
               <string name="Name">BattleService</string>
               <string name="Source"><![CDATA[--[[
@@ -7736,11 +8603,11 @@ return BattleService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="60">
+        <Item class="Folder" referent="61">
           <Properties>
             <string name="Name">Core</string>
           </Properties>
-          <Item class="ModuleScript" referent="61">
+          <Item class="ModuleScript" referent="62">
             <Properties>
               <string name="Name">AdminService</string>
               <string name="Source"><![CDATA[--[[
@@ -7750,7 +8617,8 @@ return BattleService
 
 	  cash <amount>            food <FoodId> <amount>     trophies <amount>
 	  give <TitanId> [Mutation] level <1-100>              boost <Id> <minutes>
-	  event <TitanClash|MeteorFeast|BloodMoon>             practice
+	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
+	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
 	  tutorial                 daily                      quests
 ]]
 
@@ -7775,7 +8643,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle
+local Data, Creature, Food, Event, Battle, Wild
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -7783,6 +8651,7 @@ function AdminService:Init(registry)
 	Food = registry.FoodService
 	Event = registry.EventService
 	Battle = registry.BattleService
+	Wild = registry.WildService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -7839,6 +8708,11 @@ function AdminService:Run(player: Player, text: string): string?
 		if not Creature:Add(player, args[2], mutation) then
 			return "No free pen!"
 		end
+	elseif command == "wild" then
+		local id = if Creatures[args[2] or ""] then args[2] else nil
+		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
+		Wild:Spawn(id, mutation)
+		return "Spawned a wild " .. (id or "titan")
 	elseif command == "level" and number then
 		for uid in data.Creatures do
 			Creature:SetLevel(player, uid, number)
@@ -7883,7 +8757,7 @@ return AdminService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="62">
+          <Item class="ModuleScript" referent="63">
             <Properties>
               <string name="Name">DataService</string>
               <string name="Source"><![CDATA[--[[
@@ -8101,7 +8975,7 @@ return DataService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="63">
+          <Item class="ModuleScript" referent="64">
             <Properties>
               <string name="Name">FxService</string>
               <string name="Source"><![CDATA[--[[
@@ -8144,7 +9018,7 @@ return FxService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="64">
+          <Item class="ModuleScript" referent="65">
             <Properties>
               <string name="Name">SettingsService</string>
               <string name="Source"><![CDATA[--[[
@@ -8182,11 +9056,11 @@ return SettingsService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="65">
+        <Item class="Folder" referent="66">
           <Properties>
             <string name="Name">Economy</string>
           </Properties>
-          <Item class="ModuleScript" referent="66">
+          <Item class="ModuleScript" referent="67">
             <Properties>
               <string name="Name">EggService</string>
               <string name="Source"><![CDATA[--[[
@@ -8311,7 +9185,7 @@ return EggService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="67">
+          <Item class="ModuleScript" referent="68">
             <Properties>
               <string name="Name">RebirthService</string>
               <string name="Source"><![CDATA[--[[
@@ -8394,17 +9268,18 @@ return RebirthService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="68">
+        <Item class="Folder" referent="69">
           <Properties>
             <string name="Name">Events</string>
           </Properties>
-          <Item class="ModuleScript" referent="69">
+          <Item class="ModuleScript" referent="70">
             <Properties>
               <string name="Name">EventService</string>
               <string name="Source"><![CDATA[--[[
 	EventService: random server events that keep things fresh.
 
 	  TitanClash  - free-for-all battle in the arena (BattleService)
+	  WildRush    - lots of wild titans appear, rare ones 3x more likely
 	  MeteorFeast - food falls on the fields
 	  BloodMoon   - 2x growth, faster stealing
 
@@ -8430,12 +9305,23 @@ local EventService = {
 	Running = nil :: string?,
 }
 
-local Food, Base, Battle
+local Food, Base, Battle, Wild
 
 local EVENTS = {}
 
 function EVENTS.TitanClash()
 	Battle:RunClash()
+end
+
+function EVENTS.WildRush()
+	local duration = GameConfig.Events.WildRushDuration
+	Net.Announce(
+		"🌟 WILD RUSH",
+		"Wild titans are everywhere and rare ones are 3x more common! Go tame them!",
+		Color3.fromRGB(120, 255, 150)
+	)
+	Workspace:SetAttribute("EventEndsAt", Workspace:GetServerTimeNow() + duration)
+	Wild:Rush(duration)
 end
 
 function EVENTS.MeteorFeast()
@@ -8481,12 +9367,13 @@ function EVENTS.BloodMoon()
 end
 
 -- The Titan Clash comes up more often: it's the main event.
-local ROTATION = { "TitanClash", "MeteorFeast", "TitanClash", "BloodMoon" }
+local ROTATION = { "TitanClash", "WildRush", "TitanClash", "MeteorFeast", "TitanClash", "BloodMoon" }
 
 function EventService:Init(registry)
 	Food = registry.FoodService
 	Base = registry.BaseService
 	Battle = registry.BattleService
+	Wild = registry.WildService
 end
 
 function EventService:Start()
@@ -8536,11 +9423,11 @@ return EventService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="70">
+        <Item class="Folder" referent="71">
           <Properties>
             <string name="Name">Food</string>
           </Properties>
-          <Item class="ModuleScript" referent="71">
+          <Item class="ModuleScript" referent="72">
             <Properties>
               <string name="Name">FoodService</string>
               <string name="Source"><![CDATA[--[[
@@ -8895,7 +9782,7 @@ return FoodService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="72">
+          <Item class="ModuleScript" referent="73">
             <Properties>
               <string name="Name">StealService</string>
               <string name="Source"><![CDATA[--[[
@@ -9205,11 +10092,11 @@ return StealService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="73">
+        <Item class="Folder" referent="74">
           <Properties>
             <string name="Name">Progress</string>
           </Properties>
-          <Item class="ModuleScript" referent="74">
+          <Item class="ModuleScript" referent="75">
             <Properties>
               <string name="Name">CodeService</string>
               <string name="Source"><![CDATA[--[[
@@ -9258,7 +10145,7 @@ return CodeService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="75">
+          <Item class="ModuleScript" referent="76">
             <Properties>
               <string name="Name">DailyRewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -9307,7 +10194,7 @@ return DailyRewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="76">
+          <Item class="ModuleScript" referent="77">
             <Properties>
               <string name="Name">IndexService</string>
               <string name="Source"><![CDATA[--[[
@@ -9357,7 +10244,7 @@ return IndexService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="77">
+          <Item class="ModuleScript" referent="78">
             <Properties>
               <string name="Name">OfflineService</string>
               <string name="Source"><![CDATA[--[[
@@ -9408,7 +10295,7 @@ return OfflineService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="78">
+          <Item class="ModuleScript" referent="79">
             <Properties>
               <string name="Name">QuestService</string>
               <string name="Source"><![CDATA[--[[
@@ -9512,7 +10399,7 @@ return QuestService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="79">
+          <Item class="ModuleScript" referent="80">
             <Properties>
               <string name="Name">RewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -9582,7 +10469,7 @@ return RewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="80">
+          <Item class="ModuleScript" referent="81">
             <Properties>
               <string name="Name">TutorialService</string>
               <string name="Source"><![CDATA[--[[
@@ -9657,11 +10544,11 @@ return TutorialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="81">
+        <Item class="Folder" referent="82">
           <Properties>
             <string name="Name">Social</string>
           </Properties>
-          <Item class="ModuleScript" referent="82">
+          <Item class="ModuleScript" referent="83">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -9849,7 +10736,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="83">
+          <Item class="ModuleScript" referent="84">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -10048,7 +10935,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="84">
+          <Item class="ModuleScript" referent="85">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -10224,11 +11111,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="85">
+        <Item class="Folder" referent="86">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="86">
+          <Item class="ModuleScript" referent="87">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -10366,11 +11253,432 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="87">
+        <Item class="Folder" referent="88">
+          <Properties>
+            <string name="Name">Wild</string>
+          </Properties>
+          <Item class="ModuleScript" referent="89">
+            <Properties>
+              <string name="Name">WildService</string>
+              <string name="Source"><![CDATA[--[[
+	WildService: wild titans roaming the fields. FIND them, then TAME them.
+
+	- Up to Wild.MaxWild wild titans at once, spawned at WildSpawn markers.
+	  Species odds: Rules.WildPool (rarity WildWeight, luck during Wild Rush).
+	- Rare ones (Rarity.Announce) or mutated ones: server-wide message + a
+	  huge light beam (Fx "WildSpawn") so everyone races to find them.
+	- Hold the "Tame" prompt (Rarity.TameTime). Taming feeds it
+	  Rarity.TameFood food (favorites first, which raise the chance).
+	  Success -> it joins your base. Fail -> the food is eaten and it runs away.
+	- Movement: the server picks a target and writes MoveFrom / MoveTo /
+	  MoveStart / MoveDuration attributes; clients animate smoothly
+	  (client WildController). The server snaps the model at the end.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Foods = require(Shared.Config.Foods)
+local GameConfig = require(Shared.Config.GameConfig)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Rules = require(Shared.Game.Rules)
+local Tags = require(Shared.Game.Tags)
+local RarityTag = require(Shared.Fx.RarityTag)
+local Log = require(Shared.Lib.Log)
+local WeightedRandom = require(Shared.Lib.WeightedRandom)
+local Net = require(Shared.Net)
+
+local ServerModules = ServerScriptService:WaitForChild("Server").Modules
+local CreatureBuilder = require(ServerModules.CreatureBuilder)
+local GameEvents = require(ServerModules.GameEvents)
+
+local log = Log.new("WildService")
+
+local RED = Color3.fromRGB(255, 90, 90)
+local WILD = GameConfig.Wild
+
+type Wild = {
+	Id: string,
+	Mutation: string?,
+	Model: Model,
+	Home: Vector3,
+	From: CFrame,
+	To: CFrame,
+	MoveStart: number,
+	MoveDuration: number,
+	ExpiresAt: number,
+	Taken: boolean,
+}
+
+local WildService = {
+	Priority = 40,
+	Wilds = {} :: { [Model]: Wild },
+	Count = 0,
+	Luck = 1, -- raised during the Wild Rush event
+	_folder = nil :: Folder?,
+}
+
+local Data, Map, Creature, Fx
+
+function WildService:Init(registry)
+	Data = registry.DataService
+	Map = registry.MapService
+	Creature = registry.CreatureService
+	Fx = registry.FxService
+end
+
+function WildService:Start()
+	local folder = Instance.new("Folder")
+	folder.Name = "Wild"
+	folder.Parent = Map.Map or Workspace
+	self._folder = folder
+
+	if #Map.WildSpawns == 0 then
+		log:Warn("no WildSpawn (or FoodSpawn) markers: wild titans are off")
+		return
+	end
+	task.spawn(function()
+		while true do
+			if self.Count < WILD.MaxWild then
+				self:Spawn()
+			end
+			task.wait(WILD.RespawnDelay * (0.7 + math.random() * 0.6))
+		end
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			self:_tick()
+		end
+	end)
+end
+
+--------------------------------------------------------------------------
+-- Spawning
+--------------------------------------------------------------------------
+
+local function groundAt(position: Vector3): Vector3?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { Workspace.Terrain }
+	local hit = Workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -160, 0), params)
+	if hit and hit.Material ~= Enum.Material.Water then
+		return hit.Position
+	end
+	return nil
+end
+
+local function displayName(creatureId: string, mutation: string?): string
+	return CreatureMath.DisplayName({ Id = creatureId, Level = 1, Xp = 0, Mutation = mutation })
+end
+
+local function nameTag(model: Model, creatureId: string, mutation: string?)
+	local def = Creatures[creatureId]
+	local rarity = Rarities[def.Rarity]
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "WildTag"
+	gui.Size = UDim2.fromOffset(220, 74)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, model:GetExtentsSize().Y + 1.5, 0)
+	gui.MaxDistance = if rarity.Order >= 4 then 400 else 140
+	gui.LightInfluence = 0
+	gui.Parent = model.PrimaryPart
+	local function line(text: string, color: Color3, y: number, h: number): TextLabel
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, h)
+		label.Position = UDim2.fromScale(0, y)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.FredokaOne
+		label.TextScaled = true
+		label.TextColor3 = color
+		label.Text = text
+		label.Parent = gui
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Parent = label
+		return label
+	end
+	RarityTag.Add(line("", Color3.new(1, 1, 1), 0, 0.28), def.Rarity)
+	line(displayName(creatureId, mutation), if mutation then Mutations[mutation].Color else rarity.Color, 0.28, 0.42)
+	line(
+		string.format("🌿 WILD • needs %d food", Rules.TameFood(creatureId)),
+		Color3.fromRGB(220, 255, 220),
+		0.7,
+		0.3
+	)
+end
+
+function WildService:Spawn(forcedId: string?, forcedMutation: string?)
+	local spawns = Map.WildSpawns
+	local creatureId = forcedId
+	if not creatureId then
+		local entry = WeightedRandom.Pick(Rules.WildPool(self.Luck), function(e)
+			return e.Weight
+		end)
+		creatureId = entry and entry.Creature
+	end
+	if not creatureId or not Creatures[creatureId] then
+		return
+	end
+	local mutation = forcedMutation
+	if not mutation and math.random() < WILD.MutationChance then
+		local pick = WeightedRandom.Pick(Mutations.HatchPool, function(e)
+			return e.Weight
+		end)
+		mutation = pick and pick.Id
+	end
+
+	local home = spawns[math.random(1, #spawns)].Position
+	local model = CreatureBuilder.Build({ Id = creatureId, Level = 1, Xp = 0, Mutation = mutation })
+	model.Name = "Wild_" .. creatureId
+	model:SetAttribute("Wild", true)
+	model.Parent = self._folder
+	local start = CFrame.new(home) * CFrame.Angles(0, math.random() * math.pi * 2, 0)
+	model:PivotTo(start)
+	nameTag(model, creatureId, mutation)
+	CollectionService:AddTag(model, Tags.WildTitan)
+
+	local def = Creatures[creatureId]
+	local rarity = Rarities[def.Rarity]
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "TamePrompt"
+	prompt.ActionText = "Tame"
+	prompt.ObjectText = string.format("%s (%s) • 🍖 x%d", def.Name, rarity.Id, Rules.TameFood(creatureId))
+	prompt.HoldDuration = Rules.TameTime(creatureId)
+	prompt.MaxActivationDistance = WILD.TameDistance
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = model.PrimaryPart
+
+	local now = Workspace:GetServerTimeNow()
+	local wild: Wild = {
+		Id = creatureId,
+		Mutation = mutation,
+		Model = model,
+		Home = home,
+		From = start,
+		To = start,
+		MoveStart = now,
+		MoveDuration = 0,
+		ExpiresAt = now + WILD.Lifetime.Min + math.random() * (WILD.Lifetime.Max - WILD.Lifetime.Min),
+		Taken = false,
+	}
+	self.Wilds[model] = wild
+	self.Count += 1
+
+	prompt.PromptButtonHoldBegan:Connect(function(player)
+		if Net.Throttle(player, "TameStart", 1) then
+			local position = self:CurrentCFrame(wild).Position
+			Fx:PlayAll("TameStart", {
+				Position = position + Vector3.new(0, 2, 0),
+				Ground = position,
+				Color = rarity.Color,
+				Duration = prompt.HoldDuration,
+			})
+		end
+	end)
+	prompt.Triggered:Connect(function(player)
+		self:TryTame(player, wild)
+	end)
+
+	local color = if mutation then Mutations[mutation].Color else rarity.Color
+	Fx:PlayAll(
+		"WildSpawn",
+		{ Position = home, Color = color, RarityOrder = rarity.Order + (if mutation then 2 else 0) }
+	)
+	if rarity.Announce or mutation then
+		Net.NotifyAll(
+			string.format(
+				"🌟 A wild %s %s appeared in the fields! Go find it!",
+				string.upper(rarity.Id),
+				displayName(creatureId, mutation)
+			),
+			color
+		)
+	end
+end
+
+function WildService:_remove(wild: Wild)
+	if not self.Wilds[wild.Model] then
+		return
+	end
+	self.Wilds[wild.Model] = nil
+	self.Count -= 1
+	wild.Model:Destroy()
+end
+
+-- Wild Rush event: rare titans are much more common, and a bunch appear now.
+function WildService:Rush(duration: number)
+	self.Luck = WILD.EventLuck
+	for _ = 1, math.max(0, WILD.MaxWild + 4 - self.Count) do
+		self:Spawn()
+		task.wait(0.4)
+	end
+	task.wait(duration)
+	self.Luck = 1
+end
+
+--------------------------------------------------------------------------
+-- Movement
+--------------------------------------------------------------------------
+
+-- Where the titan is right now (lerped along its current move).
+function WildService:CurrentCFrame(wild: Wild): CFrame
+	if wild.MoveDuration <= 0 then
+		return wild.To
+	end
+	local alpha = math.clamp((Workspace:GetServerTimeNow() - wild.MoveStart) / wild.MoveDuration, 0, 1)
+	return wild.From:Lerp(wild.To, alpha)
+end
+
+function WildService:_tick()
+	local now = Workspace:GetServerTimeNow()
+	for _, wild in self.Wilds do
+		if wild.Taken then
+			continue
+		end
+		if now >= wild.ExpiresAt then
+			Fx:PlayAll("Poof", { Position = self:CurrentCFrame(wild).Position })
+			self:_remove(wild)
+			continue
+		end
+		local arrived = now >= wild.MoveStart + wild.MoveDuration
+		if arrived and wild.MoveDuration > 0 then
+			wild.Model:PivotTo(wild.To) -- snap the real model to where clients animated it
+			wild.MoveDuration = 0
+			wild.MoveStart = now + 1 + math.random() * 4 -- idle a bit
+		elseif arrived and now >= wild.MoveStart then
+			self:_startMove(wild, now)
+		end
+	end
+end
+
+function WildService:_startMove(wild: Wild, now: number)
+	local angle = math.random() * math.pi * 2
+	local distance = WILD.WanderRadius * math.sqrt(math.random())
+	local ground = groundAt(wild.Home + Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance))
+	if not ground or Map:IsInArena(ground, 6) then
+		wild.MoveStart = now + 2
+		return
+	end
+	local from = wild.Model:GetPivot()
+	local flat = (ground - from.Position) * Vector3.new(1, 0, 1)
+	local to = if flat.Magnitude < 1 then CFrame.new(ground) * from.Rotation else CFrame.lookAt(ground, ground + flat)
+	local duration = math.max(0.5, flat.Magnitude / WILD.MoveSpeed)
+	wild.From = from
+	wild.To = to
+	wild.MoveStart = now
+	wild.MoveDuration = duration
+	local model = wild.Model
+	model:SetAttribute("MoveFrom", from)
+	model:SetAttribute("MoveTo", to)
+	model:SetAttribute("MoveStart", now)
+	model:SetAttribute("MoveDuration", duration)
+end
+
+--------------------------------------------------------------------------
+-- Taming
+--------------------------------------------------------------------------
+
+function WildService:TryTame(player: Player, wild: Wild)
+	if wild.Taken or not self.Wilds[wild.Model] then
+		return
+	end
+	local data = Data:Get(player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not data or not root then
+		return
+	end
+	local position = self:CurrentCFrame(wild).Position
+	if (root.Position - position).Magnitude > WILD.TameDistance + wild.Model:GetExtentsSize().X + 4 then
+		return
+	end
+	if not Rules.HasFreeSlot(data) then
+		Net.Notify(player, "🏠 Your base is full! Sell a titan or Rebirth for more pens.", RED)
+		return
+	end
+	local plan, favorite = Rules.TameFoodPlan(data.Food, wild.Id)
+	if not plan then
+		Net.Notify(
+			player,
+			string.format("🍖 You need %d food to tame this titan. Grab some in the fields!", Rules.TameFood(wild.Id)),
+			RED
+		)
+		return
+	end
+
+	wild.Taken = true
+	for foodId, count in plan do
+		data.Food[foodId] -= count
+		if data.Food[foodId] <= 0 then
+			data.Food[foodId] = nil
+		end
+	end
+	data.Stats.FoodEaten += Rules.TameFood(wild.Id)
+	Data:Changed(player)
+
+	local def = Creatures[wild.Id]
+	local rarity = Rarities[def.Rarity]
+	local color = if wild.Mutation then Mutations[wild.Mutation].Color else rarity.Color
+	local firstFood = next(plan)
+	Fx:PlayAll("Feed", {
+		Position = position + Vector3.new(0, 2, 0),
+		Color = if firstFood then Foods[firstFood].Color else color,
+		Favorite = favorite,
+		Model = wild.Model,
+	})
+
+	if math.random() > Rules.TameChance(wild.Id, favorite) then
+		Fx:PlayAll("TameFail", { Position = position, Target = player.UserId })
+		Net.Notify(player, "💨 The " .. def.Name .. " ate your food and ran away!", RED)
+		self:_remove(wild)
+		return
+	end
+
+	Fx:PlayAll("TameSuccess", {
+		Position = position + Vector3.new(0, 3, 0),
+		Ground = position,
+		Color = color,
+		Owner = player.UserId,
+		RarityOrder = rarity.Order,
+	})
+	self:_remove(wild)
+	local uid = Creature:Add(player, wild.Id, wild.Mutation)
+	if not uid then
+		return
+	end
+	data.Stats.Tamed += 1
+	GameEvents.Fire(player, "Tamed", { Titan = wild.Id, Mutation = wild.Mutation, Rarity = def.Rarity })
+	Net.Fire(player, "Hatched", { CreatureId = wild.Id, Mutation = wild.Mutation, Source = "Tame" })
+	if rarity.Announce or wild.Mutation then
+		Net.NotifyAll(
+			string.format(
+				"🎯 %s tamed a %s %s!",
+				player.DisplayName,
+				string.upper(rarity.Id),
+				displayName(wild.Id, wild.Mutation)
+			),
+			color
+		)
+	end
+	Data:Changed(player)
+end
+
+return WildService
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="Folder" referent="90">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="88">
+          <Item class="ModuleScript" referent="91">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -10382,6 +11690,7 @@ return StoreService
 
 	  MapService.PlotAnchors  -> { BasePart } sorted by PlotIndex
 	  MapService.FoodSpawns   -> { BasePart }
+	  MapService.WildSpawns   -> { BasePart } (falls back to FoodSpawns)
 	  MapService.Arena        -> { Center: Vector3, Radius: number }
 	  MapService.ArenaSpawns  -> { CFrame }
 	  MapService.Stands       -> { CFrame }
@@ -10409,6 +11718,7 @@ local MapService = {
 	Priority = 5,
 	PlotAnchors = {} :: { BasePart },
 	FoodSpawns = {} :: { BasePart },
+	WildSpawns = {} :: { BasePart },
 	Arena = { Center = Vector3.zero, Radius = 90 },
 	ArenaSpawns = {} :: { CFrame },
 	Stands = {} :: { CFrame },
@@ -10443,13 +11753,14 @@ local function setupLighting()
 	atmosphere.Glare = 0.2
 	atmosphere.Haze = 1.5
 	local bloom = ensure("BloomEffect", Lighting) :: BloomEffect
-	bloom.Intensity = 0.8
-	bloom.Size = 24
-	bloom.Threshold = 1.2
+	-- Low threshold = Neon parts, auras and effects glow (the "shiny" look).
+	bloom.Intensity = 1
+	bloom.Size = 28
+	bloom.Threshold = 0.95
 	local color = ensure("ColorCorrectionEffect", Lighting) :: ColorCorrectionEffect
 	color.Name = "BaseColor"
-	color.Saturation = 0.15
-	color.Contrast = 0.05
+	color.Saturation = 0.25
+	color.Contrast = 0.08
 	local rays = ensure("SunRaysEffect", Lighting) :: SunRaysEffect
 	rays.Intensity = 0.05
 end
@@ -10487,6 +11798,11 @@ function MapService:Start()
 		return (a:GetAttribute("PlotIndex") or 0) < (b:GetAttribute("PlotIndex") or 0)
 	end)
 	self.FoodSpawns = parts(Tags.FoodSpawn)
+	self.WildSpawns = parts(Tags.WildSpawn)
+	if #self.WildSpawns == 0 then
+		log:Warn("map has no WildSpawn markers; wild titans use food spawns")
+		self.WildSpawns = self.FoodSpawns
+	end
 	self.MeteorZones = parts(Tags.MeteorZone)
 	self.Leaderboards = parts(Tags.Leaderboard)
 
@@ -10561,35 +11877,46 @@ return MapService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="89">
+  <Item class="StarterPlayer" referent="92">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="90">
+    <Item class="StarterPlayerScripts" referent="93">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="91">
+      <Item class="Folder" referent="94">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="92">
+        <Item class="Folder" referent="95">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="93">
+          <Item class="ModuleScript" referent="96">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
 	BaseAnimController: makes titans in bases feel alive (client only, no network).
 	- gentle breathing bob + looking around
 	- a bounce when fed (Fx primitive P.Bounce sets "ClientBounce")
-	Only animates titan near the camera.
+	- "+$" money popping off YOUR titans every few seconds
+	- moving shine on rarity badges (RarityTag "Shine" gradients)
+	Only animates titans near the camera.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Fx = require(Shared.Fx)
+local RarityTag = require(Shared.Fx.RarityTag)
+local Format = require(Shared.Lib.Format)
+
+local player = Players.LocalPlayer
 
 local BaseAnimController = {
 	Priority = 30,
@@ -10597,6 +11924,35 @@ local BaseAnimController = {
 
 local MAX_DISTANCE = 200
 local BOUNCE_TIME = 0.35
+local INCOME_EVERY = 3 -- seconds between money popups per titan
+local INCOME_DISTANCE = 120
+
+local nextIncome: { [Model]: number } = {}
+
+local function incomePopups(model: Model, home: CFrame, t: number, camera: Camera)
+	if model:GetAttribute("OwnerUserId") ~= player.UserId then
+		return
+	end
+	local income = model:GetAttribute("Income")
+	if type(income) ~= "number" or income <= 0 then
+		return
+	end
+	local due = nextIncome[model]
+	if not due then
+		-- Stagger titans so the popups ripple instead of all firing at once.
+		nextIncome[model] = t + math.random() * INCOME_EVERY
+		return
+	end
+	if t < due then
+		return
+	end
+	nextIncome[model] = t + INCOME_EVERY
+	if (home.Position - camera.CFrame.Position).Magnitude > INCOME_DISTANCE then
+		return
+	end
+	local top = home.Position + Vector3.new(0, model:GetExtentsSize().Y + 1, 0)
+	Fx.Play("Income", { Position = top, Text = "+" .. Format.Money(income * INCOME_EVERY) })
+end
 
 function BaseAnimController:Start()
 	local elapsed = 0
@@ -10616,7 +11972,11 @@ function BaseAnimController:Start()
 				continue
 			end
 			local home = model:GetAttribute("Home")
-			if typeof(home) ~= "CFrame" or (home.Position - camera.CFrame.Position).Magnitude > MAX_DISTANCE then
+			if typeof(home) ~= "CFrame" then
+				continue
+			end
+			incomePopups(model, home, t, camera)
+			if (home.Position - camera.CFrame.Position).Magnitude > MAX_DISTANCE then
 				continue
 			end
 			local scale = model:GetScale()
@@ -10629,6 +11989,16 @@ function BaseAnimController:Start()
 			end
 			model:PivotTo(home * CFrame.new(0, bob, 0) * CFrame.Angles(0, yaw, 0))
 		end
+		-- Shine sweeping across rarity badges.
+		local shine = ((t * 0.6) % 2) - 1
+		for _, gradient in CollectionService:GetTagged(RarityTag.ShineTag) do
+			if gradient:IsA("UIGradient") then
+				gradient.Offset = Vector2.new(shine, 0)
+			end
+		end
+	end)
+	CollectionService:GetInstanceRemovedSignal("BaseTitan"):Connect(function(model)
+		nextIncome[model] = nil
 	end)
 end
 
@@ -10636,7 +12006,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="94">
+          <Item class="ModuleScript" referent="97">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -10739,7 +12109,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="95">
+          <Item class="ModuleScript" referent="98">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -10790,7 +12160,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="96">
+          <Item class="ModuleScript" referent="99">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -10844,7 +12214,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="97">
+          <Item class="ModuleScript" referent="100">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -10930,7 +12300,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="98">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -10993,7 +12363,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="99">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -11020,7 +12390,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="100">
+          <Item class="ModuleScript" referent="103">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -11085,6 +12455,8 @@ local function targetPosition(): Vector3?
 		end)
 	elseif step.Target == "Food" then
 		return nearest(Tags.FoodPickup)
+	elseif step.Target == "Wild" then
+		return nearest(Tags.WildTitan)
 	elseif step.Target == "Arena" then
 		local arena = CollectionService:GetTagged(Tags.Arena)[1]
 		return if arena and arena:IsA("BasePart") then arena.Position else Vector3.new(0, 2, 0)
@@ -11183,7 +12555,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="104">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -11301,8 +12673,77 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="105">
+            <Properties>
+              <string name="Name">WildController</string>
+              <string name="Source"><![CDATA[--[[
+	WildController: smoothly animates wild titans between the points the
+	server picks (MoveFrom/MoveTo/MoveStart/MoveDuration attributes),
+	with a little hop while walking.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Tags = require(ReplicatedStorage:WaitForChild("Shared").Game.Tags)
+
+local WildController = {
+	Priority = 30,
+}
+
+local MAX_DISTANCE = 300
+local moving: { [Model]: boolean } = {}
+
+function WildController:Start()
+	RunService.RenderStepped:Connect(function()
+		local camera = Workspace.CurrentCamera
+		if not camera then
+			return
+		end
+		local now = Workspace:GetServerTimeNow()
+		for _, model in CollectionService:GetTagged(Tags.WildTitan) do
+			if not model:IsA("Model") or not model.PrimaryPart then
+				continue
+			end
+			local from = model:GetAttribute("MoveFrom")
+			local to = model:GetAttribute("MoveTo")
+			local start = model:GetAttribute("MoveStart")
+			local duration = model:GetAttribute("MoveDuration")
+			if
+				typeof(from) ~= "CFrame"
+				or typeof(to) ~= "CFrame"
+				or type(start) ~= "number"
+				or type(duration) ~= "number"
+			then
+				continue
+			end
+			if (to.Position - camera.CFrame.Position).Magnitude > MAX_DISTANCE then
+				continue
+			end
+			local alpha = (now - start) / duration
+			if alpha >= 0 and alpha < 1 then
+				local hop = math.abs(math.sin(alpha * duration * 9)) * 0.7
+				model:PivotTo(from:Lerp(to, alpha) + Vector3.new(0, hop, 0))
+				moving[model] = true
+			elseif moving[model] then
+				model:PivotTo(to)
+				moving[model] = nil
+			end
+		end
+	end)
+	CollectionService:GetInstanceRemovedSignal(Tags.WildTitan):Connect(function(model)
+		moving[model] = nil
+	end)
+end
+
+return WildController
+]]></string>
+            </Properties>
+          </Item>
         </Item>
-        <Item class="LocalScript" referent="102">
+        <Item class="LocalScript" referent="106">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -11319,11 +12760,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="103">
+        <Item class="Folder" referent="107">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="104">
+          <Item class="ModuleScript" referent="108">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -11358,11 +12799,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="105">
+        <Item class="Folder" referent="109">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="106">
+          <Item class="ModuleScript" referent="110">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -11581,13 +13022,13 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="107">
+          <Item class="ModuleScript" referent="111">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
 	HatchReveal: the egg-opening / catch reveal.
 	Egg: shakes (more for rarer titan) -> flash -> card with the result.
-	Catch (info.Source == "Catch"): straight to the card, titled "CAUGHT!".
+	Tame (info.Source == "Tame"): straight to the card, titled "TAMED!".
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11637,7 +13078,7 @@ local function play(info)
 	})
 	Theme.AutoScale(holder)
 
-	local isCatch = info.Source == "Catch"
+	local isCatch = info.Source == "Tame"
 	local eggFrame = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
@@ -11669,7 +13110,7 @@ local function play(info)
 	Theme.Label({
 		Position = UDim2.fromOffset(10, 16),
 		Size = UDim2.new(1, -20, 0, 34),
-		Text = (if isCatch then "🎯 CAUGHT!  " else "") .. string.upper(def.Rarity),
+		Text = (if isCatch then "🎯 TAMED!  " else "") .. string.upper(def.Rarity),
 		TextColor3 = rarity.Color,
 		Parent = card,
 	})
@@ -11734,7 +13175,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="108">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -11770,6 +13211,7 @@ local window
 
 local EVENT_NAMES = {
 	MeteorFeast = "☄️ Meteor Feast",
+	WildRush = "🌟 Wild Rush",
 	BloodMoon = "🩸 Blood Moon",
 	TitanClash = "⚔️ Titan Clash",
 }
@@ -12136,11 +13578,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="109">
+          <Item class="Folder" referent="113">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="110">
+            <Item class="ModuleScript" referent="114">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -12158,7 +13600,10 @@ local QUICK = {
 	"give Drake",
 	"trophies 100",
 	"boost Luck 30",
+	"wild Hydra",
+	"wild Phoenix Golden",
 	"event TitanClash",
+	"event WildRush",
 	"event MeteorFeast",
 	"event BloodMoon",
 	"practice",
@@ -12215,7 +13660,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="111">
+            <Item class="ModuleScript" referent="115">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -12442,7 +13887,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="112">
+            <Item class="ModuleScript" referent="116">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12529,7 +13974,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="113">
+            <Item class="ModuleScript" referent="117">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12622,7 +14067,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="114">
+            <Item class="ModuleScript" referent="118">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12709,7 +14154,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="115">
+            <Item class="ModuleScript" referent="119">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12838,7 +14283,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="116">
+            <Item class="ModuleScript" referent="120">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12916,7 +14361,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="117">
+            <Item class="ModuleScript" referent="121">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12982,7 +14427,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="118">
+            <Item class="ModuleScript" referent="122">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -13093,7 +14538,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="119">
+            <Item class="ModuleScript" referent="123">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -13217,7 +14662,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="120">
+            <Item class="ModuleScript" referent="124">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -13375,7 +14820,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="121">
+          <Item class="ModuleScript" referent="125">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -13609,7 +15054,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="122">
+          <Item class="ModuleScript" referent="126">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -13796,7 +15241,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="123">
+          <Item class="ModuleScript" referent="127">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -13932,7 +15377,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="124">
+          <Item class="ModuleScript" referent="128">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -14063,7 +15508,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="125">
+  <Item class="Workspace" referent="129">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

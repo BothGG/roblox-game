@@ -27,6 +27,7 @@ local Rules = require(Shared.Game.Rules)
 local Battle = require(Shared.Game.Battle)
 local Tags = require(Shared.Game.Tags)
 local Format = require(Shared.Lib.Format)
+local RarityTag = require(Shared.Fx.RarityTag)
 local Net = require(Shared.Net)
 
 local ServerModules = ServerScriptService:WaitForChild("Server").Modules
@@ -189,7 +190,7 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 
 	local tag = Instance.new("BillboardGui")
 	tag.Name = "Tag"
-	tag.Size = UDim2.fromOffset(210, 90)
+	tag.Size = UDim2.fromOffset(210, 112)
 	tag.LightInfluence = 0
 	tag.MaxDistance = 150
 	tag.Adornee = root
@@ -209,13 +210,14 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 		stroke.Parent = label
 		return label
 	end
-	line("NameLabel", 0, 0.32)
-	line("InfoLabel", 0.32, 0.24)
-	line("StatsLabel", 0.56, 0.24)
+	RarityTag.Add(line("RarityLabel", 0, 0.2), Creatures[creature.Id].Rarity)
+	line("NameLabel", 0.2, 0.28)
+	line("InfoLabel", 0.48, 0.2)
+	line("StatsLabel", 0.68, 0.18)
 	local bar = Instance.new("Frame")
 	bar.Name = "XpBar"
-	bar.Size = UDim2.new(0.7, 0, 0.1, 0)
-	bar.Position = UDim2.fromScale(0.15, 0.86)
+	bar.Size = UDim2.new(0.7, 0, 0.08, 0)
+	bar.Position = UDim2.fromScale(0.15, 0.89)
 	bar.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 	bar.BorderSizePixel = 0
 	bar.Parent = tag
@@ -300,6 +302,8 @@ function CreatureService:_refreshTag(player: Player, uid: string)
 	local income = CreatureMath.BaseIncome(creature) * Rules.IncomeMultiplier(data, self:IncomeContext(player))
 	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
 	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
+	info.TextColor3 = Color3.fromRGB(120, 255, 130)
+	model:SetAttribute("Income", income) -- client pops "+$" over your titans
 	local stats = Battle.Stats(creature)
 	local statsLabel = tag:FindFirstChild("StatsLabel") :: TextLabel
 	statsLabel.Text = string.format("❤️ %s   ⚔️ %s", Format.Number(stats.MaxHP), Format.Number(stats.Attack))

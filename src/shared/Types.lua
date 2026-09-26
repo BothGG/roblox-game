@@ -21,6 +21,7 @@ export type PlayerStats = {
 	PlayTime: number,
 	BattlesPlayed: number,
 	BattlesWon: number,
+	Tamed: number,
 	CashEarned: number,
 }
 

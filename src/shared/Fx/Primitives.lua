@@ -3,7 +3,8 @@
 	Presets combine these into named effects.
 
 	World effects:  Burst, Ring, Pillar, Light, FloatText, Sound, Highlight
-	Screen effects: Shake, Flash, Vignette, Confetti, Pop
+	Glow effects:   Glow, Shockwave, Sparks, ChargeUp, Slash, Beam, Chunks
+	Screen effects: Shake, Flash, Vignette, Confetti, Pop, FovPunch
 ]]
 
 local Players = game:GetService("Players")
@@ -212,14 +213,16 @@ function Primitives.Light(
 end
 
 -- Text that pops up and floats away ("+XP", "LEVEL 10!", "+$500").
+-- Shiny style: white-to-color gradient, thick outline and a bouncy pop.
 function Primitives.FloatText(
 	position: Vector3,
 	text: string,
-	opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number? }?
+	opts: { Color: Color3?, Size: number?, Duration: number?, Rise: number?, Drift: number? }?
 )
 	local o = opts or {}
 	local size = o.Size or 2.5
 	local duration = o.Duration or 1.2
+	local color = o.Color or Color3.new(1, 1, 1)
 	local holder = holderPart(position)
 	local gui = Instance.new("BillboardGui")
 	gui.Size = UDim2.fromScale(size * 5, size)
@@ -233,16 +236,29 @@ function Primitives.FloatText(
 	label.Font = FONT
 	label.TextScaled = true
 	label.Text = text
-	label.TextColor3 = o.Color or Color3.new(1, 1, 1)
+	label.TextColor3 = Color3.new(1, 1, 1)
 	label.Parent = gui
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, color:Lerp(Color3.new(1, 1, 1), 0.65)),
+		ColorSequenceKeypoint.new(0.5, color),
+		ColorSequenceKeypoint.new(1, color:Lerp(Color3.new(0, 0, 0), 0.25)),
+	})
+	gradient.Rotation = 90
+	gradient.Parent = label
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 2
+	stroke.Thickness = 3
+	stroke.Color = color:Lerp(Color3.new(0, 0, 0), 0.8)
 	stroke.Parent = label
 	local scale = Instance.new("UIScale")
 	scale.Scale = 0
 	scale.Parent = label
-	tween(scale, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
-	tween(gui, duration, { StudsOffset = Vector3.new(0, o.Rise or 5, 0) })
+	tween(scale, 0.12, { Scale = 1.35 }, Enum.EasingStyle.Quad)
+	task.delay(0.12, function()
+		tween(scale, 0.2, { Scale = 1 }, Enum.EasingStyle.Back)
+	end)
+	local drift = o.Drift or (math.random() - 0.5) * 2
+	tween(gui, duration, { StudsOffset = Vector3.new(drift, o.Rise or 5, 0) })
 	task.delay(duration * 0.6, function()
 		tween(label, duration * 0.4, { TextTransparency = 1 })
 		tween(stroke, duration * 0.4, { Transparency = 1 })
@@ -277,6 +293,286 @@ function Primitives.Sound(sound: string, position: Vector3?, volume: number?, pi
 		SoundService:PlayLocalSound(s)
 		s:Destroy()
 	end
+end
+
+--------------------------------------------------------------------------
+-- Glow effects (these are what make hits and rare moments "pop")
+--------------------------------------------------------------------------
+
+local function kp(time: number, value: number): NumberSequenceKeypoint
+	return NumberSequenceKeypoint.new(time, value)
+end
+
+local function glowEmitter(holder: BasePart, texture: string, color: Color3 | ColorSequence): ParticleEmitter
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = texture
+	e.Color = toSequence(color)
+	e.LightEmission = 1
+	e.LightInfluence = 0
+	e.Brightness = 2
+	e.Speed = NumberRange.new(0)
+	e.Rate = 0
+	e.Rotation = NumberRange.new(0, 360)
+	e.Parent = holder
+	return e
+end
+
+-- A soft, bright flash of light: the "pop" in the middle of an impact.
+function Primitives.Glow(
+	position: Vector3,
+	opts: { Color: Color3?, Size: number?, Duration: number?, Texture: string? }?
+)
+	local o = opts or {}
+	local size = math.min(o.Size or 8, 100)
+	local duration = o.Duration or 0.35
+	local holder = holderPart(position)
+	local e = glowEmitter(holder, o.Texture or Textures.Glow, o.Color or Color3.new(1, 1, 1))
+	e.Lifetime = NumberRange.new(duration)
+	e.Size = NumberSequence.new({ kp(0, size * 0.3), kp(0.2, size), kp(1, size * 1.15) })
+	e.Transparency = NumberSequence.new({ kp(0, 0), kp(0.3, 0.2), kp(1, 1) })
+	e.ZOffset = 2
+	e:Emit(1)
+	-- A white-hot core on top of the colored glow.
+	local core = glowEmitter(holder, Textures.Core, Color3.new(1, 1, 1))
+	core.Lifetime = NumberRange.new(duration * 0.6)
+	core.Size = NumberSequence.new({ kp(0, size * 0.5), kp(1, size * 0.1) })
+	core.Transparency = NumberSequence.new({ kp(0, 0.1), kp(1, 1) })
+	core.ZOffset = 3
+	core:Emit(1)
+	Debris:AddItem(holder, duration + 0.5)
+end
+
+-- A textured shockwave ring lying flat on the ground (or facing the camera
+-- with Upright = true). Looks much softer than the neon Ring.
+function Primitives.Shockwave(
+	position: Vector3,
+	opts: {
+		Color: Color3?,
+		Radius: number?,
+		Duration: number?,
+		Upright: boolean?,
+		Texture: string?,
+	}?
+)
+	local o = opts or {}
+	local radius = math.min(o.Radius or 12, 50)
+	local duration = o.Duration or 0.45
+	local holder = holderPart(position + Vector3.new(0, 0.3, 0))
+	local e = glowEmitter(holder, o.Texture or Textures.Shockwave, o.Color or Color3.new(1, 1, 1))
+	if not o.Upright then
+		-- Particles face their velocity; a tiny upward speed lays them flat.
+		e.Orientation = Enum.ParticleOrientation.VelocityPerpendicular
+		e.EmissionDirection = Enum.NormalId.Top
+		e.Speed = NumberRange.new(0.01)
+		e.SpreadAngle = Vector2.zero
+		e.Rotation = NumberRange.new(0)
+	end
+	e.Lifetime = NumberRange.new(duration)
+	e.Size = NumberSequence.new({ kp(0, radius * 0.15), kp(0.35, radius * 0.8), kp(1, radius) })
+	e.Transparency = NumberSequence.new({ kp(0, 0), kp(0.5, 0.3), kp(1, 1) })
+	e:Emit(1)
+	Debris:AddItem(holder, duration + 0.5)
+end
+
+-- Fast bright streaks that fly out (hits, sparks, level up).
+-- Direction = aim them (e.g. away from the attacker), otherwise all around.
+function Primitives.Sparks(
+	position: Vector3,
+	opts: {
+		Color: (Color3 | ColorSequence)?,
+		Count: number?,
+		Speed: number?,
+		Size: number?,
+		Lifetime: number?,
+		Gravity: number?,
+		Direction: Vector3?,
+		Spread: number?,
+	}?
+)
+	local o = opts or {}
+	local lifetime = o.Lifetime or 0.45
+	local speed = o.Speed or 45
+	local holder = holderPart(position)
+	if o.Direction and o.Direction.Magnitude > 0.01 then
+		holder.CFrame = CFrame.lookAt(position, position + o.Direction)
+	end
+	local e = glowEmitter(holder, Textures.Sparks, o.Color or Color3.fromRGB(255, 240, 180))
+	e.Orientation = Enum.ParticleOrientation.VelocityParallel
+	e.EmissionDirection = if o.Direction then Enum.NormalId.Front else Enum.NormalId.Top
+	local spread = o.Spread or (if o.Direction then 55 else 180)
+	e.SpreadAngle = Vector2.new(spread, spread)
+	e.Speed = NumberRange.new(speed * 0.5, speed)
+	e.Drag = 5
+	e.Acceleration = Vector3.new(0, -(o.Gravity or 20), 0)
+	e.Lifetime = NumberRange.new(lifetime * 0.5, lifetime)
+	e.Rotation = NumberRange.new(0)
+	e.Squash = NumberSequence.new(2) -- stretched into streaks along their flight
+	local size = o.Size or 0.6
+	e.Size = NumberSequence.new({ kp(0, size), kp(1, 0) })
+	e.Transparency = NumberSequence.new({ kp(0, 0), kp(1, 0.6) })
+	e:Emit(o.Count or 16)
+	Debris:AddItem(holder, lifetime + 0.5)
+end
+
+-- A swirl that shrinks inward: "charging up" before a big move.
+function Primitives.ChargeUp(position: Vector3, opts: { Color: Color3?, Size: number?, Duration: number? }?)
+	local o = opts or {}
+	local size = math.min(o.Size or 14, 100)
+	local duration = o.Duration or 0.35
+	local holder = holderPart(position)
+	local e = glowEmitter(holder, Textures.Implode, o.Color or Color3.new(1, 1, 1))
+	e.Lifetime = NumberRange.new(duration)
+	e.RotSpeed = NumberRange.new(360)
+	e.Size = NumberSequence.new({ kp(0, size), kp(1, 0) })
+	e.Transparency = NumberSequence.new({ kp(0, 1), kp(0.3, 0.1), kp(1, 0) })
+	e:Emit(1)
+	Debris:AddItem(holder, duration + 0.5)
+end
+
+-- A glowing crescent swipe in front of `cf` (an attacker's CFrame).
+function Primitives.Slash(
+	cf: CFrame,
+	opts: {
+		Color: Color3?,
+		Radius: number?,
+		Arc: number?,
+		Width: number?,
+		Duration: number?,
+		Tilt: number?,
+	}?
+)
+	local o = opts or {}
+	local radius = o.Radius or 8
+	local arc = math.rad(o.Arc or 140)
+	local width = o.Width or 2
+	local duration = o.Duration or 0.25
+	local segments = 11
+	local base = cf * CFrame.Angles(0, 0, math.rad(o.Tilt or 0))
+	local segLength = radius * arc / segments * 1.35
+	for i = 1, segments do
+		local a = (i - 1) / (segments - 1)
+		local fat = 1 - math.abs(a - 0.5) * 1.6 -- thick middle, thin tips
+		local angle = arc / 2 - arc * a
+		local part = holderPart(cf.Position, Vector3.new(segLength, 0.25 * width * fat + 0.05, width * fat + 0.1))
+		part.Material = Enum.Material.Neon
+		part.Color = if i % 3 == 0 then Color3.new(1, 1, 1) else (o.Color or Color3.new(1, 1, 1))
+		part.CFrame = base * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, -radius)
+		task.delay(a * duration * 0.4, function()
+			part.Transparency = 0.05
+			tween(part, duration, { Transparency = 1, Size = part.Size * Vector3.new(1, 0.3, 0.2) })
+		end)
+		Debris:AddItem(part, duration * 1.5 + 0.2)
+	end
+end
+
+-- A vertical column of light with rising sparkles (rare spawns, level ups,
+-- mutations, victories). Width grows in, then fades out.
+function Primitives.Beam(
+	position: Vector3,
+	opts: { Color: Color3?, Height: number?, Width: number?, Duration: number? }?
+)
+	local o = opts or {}
+	local color = o.Color or Color3.new(1, 1, 1)
+	local height = o.Height or 80
+	local width = o.Width or 8
+	local duration = o.Duration or 1.4
+	local holder = holderPart(position, Vector3.new(width, 1, width))
+	local bottom = Instance.new("Attachment")
+	bottom.Parent = holder
+	local top = Instance.new("Attachment")
+	top.Position = Vector3.new(0, height, 0)
+	top.Parent = holder
+	local function beam(w: number, texture: string, transparency: NumberSequence)
+		local b = Instance.new("Beam")
+		b.Attachment0 = bottom
+		b.Attachment1 = top
+		b.FaceCamera = true
+		b.LightEmission = 1
+		b.LightInfluence = 0
+		b.Brightness = 3
+		b.Texture = texture
+		b.TextureMode = Enum.TextureMode.Stretch
+		b.TextureLength = 1
+		b.Color = ColorSequence.new(color, Color3.new(1, 1, 1))
+		b.Transparency = transparency
+		b.Width0 = 0
+		b.Width1 = 0
+		b.Segments = 1
+		b.Parent = holder
+		tween(b, 0.15, { Width0 = w, Width1 = w * 0.6 }, Enum.EasingStyle.Back)
+		task.delay(duration * 0.5, function()
+			tween(b, duration * 0.5, { Width0 = 0, Width1 = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		end)
+	end
+	beam(width * 2.2, Textures.Glow, NumberSequence.new({ kp(0, 0.1), kp(0.7, 0.5), kp(1, 1) }))
+	beam(width * 0.5, "", NumberSequence.new({ kp(0, 0), kp(0.8, 0.4), kp(1, 1) }))
+	local e = glowEmitter(holder, Textures.Sparkle, color)
+	e.Shape = Enum.ParticleEmitterShape.Disc
+	e.EmissionDirection = Enum.NormalId.Top
+	e.Speed = NumberRange.new(height * 0.4, height * 0.8)
+	e.Lifetime = NumberRange.new(0.8, 1.4)
+	e.Size = NumberSequence.new({ kp(0, 0), kp(0.2, math.max(1, width * 0.2)), kp(1, 0) })
+	e.Transparency = NumberSequence.new(0)
+	e:Emit(math.floor(20 + width * 2))
+	Debris:AddItem(holder, duration + 1.6)
+end
+
+-- Chunks of rock/dirt thrown out of a ground impact.
+function Primitives.Chunks(
+	position: Vector3,
+	opts: {
+		Color: Color3?,
+		Count: number?,
+		Size: number?,
+		Distance: number?,
+		Material: Enum.Material?,
+	}?
+)
+	local o = opts or {}
+	local size = o.Size or 1.5
+	local distance = o.Distance or 12
+	for _ = 1, o.Count or 8 do
+		local s = size * (0.5 + math.random() * 0.7)
+		local chunk = holderPart(position, Vector3.new(s, s * 0.8, s))
+		chunk.Transparency = 0
+		chunk.Material = o.Material or Enum.Material.Slate
+		chunk.Color = o.Color or Color3.fromRGB(140, 120, 95)
+		local angle = math.random() * math.pi * 2
+		local dir = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local d = distance * (0.5 + math.random() * 0.5)
+		local spin = CFrame.Angles(math.random() * 6, math.random() * 6, math.random() * 6)
+		local peak = position + dir * d * 0.5 + Vector3.new(0, d * 0.6, 0)
+		local land = position + dir * d
+		tween(chunk, 0.25, { CFrame = CFrame.new(peak) * spin })
+		task.delay(0.25, function()
+			tween(
+				chunk,
+				0.3,
+				{ CFrame = CFrame.new(land) * spin * spin },
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.In
+			)
+			task.delay(0.6, function()
+				tween(chunk, 0.5, { Transparency = 1, Size = chunk.Size * 0.3 })
+			end)
+		end)
+		Debris:AddItem(chunk, 2)
+	end
+end
+
+-- Quick zoom punch of the camera (big hits, level ups).
+function Primitives.FovPunch(amount: number, duration: number?)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local base = camera:GetAttribute("BaseFov")
+	if type(base) ~= "number" then
+		base = camera.FieldOfView
+		camera:SetAttribute("BaseFov", base)
+	end
+	camera.FieldOfView = (base :: number) + amount
+	tween(camera, duration or 0.35, { FieldOfView = base }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 end
 
 -- Briefly makes a model glow.

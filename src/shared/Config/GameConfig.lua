@@ -62,6 +62,20 @@ local GameConfig = {
 		RespawnTime = { Common = 20, Rare = 35, Epic = 60, Legendary = 120, Mythic = 300, Secret = 600 },
 	},
 
+	-- Wild titans roaming the fields: find them and tame them with food.
+	-- Per-rarity odds / tame time / food cost are in Rarities.lua.
+	Wild = {
+		MaxWild = 8, -- wild titans on the island at once
+		RespawnDelay = 12, -- seconds between spawns (randomized a bit)
+		Lifetime = { Min = 120, Max = 240 }, -- then it wanders off
+		WanderRadius = 28,
+		MoveSpeed = 7,
+		TameDistance = 14,
+		MutationChance = 0.04,
+		FavoriteBonus = 0.2, -- + tame chance when fed a favorite food
+		EventLuck = 3, -- rare weight multiplier during the Wild Rush event
+	},
+
 	Steal = {
 		HoldTime = 1.5,
 		CarryWalkSpeed = 11,
@@ -103,6 +117,7 @@ local GameConfig = {
 		MeteorFoodCount = 30,
 		BloodMoonDuration = 90,
 		BloodMoonGrowthMult = 2,
+		WildRushDuration = 90,
 	},
 
 	Offline = {

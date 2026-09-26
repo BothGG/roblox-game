@@ -1,7 +1,7 @@
 --[[
 	HatchReveal: the egg-opening / catch reveal.
 	Egg: shakes (more for rarer titan) -> flash -> card with the result.
-	Catch (info.Source == "Catch"): straight to the card, titled "CAUGHT!".
+	Tame (info.Source == "Tame"): straight to the card, titled "TAMED!".
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -51,7 +51,7 @@ local function play(info)
 	})
 	Theme.AutoScale(holder)
 
-	local isCatch = info.Source == "Catch"
+	local isCatch = info.Source == "Tame"
 	local eggFrame = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
@@ -83,7 +83,7 @@ local function play(info)
 	Theme.Label({
 		Position = UDim2.fromOffset(10, 16),
 		Size = UDim2.new(1, -20, 0, 34),
-		Text = (if isCatch then "🎯 CAUGHT!  " else "") .. string.upper(def.Rarity),
+		Text = (if isCatch then "🎯 TAMED!  " else "") .. string.upper(def.Rarity),
 		TextColor3 = rarity.Color,
 		Parent = card,
 	})

@@ -52,7 +52,7 @@ local Mutations = {
 		Color = rgb(255, 0, 0),
 		AccentColor = rgb(255, 255, 255),
 		Material = Enum.Material.Neon,
-		Aura = { Color = rgb(255, 255, 255), Light = true, Particles = "Sparkles" },
+		Aura = { Color = rgb(255, 255, 255), Light = true, Particles = "Rainbow" },
 		Animated = true, -- the client cycles its colors
 	},
 }
