@@ -66,6 +66,7 @@ function Battle.Stats(creature: CreatureData): Stats
 	local mutation = creature.Mutation and Mutations[creature.Mutation]
 	local mult = mutation and mutation.StatMult or 1
 	local scale = CreatureMath.VisualScale(creature)
+	mult *= 1 + ((creature :: any).Bonus or 0) -- bred titans inherit a stat bonus
 	return {
 		MaxHP = math.floor(base.HP * (1 + (creature.Level - 1) * 0.12) * mult),
 		Attack = math.floor(base.Attack * (1 + (creature.Level - 1) * 0.10) * mult),

@@ -163,7 +163,7 @@ return function(t)
 		t.expect(Rules.UpgradeCost(data, "Pens") > (first :: number)).toBe(true)
 		t.expect(Rules.BuyUpgrade(data, "Storage")).toBe(true)
 		t.expect(Rules.StorageCap(data)).toBe(storage + 25)
-		t.expect((Rules.BuyUpgrade(data, "Incubators"))).toBe(false) -- Phase 2
+		t.expect((Rules.BuyUpgrade(data, "Incubators"))).toBe(true) -- Phase 2 turned incubators on
 		for _ = 1, 40 do
 			Rules.BuyUpgrade(data, "Pens")
 		end

@@ -20,7 +20,7 @@ type PlayerData = Types.PlayerData
 
 local Schema = {}
 
-Schema.CURRENT_VERSION = 4
+Schema.CURRENT_VERSION = 5
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -72,7 +72,10 @@ function Schema.Template(): PlayerData
 		-- v4 (ARK-style foundation)
 		Inventory = { Resources = {}, Items = {} },
 		Structures = {},
-		Upgrades = { Pens = 0, Storage = 0, Incubators = 0 },
+		Upgrades = { Pens = 0, Storage = 0, Incubators = 0, IncubatorSpeed = 0 },
+		-- v5 (eggs and breeding)
+		Eggs = {}, -- [uid] = EggData (shared/Game/Breeding.lua)
+		Breeding = {}, -- { A = uid, B = uid, StartedAt, ReadyAt }
 	}
 end
 
@@ -81,6 +84,7 @@ function Schema.FillCreature(creature: any)
 	creature.Size = if type(creature.Size) == "number" then creature.Size else 1
 	creature.Tamed = if creature.Tamed == nil then true else creature.Tamed
 	creature.Hunger = if type(creature.Hunger) == "number" then creature.Hunger else 100
+	creature.Bonus = if type(creature.Bonus) == "number" then creature.Bonus else 0
 	-- Saddle stays nil until one is crafted (Phase 3)
 end
 
@@ -103,6 +107,13 @@ local Migrations: { [number]: (any) -> () } = {
 	[3] = function(data)
 		-- v4: ARK-style foundation. Titans get Size/Tamed/Hunger; the save gets
 		-- Inventory, Structures and base Upgrades (reconcile adds the tables).
+		for _, creature in data.Creatures or {} do
+			Schema.FillCreature(creature)
+		end
+	end,
+	[4] = function(data)
+		-- v5: eggs and breeding. Titans get a stat Bonus (inherited when bred);
+		-- reconcile adds Eggs, Breeding and the IncubatorSpeed upgrade.
 		for _, creature in data.Creatures or {} do
 			Schema.FillCreature(creature)
 		end
@@ -135,6 +146,15 @@ function Schema.Trim(data: PlayerData): number
 	local removed = 0
 	while #data.Structures > limits.Structures do
 		table.remove(data.Structures)
+		removed += 1
+	end
+	local eggUids = {}
+	for uid in data.Eggs do
+		table.insert(eggUids, uid)
+	end
+	table.sort(eggUids)
+	for i = limits.Eggs + 1, #eggUids do
+		data.Eggs[eggUids[i]] = nil
 		removed += 1
 	end
 	while #data.Inventory.Items > limits.ItemStacks do

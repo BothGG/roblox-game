@@ -589,6 +589,27 @@ local GameConfig = {
 		KnockOffDamage = true, -- your titan at 0 HP throws you off
 	},
 
+	-- Eggs and breeding (Phase 2; shared/Game/Breeding.lua). Times in seconds.
+	Breeding = {
+		Time = { Common = 120, Rare = 300, Epic = 900, Legendary = 1800, Mythic = 3600, Secret = 7200 },
+		CooldownMult = 2, -- a parent rests Time * this before breeding again
+		MutationChance = 0.05, -- neither parent mutated
+		OneMutatedChance = 0.12, -- one parent mutated: baby gets that mutation
+		BothMutatedChance = 0.3, -- both mutated: baby gets one of theirs
+		BonusRange = { -0.02, 0.08 }, -- baby stat bonus = parents' average + this
+		MaxBonus = 1, -- +100% stats at most
+		TierJumpChance = 0.04, -- egg jumps one size tier above its parents
+		HatchTime = { Common = 60, Rare = 180, Epic = 600, Legendary = 1200, Mythic = 2400, Secret = 3600 },
+		HatchPerTier = 0.5, -- each size tier above Tiny hatches 50% slower
+		IncubatorSpeedPerLevel = 0.15,
+		CarrySpeed = 16, -- walk speed carrying a Tiny egg
+		CarryPenaltyPerTier = 0.07, -- slower for every size tier
+		MinCarrySpeed = 7,
+		DroppedTime = 10, -- a dropped egg can be grabbed by anyone for this long
+		AnnounceTier = "Colossal", -- server message when an egg this big appears
+		BeamTier = "Titanic", -- sky beam on eggs this big
+	},
+
 	-- Titans that follow you around (FollowerService)
 	Followers = {
 		Max = 3,
@@ -662,6 +683,7 @@ local GameConfig = {
 			Structures = 600, -- placed build pieces per base (Phase 4)
 			ItemStacks = 120, -- backpack + chest item stacks (Phase 3)
 			ResourceKinds = 40,
+			Eggs = 60, -- eggs in incubators + egg storage
 		},
 	},
 
@@ -1222,7 +1244,8 @@ return {
 
 	  Pens       +1 pen per level (pens go up to GameConfig.MaxSlots = 24)
 	  Storage    +25 food storage per level
-	  Incubators for eggs (Phase 2: shown as "coming soon" until Enabled)
+	  Incubators +1 incubator for eggs (you start with 1, max 6)
+	  IncubatorSpeed  +15% hatch speed per level
 ]]
 
 export type Upgrade = {
@@ -1238,7 +1261,7 @@ export type Upgrade = {
 }
 
 local Upgrades: { [string]: any } = {
-	Order = { "Pens", "Storage", "Incubators" },
+	Order = { "Pens", "Storage", "Incubators", "IncubatorSpeed" },
 	Pens = {
 		Name = "Extra Pen",
 		Icon = "🐾",
@@ -1267,7 +1290,17 @@ local Upgrades: { [string]: any } = {
 		Per = 1,
 		BaseCost = 10000,
 		Growth = 2.5,
-		Enabled = false, -- turned on with breeding & eggs (Phase 2)
+		Enabled = true,
+	},
+	IncubatorSpeed = {
+		Name = "Faster Hatching",
+		Icon = "⏩",
+		Text = "+15% hatch speed",
+		Max = 10,
+		Per = 1,
+		BaseCost = 8000,
+		Growth = 1.9,
+		Enabled = true,
 	},
 }
 
@@ -3208,6 +3241,7 @@ function Battle.Stats(creature: CreatureData): Stats
 	local mutation = creature.Mutation and Mutations[creature.Mutation]
 	local mult = mutation and mutation.StatMult or 1
 	local scale = CreatureMath.VisualScale(creature)
+	mult *= 1 + ((creature :: any).Bonus or 0) -- bred titans inherit a stat bonus
 	return {
 		MaxHP = math.floor(base.HP * (1 + (creature.Level - 1) * 0.12) * mult),
 		Attack = math.floor(base.Attack * (1 + (creature.Level - 1) * 0.10) * mult),
@@ -3337,6 +3371,209 @@ return Battle
           </Properties>
         </Item>
         <Item class="ModuleScript" referent="28">
+          <Properties>
+            <string name="Name">Breeding</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Breeding: eggs, breeding, hatching, carrying and fusion math (pure, tested).
+
+	Size tiers come from Config/Sizes.lua. Eggs always have a tier's size
+	(x1, x3, x10 ... x100,000). Bigger eggs hatch slower and are carried
+	slower, so a Mythical egg is a slow, risky run home.
+]]
+
+local Config = script.Parent.Parent.Config
+local Creatures = require(Config.Creatures)
+local GameConfig = require(Config.GameConfig)
+local Sizes = require(Config.Sizes)
+local CreatureMath = require(script.Parent.CreatureMath)
+
+local BREED = GameConfig.Breeding
+
+local Breeding = {}
+
+export type Parent = { Id: string, Mutation: string?, Size: number?, Bonus: number?, BreedReadyAt: number? }
+export type EggData = {
+	Uid: string,
+	Species: string,
+	Mutation: string?,
+	Size: number,
+	Bonus: number,
+	Source: string, -- "Breed" | "Nest" | "Stolen"
+	Slot: number?, -- incubator index, nil = waiting in egg storage
+	StartedAt: number?,
+	HatchAt: number?,
+}
+export type Rolls = {
+	Mutation: number, -- 0..1
+	PickParent: number, -- 0..1
+	Bonus: number, -- 0..1
+	Size: number, -- 0..1
+	Jump: number, -- 0..1
+	PoolMutation: string?, -- a random mutation from the hatch pool (server picks it)
+}
+
+-- Size tiers --------------------------------------------------------------
+
+function Breeding.TierIndex(size: number?): number
+	local n = CreatureMath.ClampSize(size)
+	local index = 1
+	for i, tier in Sizes.Tiers do
+		if n >= tier.Min then
+			index = i
+		end
+	end
+	return index
+end
+
+function Breeding.TierSize(index: number): number
+	local i = math.clamp(index, 1, #Sizes.Tiers)
+	return Sizes.Tiers[i].Min
+end
+
+local function tierByName(name: string): number
+	for i, tier in Sizes.Tiers do
+		if tier.Id == name then
+			return i
+		end
+	end
+	return #Sizes.Tiers + 1
+end
+
+function Breeding.ShouldAnnounce(size: number): boolean
+	return Breeding.TierIndex(size) >= tierByName(BREED.AnnounceTier)
+end
+
+function Breeding.HasBeam(size: number): boolean
+	return Breeding.TierIndex(size) >= tierByName(BREED.BeamTier)
+end
+
+-- Breeding ----------------------------------------------------------------
+
+function Breeding.Time(species: string): number
+	return BREED.Time[Creatures[species].Rarity] or 120
+end
+
+function Breeding.CanBreed(a: Parent?, b: Parent?, now: number): (boolean, string?)
+	if not a or not b then
+		return false, "Pick two titans"
+	end
+	if a == b then
+		return false, "Pick two different titans"
+	end
+	if a.Id ~= b.Id then
+		return false, "Both parents must be the same species"
+	end
+	if (a.BreedReadyAt or 0) > now or (b.BreedReadyAt or 0) > now then
+		return false, "A parent is still resting"
+	end
+	return true, nil
+end
+
+-- The egg two parents make. Rolls are random 0..1 numbers (passed in so
+-- tests are repeatable).
+function Breeding.MakeEgg(
+	a: Parent,
+	b: Parent,
+	rolls: Rolls
+): { Species: string, Mutation: string?, Size: number, Bonus: number }
+	-- Mutation
+	local mutation: string? = nil
+	if a.Mutation and b.Mutation then
+		if rolls.Mutation < BREED.BothMutatedChance then
+			mutation = if rolls.PickParent < 0.5 then a.Mutation else b.Mutation
+		end
+	elseif a.Mutation or b.Mutation then
+		if rolls.Mutation < BREED.OneMutatedChance then
+			mutation = a.Mutation or b.Mutation
+		end
+	elseif rolls.Mutation < BREED.MutationChance then
+		mutation = rolls.PoolMutation
+	end
+	-- Stat bonus: parents' average + a small random change
+	local average = ((a.Bonus or 0) + (b.Bonus or 0)) / 2
+	local lo, hi = BREED.BonusRange[1], BREED.BonusRange[2]
+	local bonus = math.clamp(average + lo + (hi - lo) * rolls.Bonus, 0, BREED.MaxBonus)
+	-- Size: a tier between the parents' tiers, rarely one tier higher
+	local ta, tb = Breeding.TierIndex(a.Size), Breeding.TierIndex(b.Size)
+	local low, high = math.min(ta, tb), math.max(ta, tb)
+	local index = low + math.floor(rolls.Size * (high - low + 1))
+	index = math.min(index, high)
+	if rolls.Jump < BREED.TierJumpChance then
+		index += 1
+	end
+	return {
+		Species = a.Id,
+		Mutation = mutation,
+		Size = Breeding.TierSize(index),
+		Bonus = math.floor(bonus * 1000 + 0.5) / 1000,
+	}
+end
+
+function Breeding.Cooldown(species: string): number
+	return Breeding.Time(species) * BREED.CooldownMult
+end
+
+-- Hatching ----------------------------------------------------------------
+
+function Breeding.HatchTime(species: string, size: number, speedLevel: number?): number
+	local base = BREED.HatchTime[Creatures[species].Rarity] or 60
+	local tierMult = 1 + (Breeding.TierIndex(size) - 1) * BREED.HatchPerTier
+	return math.ceil(base * tierMult / (1 + (speedLevel or 0) * BREED.IncubatorSpeedPerLevel))
+end
+
+-- 0..1 progress of an egg in an incubator.
+function Breeding.HatchProgress(egg: EggData, now: number): number
+	if not egg.StartedAt or not egg.HatchAt then
+		return 0
+	end
+	local total = egg.HatchAt - egg.StartedAt
+	if total <= 0 then
+		return 1
+	end
+	return math.clamp((now - egg.StartedAt) / total, 0, 1)
+end
+
+function Breeding.IncubatorCount(level: number): number
+	return 1 + level
+end
+
+-- Carrying ----------------------------------------------------------------
+
+function Breeding.CarrySpeed(size: number): number
+	local penalty = (Breeding.TierIndex(size) - 1) * BREED.CarryPenaltyPerTier
+	return math.max(BREED.MinCarrySpeed, BREED.CarrySpeed * (1 - penalty))
+end
+
+-- Fusion ------------------------------------------------------------------
+
+-- 3 titans of the same species AND the same size tier fuse into one of the
+-- next tier. Returns the new size, or nil and a reason.
+function Breeding.FuseResult(parts: { Parent }): (number?, string?)
+	if #parts ~= 3 then
+		return nil, "Pick 3 titans"
+	end
+	local species = parts[1].Id
+	local tier = Breeding.TierIndex(parts[1].Size)
+	for _, p in parts do
+		if p.Id ~= species then
+			return nil, "All 3 must be the same species"
+		end
+		if Breeding.TierIndex(p.Size) ~= tier then
+			return nil, "All 3 must be the same size tier"
+		end
+	end
+	if tier >= #Sizes.Tiers then
+		return nil, "Already the biggest size"
+	end
+	return Breeding.TierSize(tier + 1), nil
+end
+
+return Breeding
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">ConfigValidator</string>
             <string name="Source"><![CDATA[--[[
@@ -3574,7 +3811,7 @@ return ConfigValidator
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">CreatureMath</string>
             <string name="Source"><![CDATA[--[[
@@ -3779,7 +4016,7 @@ return CreatureMath
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">Progress</string>
             <string name="Source"><![CDATA[--[[
@@ -4073,7 +4310,7 @@ return Progress
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">Riding</string>
             <string name="Source"><![CDATA[--!strict
@@ -4154,7 +4391,7 @@ return Riding
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">Rules</string>
             <string name="Source"><![CDATA[--!strict
@@ -4483,7 +4720,7 @@ return Rules
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">Tags</string>
             <string name="Source"><![CDATA[--!strict
@@ -4515,7 +4752,7 @@ return {
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">Taming</string>
             <string name="Source"><![CDATA[--!strict
@@ -4618,7 +4855,7 @@ return Taming
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">WildBrain</string>
             <string name="Source"><![CDATA[--!strict
@@ -4739,11 +4976,11 @@ return WildBrain
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="36">
+      <Item class="Folder" referent="37">
         <Properties>
           <string name="Name">Lib</string>
         </Properties>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">Format</string>
             <string name="Source"><![CDATA[local Format = {}
@@ -4833,7 +5070,7 @@ return Format
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">Guard</string>
             <string name="Source"><![CDATA[--!strict
@@ -4896,7 +5133,7 @@ return Guard
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">Loader</string>
             <string name="Source"><![CDATA[--[[
@@ -4986,7 +5223,7 @@ return Loader
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">Log</string>
             <string name="Source"><![CDATA[--[[
@@ -5049,7 +5286,7 @@ return Log
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="41">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">Rng</string>
             <string name="Source"><![CDATA[--!strict
@@ -5093,7 +5330,7 @@ return Rng
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="42">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">Signal</string>
             <string name="Source"><![CDATA[--[[
@@ -5181,7 +5418,7 @@ return Signal
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="43">
+        <Item class="ModuleScript" referent="44">
           <Properties>
             <string name="Name">Trove</string>
             <string name="Source"><![CDATA[--[[
@@ -5249,7 +5486,7 @@ return Trove
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="44">
+        <Item class="ModuleScript" referent="45">
           <Properties>
             <string name="Name">WeightedRandom</string>
             <string name="Source"><![CDATA[local WeightedRandom = {}
@@ -5278,7 +5515,7 @@ return WeightedRandom
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="45">
+      <Item class="ModuleScript" referent="46">
         <Properties>
           <string name="Name">Net</string>
           <string name="Source"><![CDATA[--[[
@@ -5415,7 +5652,7 @@ end
 return Net
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="46">
+        <Item class="ModuleScript" referent="47">
           <Properties>
             <string name="Name">Remotes</string>
             <string name="Source"><![CDATA[--!strict
@@ -5489,7 +5726,7 @@ return Remotes
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="47">
+      <Item class="ModuleScript" referent="48">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
@@ -5507,6 +5744,8 @@ export type CreatureData = {
 	Tamed: boolean?, -- false while a wild titan is being tamed (Phase 1)
 	Saddle: string?, -- saddle item id; needed to ride (Phase 1)
 	Hunger: number?, -- 0..100 (Phase 3)
+	Bonus: number?, -- stat bonus from breeding (0.05 = +5% HP and Attack)
+	BreedReadyAt: number?, -- os.time() when it can breed again
 }
 
 export type InventoryItem = { Id: string, Count: number }
@@ -5516,7 +5755,19 @@ export type Inventory = {
 }
 -- A placed build piece in the base (plot-local position, rotation in degrees).
 export type Structure = { Id: string, X: number, Y: number, Z: number, R: number, Hp: number? }
-export type Upgrades = { Pens: number, Storage: number, Incubators: number }
+export type Upgrades = { Pens: number, Storage: number, Incubators: number, IncubatorSpeed: number }
+export type EggData = {
+	Uid: string,
+	Species: string,
+	Mutation: string?,
+	Size: number,
+	Bonus: number,
+	Source: string,
+	Slot: number?,
+	StartedAt: number?,
+	HatchAt: number?,
+}
+export type BreedingPen = { A: string?, B: string?, StartedAt: number?, ReadyAt: number? }
 
 export type PlayerStats = {
 	StarterGiven: boolean,
@@ -5559,6 +5810,8 @@ export type PlayerData = {
 	Inventory: Inventory,
 	Structures: { Structure },
 	Upgrades: Upgrades,
+	Eggs: { [string]: EggData },
+	Breeding: BreedingPen,
 }
 
 -- What the client UI receives (PlayerData + computed values).
@@ -5594,6 +5847,9 @@ export type Snapshot = {
 	Upgrades: Upgrades?,
 	Inventory: Inventory?,
 	Following: { [string]: boolean }?, -- titans following you (FollowerService)
+	Eggs: { [string]: EggData }?,
+	Breeding: BreedingPen?,
+	Incubators: number?,
 }
 
 -- Modules must return exactly one non-nil value.
@@ -5603,19 +5859,19 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="48">
+  <Item class="ServerScriptService" referent="49">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="49">
+    <Item class="Folder" referent="50">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Folder" referent="50">
+      <Item class="Folder" referent="51">
         <Properties>
           <string name="Name">Data</string>
         </Properties>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">Schema</string>
             <string name="Source"><![CDATA[--!strict
@@ -5640,7 +5896,7 @@ type PlayerData = Types.PlayerData
 
 local Schema = {}
 
-Schema.CURRENT_VERSION = 4
+Schema.CURRENT_VERSION = 5
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -5692,7 +5948,10 @@ function Schema.Template(): PlayerData
 		-- v4 (ARK-style foundation)
 		Inventory = { Resources = {}, Items = {} },
 		Structures = {},
-		Upgrades = { Pens = 0, Storage = 0, Incubators = 0 },
+		Upgrades = { Pens = 0, Storage = 0, Incubators = 0, IncubatorSpeed = 0 },
+		-- v5 (eggs and breeding)
+		Eggs = {}, -- [uid] = EggData (shared/Game/Breeding.lua)
+		Breeding = {}, -- { A = uid, B = uid, StartedAt, ReadyAt }
 	}
 end
 
@@ -5701,6 +5960,7 @@ function Schema.FillCreature(creature: any)
 	creature.Size = if type(creature.Size) == "number" then creature.Size else 1
 	creature.Tamed = if creature.Tamed == nil then true else creature.Tamed
 	creature.Hunger = if type(creature.Hunger) == "number" then creature.Hunger else 100
+	creature.Bonus = if type(creature.Bonus) == "number" then creature.Bonus else 0
 	-- Saddle stays nil until one is crafted (Phase 3)
 end
 
@@ -5723,6 +5983,13 @@ local Migrations: { [number]: (any) -> () } = {
 	[3] = function(data)
 		-- v4: ARK-style foundation. Titans get Size/Tamed/Hunger; the save gets
 		-- Inventory, Structures and base Upgrades (reconcile adds the tables).
+		for _, creature in data.Creatures or {} do
+			Schema.FillCreature(creature)
+		end
+	end,
+	[4] = function(data)
+		-- v5: eggs and breeding. Titans get a stat Bonus (inherited when bred);
+		-- reconcile adds Eggs, Breeding and the IncubatorSpeed upgrade.
 		for _, creature in data.Creatures or {} do
 			Schema.FillCreature(creature)
 		end
@@ -5755,6 +6022,15 @@ function Schema.Trim(data: PlayerData): number
 	local removed = 0
 	while #data.Structures > limits.Structures do
 		table.remove(data.Structures)
+		removed += 1
+	end
+	local eggUids = {}
+	for uid in data.Eggs do
+		table.insert(eggUids, uid)
+	end
+	table.sort(eggUids)
+	for i = limits.Eggs + 1, #eggUids do
+		data.Eggs[eggUids[i]] = nil
 		removed += 1
 	end
 	while #data.Inventory.Items > limits.ItemStacks do
@@ -5812,7 +6088,7 @@ return Schema
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">SessionStore</string>
             <string name="Source"><![CDATA[--[[
@@ -5943,7 +6219,7 @@ return SessionStore
           </Properties>
         </Item>
       </Item>
-      <Item class="Script" referent="53">
+      <Item class="Script" referent="54">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -6014,11 +6290,11 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="54">
+      <Item class="Folder" referent="55">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="55">
+        <Item class="ModuleScript" referent="56">
           <Properties>
             <string name="Name">CreatureBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -6310,7 +6586,7 @@ return CreatureBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="56">
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">FoodBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -6482,7 +6758,7 @@ return FoodBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="57">
+        <Item class="ModuleScript" referent="58">
           <Properties>
             <string name="Name">GameEvents</string>
             <string name="Source"><![CDATA[--[[
@@ -6531,11 +6807,11 @@ return GameEvents
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="58">
+        <Item class="Folder" referent="59">
           <Properties>
             <string name="Name">Map</string>
           </Properties>
-          <Item class="ModuleScript" referent="59">
+          <Item class="ModuleScript" referent="60">
             <Properties>
               <string name="Name">MapGenerator</string>
               <string name="Source"><![CDATA[--[[
@@ -7167,7 +7443,7 @@ return MapGenerator
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="60">
+          <Item class="ModuleScript" referent="61">
             <Properties>
               <string name="Name">Props</string>
               <string name="Source"><![CDATA[--[[
@@ -7561,7 +7837,7 @@ return Props
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="61">
+          <Item class="ModuleScript" referent="62">
             <Properties>
               <string name="Name">StudGround</string>
               <string name="Source"><![CDATA[--[[
@@ -7728,15 +8004,15 @@ return StudGround
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="62">
+      <Item class="Folder" referent="63">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="Folder" referent="63">
+        <Item class="Folder" referent="64">
           <Properties>
             <string name="Name">Base</string>
           </Properties>
-          <Item class="ModuleScript" referent="64">
+          <Item class="ModuleScript" referent="65">
             <Properties>
               <string name="Name">BaseService</string>
               <string name="Source"><![CDATA[--[[
@@ -8198,7 +8474,7 @@ return BaseService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="65">
+          <Item class="ModuleScript" referent="66">
             <Properties>
               <string name="Name">CreatureService</string>
               <string name="Source"><![CDATA[--[[
@@ -8834,7 +9110,7 @@ return CreatureService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="66">
+          <Item class="ModuleScript" referent="67">
             <Properties>
               <string name="Name">UpgradeService</string>
               <string name="Source"><![CDATA[--[[
@@ -9036,11 +9312,11 @@ return UpgradeService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="67">
+        <Item class="Folder" referent="68">
           <Properties>
             <string name="Name">Battle</string>
           </Properties>
-          <Item class="ModuleScript" referent="68">
+          <Item class="ModuleScript" referent="69">
             <Properties>
               <string name="Name">BattleService</string>
               <string name="Source"><![CDATA[--[[
@@ -10136,11 +10412,11 @@ return BattleService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="69">
+        <Item class="Folder" referent="70">
           <Properties>
             <string name="Name">Core</string>
           </Properties>
-          <Item class="ModuleScript" referent="70">
+          <Item class="ModuleScript" referent="71">
             <Properties>
               <string name="Name">AdminService</string>
               <string name="Source"><![CDATA[--[[
@@ -10307,7 +10583,7 @@ return AdminService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="71">
+          <Item class="ModuleScript" referent="72">
             <Properties>
               <string name="Name">DataService</string>
               <string name="Source"><![CDATA[--[[
@@ -10498,6 +10774,8 @@ function DataService:BuildSnapshot(player: Player): Types.Snapshot
 		Stats = data.Stats,
 		Upgrades = data.Upgrades,
 		Inventory = data.Inventory,
+		Eggs = data.Eggs,
+		Breeding = data.Breeding,
 		ServerTime = os.time(),
 	}
 	for _, hook in self._hooks do
@@ -10531,7 +10809,7 @@ return DataService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="72">
+          <Item class="ModuleScript" referent="73">
             <Properties>
               <string name="Name">FxService</string>
               <string name="Source"><![CDATA[--[[
@@ -10574,7 +10852,7 @@ return FxService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="73">
+          <Item class="ModuleScript" referent="74">
             <Properties>
               <string name="Name">SettingsService</string>
               <string name="Source"><![CDATA[--[[
@@ -10612,11 +10890,11 @@ return SettingsService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="74">
+        <Item class="Folder" referent="75">
           <Properties>
             <string name="Name">Economy</string>
           </Properties>
-          <Item class="ModuleScript" referent="75">
+          <Item class="ModuleScript" referent="76">
             <Properties>
               <string name="Name">EggService</string>
               <string name="Source"><![CDATA[--[[
@@ -10741,7 +11019,7 @@ return EggService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="76">
+          <Item class="ModuleScript" referent="77">
             <Properties>
               <string name="Name">RebirthService</string>
               <string name="Source"><![CDATA[--[[
@@ -10824,11 +11102,11 @@ return RebirthService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="77">
+        <Item class="Folder" referent="78">
           <Properties>
             <string name="Name">Events</string>
           </Properties>
-          <Item class="ModuleScript" referent="78">
+          <Item class="ModuleScript" referent="79">
             <Properties>
               <string name="Name">EventService</string>
               <string name="Source"><![CDATA[--[[
@@ -10979,11 +11257,11 @@ return EventService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="79">
+        <Item class="Folder" referent="80">
           <Properties>
             <string name="Name">Food</string>
           </Properties>
-          <Item class="ModuleScript" referent="80">
+          <Item class="ModuleScript" referent="81">
             <Properties>
               <string name="Name">FoodService</string>
               <string name="Source"><![CDATA[--[[
@@ -11338,7 +11616,7 @@ return FoodService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="81">
+          <Item class="ModuleScript" referent="82">
             <Properties>
               <string name="Name">StealService</string>
               <string name="Source"><![CDATA[--[[
@@ -11648,11 +11926,11 @@ return StealService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="82">
+        <Item class="Folder" referent="83">
           <Properties>
             <string name="Name">Progress</string>
           </Properties>
-          <Item class="ModuleScript" referent="83">
+          <Item class="ModuleScript" referent="84">
             <Properties>
               <string name="Name">CodeService</string>
               <string name="Source"><![CDATA[--[[
@@ -11701,7 +11979,7 @@ return CodeService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="84">
+          <Item class="ModuleScript" referent="85">
             <Properties>
               <string name="Name">DailyRewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -11750,7 +12028,7 @@ return DailyRewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="85">
+          <Item class="ModuleScript" referent="86">
             <Properties>
               <string name="Name">IndexService</string>
               <string name="Source"><![CDATA[--[[
@@ -11800,7 +12078,7 @@ return IndexService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="86">
+          <Item class="ModuleScript" referent="87">
             <Properties>
               <string name="Name">OfflineService</string>
               <string name="Source"><![CDATA[--[[
@@ -11851,7 +12129,7 @@ return OfflineService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="87">
+          <Item class="ModuleScript" referent="88">
             <Properties>
               <string name="Name">QuestService</string>
               <string name="Source"><![CDATA[--[[
@@ -11955,7 +12233,7 @@ return QuestService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="88">
+          <Item class="ModuleScript" referent="89">
             <Properties>
               <string name="Name">RewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -12025,7 +12303,7 @@ return RewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="89">
+          <Item class="ModuleScript" referent="90">
             <Properties>
               <string name="Name">TutorialService</string>
               <string name="Source"><![CDATA[--[[
@@ -12100,11 +12378,11 @@ return TutorialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="90">
+        <Item class="Folder" referent="91">
           <Properties>
             <string name="Name">Ride</string>
           </Properties>
-          <Item class="ModuleScript" referent="91">
+          <Item class="ModuleScript" referent="92">
             <Properties>
               <string name="Name">FollowerService</string>
               <string name="Source"><![CDATA[--[[
@@ -12515,7 +12793,7 @@ return FollowerService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="92">
+          <Item class="ModuleScript" referent="93">
             <Properties>
               <string name="Name">RideService</string>
               <string name="Source"><![CDATA[--[[
@@ -12990,11 +13268,11 @@ return RideService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="93">
+        <Item class="Folder" referent="94">
           <Properties>
             <string name="Name">Social</string>
           </Properties>
-          <Item class="ModuleScript" referent="94">
+          <Item class="ModuleScript" referent="95">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -13182,7 +13460,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="95">
+          <Item class="ModuleScript" referent="96">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -13381,7 +13659,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="96">
+          <Item class="ModuleScript" referent="97">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -13557,11 +13835,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="97">
+        <Item class="Folder" referent="98">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="98">
+          <Item class="ModuleScript" referent="99">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -13699,11 +13977,11 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="99">
+        <Item class="Folder" referent="100">
           <Properties>
             <string name="Name">Wild</string>
           </Properties>
-          <Item class="ModuleScript" referent="100">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">TameService</string>
               <string name="Source"><![CDATA[--[[
@@ -13916,7 +14194,7 @@ return TameService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">ToolService</string>
               <string name="Source"><![CDATA[--[[
@@ -14093,7 +14371,7 @@ return ToolService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="103">
             <Properties>
               <string name="Name">WildService</string>
               <string name="Source"><![CDATA[--[[
@@ -14962,11 +15240,11 @@ return WildService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="103">
+        <Item class="Folder" referent="104">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="104">
+          <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -15178,7 +15456,7 @@ return MapService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="105">
+          <Item class="ModuleScript" referent="106">
             <Properties>
               <string name="Name">PortalService</string>
               <string name="Source"><![CDATA[--[[
@@ -15257,23 +15535,23 @@ return PortalService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="106">
+  <Item class="StarterPlayer" referent="107">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="107">
+    <Item class="StarterPlayerScripts" referent="108">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="108">
+      <Item class="Folder" referent="109">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="109">
+        <Item class="Folder" referent="110">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="110">
+          <Item class="ModuleScript" referent="111">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -15386,7 +15664,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="111">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -15489,7 +15767,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="112">
+          <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -15540,7 +15818,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="113">
+          <Item class="ModuleScript" referent="114">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -15594,7 +15872,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="114">
+          <Item class="ModuleScript" referent="115">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -15680,7 +15958,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="115">
+          <Item class="ModuleScript" referent="116">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -15743,7 +16021,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="116">
+          <Item class="ModuleScript" referent="117">
             <Properties>
               <string name="Name">RideController</string>
               <string name="Source"><![CDATA[--[[
@@ -15918,7 +16196,7 @@ return RideController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="117">
+          <Item class="ModuleScript" referent="118">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -15945,7 +16223,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="118">
+          <Item class="ModuleScript" referent="119">
             <Properties>
               <string name="Name">ToolController</string>
               <string name="Source"><![CDATA[--[[
@@ -16013,7 +16291,7 @@ return ToolController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="119">
+          <Item class="ModuleScript" referent="120">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -16184,7 +16462,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="120">
+          <Item class="ModuleScript" referent="121">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -16302,7 +16580,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="121">
+          <Item class="ModuleScript" referent="122">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -16386,7 +16664,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="122">
+        <Item class="LocalScript" referent="123">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -16403,11 +16681,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="123">
+        <Item class="Folder" referent="124">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="124">
+          <Item class="ModuleScript" referent="125">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -16442,11 +16720,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="125">
+        <Item class="Folder" referent="126">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="126">
+          <Item class="ModuleScript" referent="127">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -16665,7 +16943,7 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="127">
+          <Item class="ModuleScript" referent="128">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
@@ -16818,7 +17096,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="128">
+          <Item class="ModuleScript" referent="129">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -17286,11 +17564,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="129">
+          <Item class="Folder" referent="130">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="130">
+            <Item class="ModuleScript" referent="131">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -17372,7 +17650,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="131">
+            <Item class="ModuleScript" referent="132">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -17599,7 +17877,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="132">
+            <Item class="ModuleScript" referent="133">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17686,7 +17964,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="133">
+            <Item class="ModuleScript" referent="134">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17779,7 +18057,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="134">
+            <Item class="ModuleScript" referent="135">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17866,7 +18144,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="135">
+            <Item class="ModuleScript" referent="136">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17995,7 +18273,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="136">
+            <Item class="ModuleScript" referent="137">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18073,7 +18351,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="137">
+            <Item class="ModuleScript" referent="138">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18139,7 +18417,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="138">
+            <Item class="ModuleScript" referent="139">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -18250,7 +18528,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="139">
+            <Item class="ModuleScript" referent="140">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -18374,7 +18652,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="140">
+            <Item class="ModuleScript" referent="141">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -18558,7 +18836,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="141">
+          <Item class="ModuleScript" referent="142">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -18792,7 +19070,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="142">
+          <Item class="ModuleScript" referent="143">
             <Properties>
               <string name="Name">RideHud</string>
               <string name="Source"><![CDATA[--[[
@@ -19033,7 +19311,7 @@ return RideHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="143">
+          <Item class="ModuleScript" referent="144">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -19248,7 +19526,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="144">
+          <Item class="ModuleScript" referent="145">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -19384,7 +19662,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="145">
+          <Item class="ModuleScript" referent="146">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -19515,7 +19793,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="146">
+  <Item class="Workspace" referent="147">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

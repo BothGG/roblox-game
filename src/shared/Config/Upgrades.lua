@@ -5,7 +5,8 @@
 
 	  Pens       +1 pen per level (pens go up to GameConfig.MaxSlots = 24)
 	  Storage    +25 food storage per level
-	  Incubators for eggs (Phase 2: shown as "coming soon" until Enabled)
+	  Incubators +1 incubator for eggs (you start with 1, max 6)
+	  IncubatorSpeed  +15% hatch speed per level
 ]]
 
 export type Upgrade = {
@@ -21,7 +22,7 @@ export type Upgrade = {
 }
 
 local Upgrades: { [string]: any } = {
-	Order = { "Pens", "Storage", "Incubators" },
+	Order = { "Pens", "Storage", "Incubators", "IncubatorSpeed" },
 	Pens = {
 		Name = "Extra Pen",
 		Icon = "🐾",
@@ -50,7 +51,17 @@ local Upgrades: { [string]: any } = {
 		Per = 1,
 		BaseCost = 10000,
 		Growth = 2.5,
-		Enabled = false, -- turned on with breeding & eggs (Phase 2)
+		Enabled = true,
+	},
+	IncubatorSpeed = {
+		Name = "Faster Hatching",
+		Icon = "⏩",
+		Text = "+15% hatch speed",
+		Max = 10,
+		Per = 1,
+		BaseCost = 8000,
+		Growth = 1.9,
+		Enabled = true,
 	},
 }
 

@@ -76,7 +76,7 @@ return function(t)
 		old.Structures = nil
 		old.Upgrades = nil
 		local data = Schema.Prepare(old)
-		t.expect(data.Version).toBe(4)
+		t.expect(data.Version).toBe(Schema.CURRENT_VERSION)
 		t.expect(data.Cash).toBe(98765)
 		t.expect(data.Food.StarFood).toBe(1)
 		t.expect(data.Creatures["1"].Level).toBe(30)

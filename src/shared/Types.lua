@@ -13,6 +13,8 @@ export type CreatureData = {
 	Tamed: boolean?, -- false while a wild titan is being tamed (Phase 1)
 	Saddle: string?, -- saddle item id; needed to ride (Phase 1)
 	Hunger: number?, -- 0..100 (Phase 3)
+	Bonus: number?, -- stat bonus from breeding (0.05 = +5% HP and Attack)
+	BreedReadyAt: number?, -- os.time() when it can breed again
 }
 
 export type InventoryItem = { Id: string, Count: number }
@@ -22,7 +24,19 @@ export type Inventory = {
 }
 -- A placed build piece in the base (plot-local position, rotation in degrees).
 export type Structure = { Id: string, X: number, Y: number, Z: number, R: number, Hp: number? }
-export type Upgrades = { Pens: number, Storage: number, Incubators: number }
+export type Upgrades = { Pens: number, Storage: number, Incubators: number, IncubatorSpeed: number }
+export type EggData = {
+	Uid: string,
+	Species: string,
+	Mutation: string?,
+	Size: number,
+	Bonus: number,
+	Source: string,
+	Slot: number?,
+	StartedAt: number?,
+	HatchAt: number?,
+}
+export type BreedingPen = { A: string?, B: string?, StartedAt: number?, ReadyAt: number? }
 
 export type PlayerStats = {
 	StarterGiven: boolean,
@@ -65,6 +79,8 @@ export type PlayerData = {
 	Inventory: Inventory,
 	Structures: { Structure },
 	Upgrades: Upgrades,
+	Eggs: { [string]: EggData },
+	Breeding: BreedingPen,
 }
 
 -- What the client UI receives (PlayerData + computed values).
@@ -100,6 +116,9 @@ export type Snapshot = {
 	Upgrades: Upgrades?,
 	Inventory: Inventory?,
 	Following: { [string]: boolean }?, -- titans following you (FollowerService)
+	Eggs: { [string]: EggData }?,
+	Breeding: BreedingPen?,
+	Incubators: number?,
 }
 
 -- Modules must return exactly one non-nil value.

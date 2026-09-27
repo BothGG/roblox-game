@@ -124,6 +124,27 @@ local GameConfig = {
 		KnockOffDamage = true, -- your titan at 0 HP throws you off
 	},
 
+	-- Eggs and breeding (Phase 2; shared/Game/Breeding.lua). Times in seconds.
+	Breeding = {
+		Time = { Common = 120, Rare = 300, Epic = 900, Legendary = 1800, Mythic = 3600, Secret = 7200 },
+		CooldownMult = 2, -- a parent rests Time * this before breeding again
+		MutationChance = 0.05, -- neither parent mutated
+		OneMutatedChance = 0.12, -- one parent mutated: baby gets that mutation
+		BothMutatedChance = 0.3, -- both mutated: baby gets one of theirs
+		BonusRange = { -0.02, 0.08 }, -- baby stat bonus = parents' average + this
+		MaxBonus = 1, -- +100% stats at most
+		TierJumpChance = 0.04, -- egg jumps one size tier above its parents
+		HatchTime = { Common = 60, Rare = 180, Epic = 600, Legendary = 1200, Mythic = 2400, Secret = 3600 },
+		HatchPerTier = 0.5, -- each size tier above Tiny hatches 50% slower
+		IncubatorSpeedPerLevel = 0.15,
+		CarrySpeed = 16, -- walk speed carrying a Tiny egg
+		CarryPenaltyPerTier = 0.07, -- slower for every size tier
+		MinCarrySpeed = 7,
+		DroppedTime = 10, -- a dropped egg can be grabbed by anyone for this long
+		AnnounceTier = "Colossal", -- server message when an egg this big appears
+		BeamTier = "Titanic", -- sky beam on eggs this big
+	},
+
 	-- Titans that follow you around (FollowerService)
 	Followers = {
 		Max = 3,
@@ -197,6 +218,7 @@ local GameConfig = {
 			Structures = 600, -- placed build pieces per base (Phase 4)
 			ItemStacks = 120, -- backpack + chest item stacks (Phase 3)
 			ResourceKinds = 40,
+			Eggs = 60, -- eggs in incubators + egg storage
 		},
 	},
 

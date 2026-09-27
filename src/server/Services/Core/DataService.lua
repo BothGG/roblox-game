@@ -186,6 +186,8 @@ function DataService:BuildSnapshot(player: Player): Types.Snapshot
 		Stats = data.Stats,
 		Upgrades = data.Upgrades,
 		Inventory = data.Inventory,
+		Eggs = data.Eggs,
+		Breeding = data.Breeding,
 		ServerTime = os.time(),
 	}
 	for _, hook in self._hooks do
