@@ -89,6 +89,7 @@ export type Wild = {
 	LastSnap: number,
 	Bars: { [string]: any },
 	Removed: boolean,
+	Guard: boolean, -- nest guardian: always aggressive, never despawns on its own
 }
 
 local WildService = {
@@ -463,12 +464,29 @@ function WildService:_spawnOne(
 		LastSnap = now,
 		Bars = {},
 		Removed = false,
+		Guard = false,
 	}
 	self:_buildBars(wild)
 	self:RefreshBars(wild)
 	table.insert(self.Wilds, wild)
 	model:SetAttribute("Temper", wild.Temper)
 	log:Debug("spawned", creatureId, "size", size, if leader then "(pack)" else "")
+	return wild
+end
+
+-- A nest guardian: always aggressive, stays near `at` and never despawns
+-- by itself (NestService removes it).
+function WildService:SpawnGuardian(creatureId: string, at: Vector3, size: number?): Wild?
+	if not Creatures[creatureId] then
+		return nil
+	end
+	local wild = self:_spawnOne(creatureId, nil, at, size, nil, Vector3.zero)
+	if wild then
+		wild.Temper = "Aggressive"
+		wild.Guard = true
+		wild.Model:SetAttribute("Temper", "Aggressive")
+		wild.Model:SetAttribute("Guardian", true)
+	end
 	return wild
 end
 
@@ -786,9 +804,11 @@ function WildService:_tick()
 			self:RefreshBars(wild)
 		end
 
-		-- Despawn when alone for a while or too old
+		-- Despawn when alone for a while or too old (not nest guardians)
 		local target, targetDistance = nearestPlayer(wild.Pos)
-		if targetDistance > WILD.DespawnDistance then
+		if wild.Guard then
+			wild.LonelySince = nil
+		elseif targetDistance > WILD.DespawnDistance then
 			wild.LonelySince = wild.LonelySince or now
 			if now - wild.LonelySince > WILD.DespawnAfter then
 				self:Remove(wild, nil)
@@ -797,7 +817,7 @@ function WildService:_tick()
 		else
 			wild.LonelySince = nil
 		end
-		if now > wild.ExpiresAt and targetDistance > 120 then
+		if not wild.Guard and now > wild.ExpiresAt and targetDistance > 120 then
 			self:Remove(wild, "Poof")
 			continue
 		end

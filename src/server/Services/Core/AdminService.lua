@@ -8,7 +8,7 @@
 	  size <1-100000>  (all your titans)   res <Resource> <amount>   upgrade <Pens|Storage|Incubators>
 	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
 	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
-	  egg <TitanId> [Size] [Mutation]  (egg into an incubator)   hatchnow
+	  egg <TitanId> [Size] [Mutation]  (egg into an incubator)   hatchnow   nest
 	  tutorial                 daily                      quests
 ]]
 
@@ -35,7 +35,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle, Wild, Base, Incubator
+local Data, Creature, Food, Event, Battle, Wild, Base, Incubator, Nest
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -46,6 +46,7 @@ function AdminService:Init(registry)
 	Wild = registry.WildService
 	Base = registry.BaseService
 	Incubator = registry.IncubatorService
+	Nest = registry.NestService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -124,6 +125,8 @@ function AdminService:Run(player: Player, text: string): string?
 			return "Egg storage full!"
 		end
 		return "Added a " .. args[2] .. " egg"
+	elseif command == "nest" then
+		return if Nest:Spawn() then "A nest appeared in the fields" else "No spot for a nest"
 	elseif command == "hatchnow" then
 		for _, egg in data.Eggs do
 			if egg.HatchAt then

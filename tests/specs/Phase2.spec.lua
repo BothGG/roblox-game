@@ -92,4 +92,14 @@ return function(t)
 		t.expect(next(data.Eggs)).toBe(nil)
 		t.expect(data.Breeding ~= nil).toBe(true)
 	end)
+
+	t.test("nest eggs roll size tiers by weight; fusing costs more for bigger and rarer titans", function()
+		t.expect(Breeding.RollNestSize(0)).toBe(1)
+		t.expect(Breeding.RollNestSize(0.6)).toBe(3) -- past Tiny (0.5), inside Normal
+		t.expect(Breeding.RollNestSize(0.9)).toBe(10)
+		t.expect(Breeding.RollNestSize(0.999)).toBe(1000)
+		t.expect(Breeding.FuseCost("Rex", 1)).toBe(BREED.FuseCost.Common)
+		t.expect(Breeding.FuseCost("Rex", 10)).toBe(BREED.FuseCost.Common * 4)
+		t.expect(Breeding.FuseCost("Voidmaw", 1)).toBe(BREED.FuseCost.Secret)
+	end)
 end

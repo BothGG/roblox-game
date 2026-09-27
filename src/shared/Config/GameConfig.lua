@@ -143,6 +143,20 @@ local GameConfig = {
 		DroppedTime = 10, -- a dropped egg can be grabbed by anyone for this long
 		AnnounceTier = "Colossal", -- server message when an egg this big appears
 		BeamTier = "Titanic", -- sky beam on eggs this big
+		FuseCost = { Common = 500, Rare = 2500, Epic = 10000, Legendary = 50000, Mythic = 200000, Secret = 1000000 },
+	},
+
+	-- Wild nests (NestService): an egg guarded by angry titans of its kind.
+	Nests = {
+		Max = 2, -- nests on the island at once
+		FirstDelay = 20, -- seconds after the server starts
+		RespawnDelay = 180, -- after a nest is raided or expires
+		Lifetime = 600,
+		Guardians = { 1, 2 },
+		GuardianSize = { 1, 3 }, -- guardian size = egg size * this range
+		-- Egg size tier chances (1 = Tiny, 2 = Normal, ...)
+		SizeTiers = { { 1, 0.5 }, { 2, 0.3 }, { 3, 0.14 }, { 4, 0.05 }, { 5, 0.01 } },
+		BonusMax = 0.05, -- random stat bonus 0..this
 	},
 
 	-- Titans that follow you around (FollowerService)

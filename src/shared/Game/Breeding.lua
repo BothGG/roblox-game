@@ -163,6 +163,28 @@ function Breeding.IncubatorCount(level: number): number
 	return 1 + level
 end
 
+-- Nest egg size from a 0..1 roll (GameConfig.Nests.SizeTiers).
+function Breeding.RollNestSize(roll: number): number
+	local total = 0
+	for _, entry in GameConfig.Nests.SizeTiers do
+		total += entry[2]
+	end
+	local pick = roll * total
+	for _, entry in GameConfig.Nests.SizeTiers do
+		pick -= entry[2]
+		if pick < 0 then
+			return Breeding.TierSize(entry[1])
+		end
+	end
+	return Breeding.TierSize(1)
+end
+
+-- Cost to fuse 3 titans into one of the next size tier.
+function Breeding.FuseCost(species: string, size: number): number
+	local base = BREED.FuseCost[Creatures[species].Rarity] or 1000
+	return math.floor(base * (2 ^ (Breeding.TierIndex(size) - 1)))
+end
+
 -- Carrying ----------------------------------------------------------------
 
 function Breeding.CarrySpeed(size: number): number
