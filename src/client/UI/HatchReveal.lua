@@ -2,6 +2,8 @@
 	HatchReveal: the egg-opening / catch reveal.
 	Egg: shakes (more for rarer titan) -> flash -> card with the result.
 	Tame (info.Source == "Tame"): straight to the card, titled "TAMED!".
+	Incubator eggs (info.Source == "Egg") carry info.Size: bigger size tiers
+	get a bigger egg, more shakes and a bigger flash.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,6 +14,7 @@ local Creatures = require(Shared.Config.Creatures)
 local Eggs = require(Shared.Config.Eggs)
 local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
+local Sizes = require(Shared.Config.Sizes)
 local CreatureMath = require(Shared.Game.CreatureMath)
 local Fx = require(Shared.Fx)
 local Theme = require(script.Parent.Theme)
@@ -33,6 +36,14 @@ local function play(info)
 	local egg = Eggs[info.EggId]
 	local mutation = info.Mutation and Mutations[info.Mutation]
 	local color = if mutation then mutation.Color else rarity.Color
+	local size = CreatureMath.ClampSize(info.Size)
+	local tier = 1
+	for i, t in Sizes.Tiers do
+		if size >= t.Min then
+			tier = i
+		end
+	end
+	local eggScale = 1 + (tier - 1) * 0.12
 
 	local dim = Theme.New("Frame", {
 		Size = UDim2.fromScale(1, 1),
@@ -55,13 +66,13 @@ local function play(info)
 	local eggFrame = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
-		Size = UDim2.fromOffset(150, 190),
-		BackgroundColor3 = egg and egg.Color or Color3.new(1, 1, 1),
+		Size = UDim2.fromOffset(150 * eggScale, 190 * eggScale),
+		BackgroundColor3 = if egg then egg.Color elseif info.Source == "Egg" then def.BodyColor else Color3.new(1, 1, 1),
 		Parent = holder,
 	}, { Theme.Corner(75), Theme.Stroke(Color3.new(0, 0, 0), 4) })
 
 	-- Shake: more shakes for rarer results builds suspense.
-	local shakes = if isCatch then 0 else 2 + rarity.Order
+	local shakes = if isCatch then 0 else 2 + rarity.Order + (tier - 1)
 	for i = 1, shakes do
 		local speed = math.max(0.05, 0.16 - i * 0.012)
 		local angle = if i % 2 == 0 then 15 else -15
@@ -71,7 +82,10 @@ local function play(info)
 	end
 	eggFrame:Destroy()
 
-	Fx.Play("HatchReveal", { Color = color, RarityOrder = rarity.Order + (if mutation then 2 else 0) })
+	Fx.Play(
+		"HatchReveal",
+		{ Color = color, RarityOrder = rarity.Order + (if mutation then 2 else 0) + math.floor((tier - 1) / 2) }
+	)
 
 	local card = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -83,14 +97,22 @@ local function play(info)
 	Theme.Label({
 		Position = UDim2.fromOffset(10, 16),
 		Size = UDim2.new(1, -20, 0, 34),
-		Text = (if isCatch then "🎯 TAMED!  " else "") .. string.upper(def.Rarity),
+		Text = (if isCatch then "🎯 TAMED!  " else "") .. string.upper(def.Rarity) .. (if tier > 1
+			then "  •  " .. string.upper(CreatureMath.SizeLabel(size))
+			else ""),
 		TextColor3 = rarity.Color,
 		Parent = card,
 	})
 	local nameLabel = Theme.Label({
 		Position = UDim2.fromOffset(10, 58),
 		Size = UDim2.new(1, -20, 0, 70),
-		Text = CreatureMath.DisplayName({ Id = info.CreatureId, Level = 1, Xp = 0, Mutation = info.Mutation }),
+		Text = CreatureMath.DisplayName({
+			Id = info.CreatureId,
+			Level = 1,
+			Xp = 0,
+			Mutation = info.Mutation,
+			Size = size,
+		}),
 		TextColor3 = color,
 		Parent = card,
 	})

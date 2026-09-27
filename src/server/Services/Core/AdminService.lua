@@ -8,6 +8,7 @@
 	  size <1-100000>  (all your titans)   res <Resource> <amount>   upgrade <Pens|Storage|Incubators>
 	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
 	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
+	  egg <TitanId> [Size] [Mutation]  (egg into an incubator)   hatchnow
 	  tutorial                 daily                      quests
 ]]
 
@@ -34,7 +35,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle, Wild, Base
+local Data, Creature, Food, Event, Battle, Wild, Base, Incubator
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -44,6 +45,7 @@ function AdminService:Init(registry)
 	Battle = registry.BattleService
 	Wild = registry.WildService
 	Base = registry.BaseService
+	Incubator = registry.IncubatorService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -113,6 +115,22 @@ function AdminService:Run(player: Player, text: string): string?
 		data.Upgrades[args[2]] = math.min(Upgrades[args[2]].Max, (data.Upgrades[args[2]] or 0) + 1)
 		Base:RefreshPens(player)
 		Food:RefreshStorage(player)
+		Incubator:_fill(player)
+		Incubator:Refresh(player)
+	elseif command == "egg" and Creatures[args[2] or ""] then
+		-- egg <Species> [Size] [Mutation]
+		local mutation = if Guard.IsConfigKey(Mutations, args[4]) then args[4] else nil
+		if not Incubator:AddEgg(player, { Species = args[2], Size = tonumber(args[3]) or 1, Mutation = mutation }) then
+			return "Egg storage full!"
+		end
+		return "Added a " .. args[2] .. " egg"
+	elseif command == "hatchnow" then
+		for _, egg in data.Eggs do
+			if egg.HatchAt then
+				egg.HatchAt = os.time()
+			end
+		end
+		return "All incubator eggs hatch now"
 	elseif command == "wild" then
 		local id = if Creatures[args[2] or ""] then args[2] else nil
 		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil

@@ -27,7 +27,7 @@ local UpgradeService = {
 	Boards = {} :: { [number]: { Prompts: { [string]: ProximityPrompt }, Labels: { [string]: TextLabel } } },
 }
 
-local Data, Base, Creature, Food, Fx
+local Data, Base, Creature, Food, Fx, Incubator
 
 local RED = Color3.fromRGB(255, 90, 90)
 local GOLD = Color3.fromRGB(255, 210, 60)
@@ -38,6 +38,7 @@ function UpgradeService:Init(registry)
 	Creature = registry.CreatureService
 	Food = registry.FoodService
 	Fx = registry.FxService
+	Incubator = registry.IncubatorService
 end
 
 local function label(parent: Instance, text: string, color: Color3?, size: UDim2, position: UDim2): TextLabel
@@ -188,6 +189,10 @@ function UpgradeService:Buy(player: Player, id: string)
 	Base:RefreshPens(player)
 	Food:RefreshStorage(player)
 	Creature:RefreshAllTags(player)
+	if Incubator then
+		Incubator:_fill(player)
+		Incubator:Refresh(player)
+	end
 	self:Refresh(player)
 	Data:Changed(player)
 end
