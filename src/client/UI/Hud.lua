@@ -45,6 +45,7 @@ local MENU = {
 	{ "📅", "Daily", "Daily", Color3.fromRGB(190, 110, 255), "Left" },
 	{ "🥚", "Eggs", "Eggs", Color3.fromRGB(235, 60, 60), "Right" },
 	{ "🐾", "Titans", "Titans", Color3.fromRGB(255, 140, 40), "Right" },
+	{ "💞", "Breed", "Breed", Color3.fromRGB(255, 110, 170), "Right" },
 	{ "🍖", "Food", "Food", Color3.fromRGB(110, 200, 70), "Right" },
 	{ "⚔️", "Battle", "Battle", Color3.fromRGB(200, 50, 70), "Right" },
 	{ "🌟", "Rebirth", "Rebirth", Color3.fromRGB(170, 110, 255), "Right" },

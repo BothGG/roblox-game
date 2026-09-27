@@ -233,6 +233,35 @@ function Presets.TameFeed(p, P)
 	end
 end
 
+-- Two titans breeding: hearts float up between them.
+function Presets.Love(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(255, 110, 160),
+		Count = 6,
+		Speed = 5,
+		Size = 1.6,
+		Lifetime = 1.6,
+		Gravity = -5,
+		Texture = Textures.Sparkle,
+	})
+	P.FloatText(p.Position, "❤️", { Color = Color3.fromRGB(255, 120, 170), Size = 2.4, Duration = 1.4, Rise = 6 })
+end
+
+-- A new egg appears (breeding done / nest found).
+function Presets.EggLaid(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	local color = p.Color or Color3.fromRGB(255, 220, 120)
+	P.Ring(p.Position, { Color = color, Radius = 8 * (p.Scale or 1), Duration = 0.6 })
+	P.Burst(p.Position + Vector3.new(0, 2, 0), { Color = color, Count = 20, Speed = 12, Texture = Textures.Sparkle })
+	P.FloatText(p.Position + Vector3.new(0, 4, 0), p.Text or "🥚 New egg!", { Color = color, Size = 2.2 })
+	P.Sound("Pop", p.Position, 0.7)
+end
+
 -- Mounting / dismounting a titan: dust puff at the feet.
 function Presets.MountDust(p, P)
 	if P.Distance(p.Position) > FAR then

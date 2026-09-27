@@ -13,7 +13,7 @@
 	  Hatched { Titan, Mutation }     Mutated { Mutation }
 	  BattleWon { Mode }              BattlePlayed { Mode }
 	  Earned { Amount }               Rebirthed { Rebirths }
-	  Equipped { Titan }
+	  Equipped { Titan }              Bred { Titan, Mutation, Size }
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

@@ -49,6 +49,7 @@ export type PlayerStats = {
 	BattlesPlayed: number,
 	BattlesWon: number,
 	Tamed: number,
+	Bred: number,
 	CashEarned: number,
 }
 

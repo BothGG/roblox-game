@@ -563,6 +563,10 @@ function CreatureService:Sell(player: Player, uid: string)
 	if not creature or not Net.Throttle(player, "Sell", 0.5) then
 		return
 	end
+	if data.Breeding.ReadyAt and (data.Breeding.A == uid or data.Breeding.B == uid) then
+		Net.Notify(player, "💞 This titan is breeding! Cancel breeding first.", Color3.fromRGB(255, 90, 90))
+		return
+	end
 	local price = CreatureMath.SellPrice(creature, data.Rebirths)
 	local model = self:GetModel(player, uid)
 	if model then

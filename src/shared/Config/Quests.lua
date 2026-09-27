@@ -62,6 +62,13 @@ return {
 			Reward = { Boost = { Id = "Luck", Minutes = 10 } },
 		},
 		{
+			Id = "Breed",
+			Text = "Breed %d eggs",
+			Event = "Bred",
+			Goal = { 1, 2 },
+			Reward = { CashSeconds = 240 },
+		},
+		{
 			Id = "Level",
 			Text = "Gain %d titan levels",
 			Event = "LevelUp",

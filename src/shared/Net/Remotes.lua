@@ -46,6 +46,10 @@ local Remotes: { [string]: RemoteSpec } = {
 	RideAction = { Direction = "ToServer", Args = { "string", "boolean?" }, RateLimit = 0.05 },
 	FollowerCommand = { Direction = "ToServer", Args = { "string", "string?" }, RateLimit = 0.3 },
 
+	-- Client -> server: Phase 2 (breeding, eggs)
+	Breed = { Direction = "ToServer", Args = { "string", "string" }, RateLimit = 1 }, -- two titan uids
+	BreedCancel = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+
 	-- Client -> server: battles
 	Challenge = { Direction = "ToServer", Args = { "integer" }, RateLimit = 1 },
 	DuelRespond = { Direction = "ToServer", Args = { "integer", "boolean" }, RateLimit = 0.3 },

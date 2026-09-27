@@ -32,7 +32,7 @@ local ctx = {
 }
 
 local PAGES =
-	{ "Eggs", "Food", "Titans", "Battle", "Quests", "Daily", "Index", "Store", "Rebirth", "Settings", "Admin" }
+	{ "Eggs", "Food", "Titans", "Breed", "Battle", "Quests", "Daily", "Index", "Store", "Rebirth", "Settings", "Admin" }
 
 local function updateBadges(state)
 	local canClaimDaily = Progress.DailyStatus(state.Daily, Progress.Day(state.ServerTime or os.time()))

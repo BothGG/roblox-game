@@ -66,6 +66,7 @@ function Schema.Template(): PlayerData
 			BattlesPlayed = 0,
 			BattlesWon = 0,
 			Tamed = 0,
+			Bred = 0,
 			CashEarned = 0,
 		},
 		LastOnline = 0,
