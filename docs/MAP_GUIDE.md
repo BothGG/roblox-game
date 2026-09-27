@@ -21,7 +21,8 @@ invisible: `Transparency = 1`, `CanCollide = false`, `Anchored = true`.
 | Tag | What | Attributes |
 |---|---|---|
 | `Plot` | One per base (need `GameConfig.Plots.Count`). The base is built centered on it. **Front (-Z) faces the arena.** Needs ~74×74 studs of flat ground. | `PlotIndex` (1..N) |
-| `Arena` | Center of the fighting area. | `Radius` (fighting circle, studs) |
+| `Arena` | Center of the fighting area, on its floor (the arena can float anywhere, e.g. high in the sky). | `Radius` (fighting circle, studs) |
+| `Portal` | Touch part that teleports players (`PortalService`). | `To` = `Arena` (to the stands) / `Island` (home) |
 | `ArenaSpawn` | Where fighters start (at least 2; 12 for full Titan Clashes), facing the center. | — |
 | `Stands` | Where spectators are moved during a match. | — |
 | `FoodSpawn` | Where food grows (~1.5 studs above ground). 40–80 total. | — |
@@ -34,10 +35,14 @@ invisible: `Transparency = 1`, `CanCollide = false`, `Anchored = true`.
 
 `GameConfig.Map.Style = "Studs"` (default) builds the island from Plastic parts with **studs on top
 and inlets on the sides**, the classic Roblox look (`Modules/Map/StudGround.lua`): bright green
-grass, brown dirt patches in the food fields, a tan road, and the **arena on its own ground in the
-middle** with a water moat and 4 wooden bridges. Bases get the same studded style.
+grass, brown dirt patches in the food fields, tan roads and a stone plaza in the middle. Bases get
+the same studded style.
 `"Terrain"` uses smooth Roblox terrain instead. Colors are in `COLORS` at the top of
-`MapGenerator.lua`; moat size is `Map.ArenaPlatform` / `Map.MoatWidth`.
+`MapGenerator.lua`.
+
+**The arena is its own floating square block** (`Map.ArenaHeight`, `Map.ArenaSize`) high above
+the plaza. A glowing portal in the plaza takes players up to the stands; a portal on the arena
+brings them home. Fighters are teleported in and out by BattleService.
 
 For a hand-built map in the same style: select your parts → set **Material = Plastic**,
 **TopSurface = Studs**, side surfaces **Inlet**.

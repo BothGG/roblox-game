@@ -167,6 +167,9 @@ end
 
 function MapService:IsInArena(position: Vector3, margin: number?): boolean
 	local offset = position - self.Arena.Center
+	if math.abs(offset.Y) > 60 then
+		return false -- the arena floats high above the island
+	end
 	local r = self.Arena.Radius + (margin or 0)
 	return offset.X * offset.X + offset.Z * offset.Z <= r * r
 end

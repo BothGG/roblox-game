@@ -23,7 +23,7 @@ src/
     Modules/                   CreatureBuilder FoodBuilder GameEvents Map/MapGenerator Map/Props Map/StudGround
     Services/
       Core/     DataService FxService SettingsService AdminService
-      World/    MapService
+      World/    MapService PortalService
       Base/     BaseService CreatureService
       Food/     FoodService StealService
       Wild/     WildService (wild titans: spawn, roam, tame)

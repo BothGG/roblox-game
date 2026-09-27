@@ -63,6 +63,12 @@ local function targetPosition(): Vector3?
 	elseif step.Target == "Wild" then
 		return nearest(Tags.WildTitan)
 	elseif step.Target == "Arena" then
+		-- The arena floats above the island: point at the portal that goes up.
+		for _, pad in CollectionService:GetTagged(Tags.Portal) do
+			if pad:IsA("BasePart") and pad:GetAttribute("To") == "Arena" then
+				return pad.Position
+			end
+		end
 		local arena = CollectionService:GetTagged(Tags.Arena)[1]
 		return if arena and arena:IsA("BasePart") then arena.Position else Vector3.new(0, 2, 0)
 	end

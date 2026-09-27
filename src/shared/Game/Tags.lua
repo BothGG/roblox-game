@@ -9,7 +9,8 @@ return {
 	Plot = "Plot", -- anchor part per base. Attribute PlotIndex (number). Front (-Z) faces the arena.
 	FoodSpawn = "FoodSpawn", -- where food grows.
 	WildSpawn = "WildSpawn", -- where wild titans appear and roam around.
-	Arena = "Arena", -- arena center part. Attribute Radius (fighting area).
+	Arena = "Arena", -- arena center part (on the floor). Attribute Radius (fighting area).
+	Portal = "Portal", -- touch to teleport. Attribute To = "Arena" (to the stands) | "Island" (back home).
 	ArenaSpawn = "ArenaSpawn", -- fighter start points (at least 2, around the arena edge).
 	Stands = "Stands", -- where spectators get moved during a match.
 	HubSpawn = "HubSpawn", -- where players appear before being sent to their base.

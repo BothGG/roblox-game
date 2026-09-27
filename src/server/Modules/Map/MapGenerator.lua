@@ -31,14 +31,13 @@ local MAP = GameConfig.Map
 local PLOTS = GameConfig.Plots
 
 local GATE_ANGLES = { 0, 90, 180, 270 } -- degrees
-local GATE_WIDTH = 26
 local ROAD_RADIUS = PLOTS.RingRadius - PLOTS.Size / 2 - 16
-local STONE = Color3.fromRGB(150, 140, 130)
 local STONE_DARK = Color3.fromRGB(110, 100, 95)
 local STUDS = MAP.Style ~= "Terrain"
-local PLATFORM = MAP.ArenaRadius + MAP.ArenaPlatform -- outer edge of the arena's ground
-local MOAT_OUTER = PLATFORM + MAP.MoatWidth
-local BRIDGE_WIDTH = 20
+local PLAZA = MAP.PlazaRadius
+local ARENA_Y = MAP.ArenaHeight -- top of the floating arena block
+local ARENA_HALF = MAP.ArenaSize / 2
+local FIGHT_HALF = ARENA_HALF - 24 -- the square players fight in
 
 -- Classic studded colors (like the reference: bright grass, brown dirt)
 local COLORS = {
@@ -49,7 +48,11 @@ local COLORS = {
 	Road = Color3.fromRGB(215, 190, 140),
 	Sand = Color3.fromRGB(245, 220, 160),
 	ArenaFloor = Color3.fromRGB(175, 125, 75),
-	Bridge = Color3.fromRGB(140, 95, 55),
+	Plaza = Color3.fromRGB(163, 162, 165),
+	PlazaEdge = Color3.fromRGB(110, 110, 118),
+	Emblem = Color3.fromRGB(230, 60, 60),
+	EmblemRing = Color3.fromRGB(250, 200, 50),
+	Portal = Color3.fromRGB(120, 200, 255),
 	Wall = Color3.fromRGB(230, 230, 235),
 	Stands = { Color3.fromRGB(40, 110, 220), Color3.fromRGB(230, 60, 60), Color3.fromRGB(250, 200, 50) },
 }
@@ -159,7 +162,7 @@ local function buildTerrain(ctx: Context)
 	end
 	-- Paths from the arena gates to the road
 	for _, angle in GATE_ANGLES do
-		local from, to = MAP.ArenaRadius, ROAD_RADIUS
+		local from, to = PLAZA, ROAD_RADIUS
 		local mid = polar(angle, (from + to) / 2, -0.5)
 		local dir = polar(angle, 1)
 		terrain:FillBlock(CFrame.lookAt(mid, mid + dir), Vector3.new(18, 2, to - from + 6), Enum.Material.Ground)
@@ -202,10 +205,14 @@ local function studZone(x: number, z: number): string?
 		return nil -- ocean
 	elseif r > MAP.IslandRadius then
 		return "Sand"
-	elseif r <= PLATFORM then
-		return "ArenaFloor"
-	elseif r <= MOAT_OUTER then
-		return if onGatePath(x, z, BRIDGE_WIDTH / 2) then "Bridge" else nil -- moat
+	elseif r < 10 then
+		return "Emblem"
+	elseif r < 15 then
+		return "EmblemRing"
+	elseif r <= PLAZA - 5 then
+		return "Plaza"
+	elseif r <= PLAZA then
+		return "PlazaEdge"
 	elseif math.abs(r - ROAD_RADIUS) <= 8 then
 		return "Road"
 	elseif r < ROAD_RADIUS and onGatePath(x, z, 9) then
@@ -241,8 +248,10 @@ local function buildStudIsland(ctx: Context)
 		DirtDark = { Color = COLORS.DirtDark, Top = 0 },
 		Road = { Color = COLORS.Road, Top = 0 },
 		Sand = { Color = COLORS.Sand, Top = -1.5 },
-		ArenaFloor = { Color = COLORS.ArenaFloor, Top = 0 },
-		Bridge = { Color = COLORS.Bridge, Top = 0, Material = Enum.Material.WoodPlanks },
+		Plaza = { Color = COLORS.Plaza, Top = 0.4 },
+		PlazaEdge = { Color = COLORS.PlazaEdge, Top = 0.4 },
+		Emblem = { Color = COLORS.Emblem, Top = 0.4 },
+		EmblemRing = { Color = COLORS.EmblemRing, Top = 0.4 },
 	}
 	local ground = StudGround.Build(ctx.Map, {
 		Cell = 8,
@@ -253,33 +262,6 @@ local function buildStudIsland(ctx: Context)
 		ZoneAt = studZone,
 	})
 	table.insert(groundFilter, ground)
-
-	-- Bridge rails
-	local rails = folder(ctx.Map, "BridgeRails")
-	for _, g in GATE_ANGLES do
-		local dir = polar(g, 1)
-		local side = dir:Cross(Vector3.yAxis)
-		for _, s in { -1, 1 } do
-			for d = PLATFORM, MOAT_OUTER, MAP.MoatWidth / 2 do
-				local p = dir * d + side * s * (BRIDGE_WIDTH / 2 - 0.5)
-				Props.Part(rails, {
-					Name = "RailPost",
-					Size = Vector3.new(1, 4, 1),
-					CFrame = CFrame.new(p + Vector3.new(0, 2, 0)),
-					Color = COLORS.Bridge,
-					Material = Enum.Material.WoodPlanks,
-				})
-			end
-			local mid = dir * (PLATFORM + MOAT_OUTER) / 2 + side * s * (BRIDGE_WIDTH / 2 - 0.5)
-			Props.Part(rails, {
-				Name = "Rail",
-				Size = Vector3.new(1, 1, MAP.MoatWidth + 2),
-				CFrame = CFrame.lookAt(mid + Vector3.new(0, 3.5, 0), mid + Vector3.new(0, 3.5, 0) + dir),
-				Color = COLORS.Bridge,
-				Material = Enum.Material.WoodPlanks,
-			})
-		end
-	end
 
 	-- Invisible walls at the edge of the world
 	local edge = size / 2
@@ -303,111 +285,188 @@ end
 -- Arena
 --------------------------------------------------------------------------
 
--- A ring of box segments (walls, stand steps), leaving gaps at the gates.
-local function ringSegments(
+local function block(
 	parent: Instance,
-	radius: number,
-	depth: number,
-	height: number,
-	baseY: number,
+	name: string,
+	size: Vector3,
+	cf: CFrame,
 	color: Color3,
-	material: Enum.Material,
-	name: string
-)
-	local circumference = 2 * math.pi * radius
-	local count = math.floor(circumference / 8)
-	local segLength = circumference / count + 0.4
-	for i = 0, count - 1 do
-		local angle = (i + 0.5) / count * 360
-		local gapDeg = math.deg(GATE_WIDTH / 2 / radius) + 1
-		if not nearGate(angle, gapDeg) then
-			local p = polar(angle, radius, baseY + height / 2)
-			Props.Part(parent, {
-				Name = name,
-				Size = Vector3.new(segLength, height, depth),
-				CFrame = CFrame.lookAt(p, Vector3.new(0, p.Y, 0)),
-				Color = color,
-				Material = material,
-			})
-		end
+	props: { [string]: any }?
+): Part
+	local p = Props.Part(parent, { Name = name, Size = size, CFrame = cf, Color = color })
+	local extra: { [string]: any } = props or {}
+	for key, value in extra do
+		(p :: any)[key] = value
 	end
+	return p
 end
 
-local function buildArena(ctx: Context)
-	local arena = folder(ctx.Map, "Arena")
-	local R = MAP.ArenaRadius
-
-	-- Floor (the stud ground already has a dirt floor here)
-	if not STUDS then
-		Props.Column(
-			arena,
-			Vector3.new(0, -0.5, 0),
-			1.2,
-			R * 2,
-			{ Name = "Floor", Color = Color3.fromRGB(225, 200, 150), Material = Enum.Material.Sand }
-		)
-	end
-	Props.Column(arena, Vector3.new(0, 0.7, 0), 0.1, 30, {
-		Name = "CenterMark",
-		Color = Color3.fromRGB(200, 60, 60),
-		Material = Enum.Material.SmoothPlastic,
+-- A glowing portal pad. Touching its trigger teleports you (PortalService).
+local function portal(ctx: Context, parent: Instance, position: Vector3, to: string, label: string)
+	local model = Instance.new("Model")
+	model.Name = "Portal_" .. to
+	model.Parent = parent
+	Props.Column(model, position, 1, 18, { Name = "Pad", Color = Color3.fromRGB(70, 70, 80) })
+	Props.Column(model, position + Vector3.new(0, 1, 0), 0.2, 16, {
+		Name = "Glow",
+		Color = COLORS.Portal,
+		Material = Enum.Material.Neon,
 		CanCollide = false,
 	})
+	Props.Column(model, position + Vector3.new(0, 1.05, 0), 0.2, 13, {
+		Name = "Inner",
+		Color = Color3.fromRGB(40, 60, 110),
+		Material = Enum.Material.Glass,
+		Transparency = 0.2,
+		CanCollide = false,
+	})
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(COLORS.Portal)
+	emitter.LightEmission = 1
+	emitter.Rate = 20
+	emitter.Lifetime = NumberRange.new(1, 2)
+	emitter.Speed = NumberRange.new(6, 12)
+	emitter.EmissionDirection = Enum.NormalId.Right -- up (cylinders lie on their side)
+	emitter.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(1, 0) })
+	emitter.Parent = model:FindFirstChild("Glow")
+	local light = Instance.new("PointLight")
+	light.Color = COLORS.Portal
+	light.Brightness = 3
+	light.Range = 20
+	light.Parent = model:FindFirstChild("Glow")
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(260, 50)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
+	gui.MaxDistance = 200
+	gui.LightInfluence = 0
+	gui.Parent = model:FindFirstChild("Pad")
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.FredokaOne
+	text.TextScaled = true
+	text.TextColor3 = Color3.fromRGB(160, 220, 255)
+	text.Text = label
+	text.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Parent = text
+	marker(ctx, Tags.Portal, CFrame.new(position + Vector3.new(0, 4, 0)), Vector3.new(12, 6, 12), { To = to })
+end
 
-	-- Wall (inner edge at R) and stands behind it
-	ringSegments(arena, R + 2, 3, 10, 0, if STUDS then COLORS.Wall else STONE, Enum.Material.Cobblestone, "Wall")
-	for step = 1, 3 do
-		ringSegments(
+-- The arena: its own square block floating high above the island.
+local function buildArena(ctx: Context)
+	local arena = folder(ctx.Map, "Arena")
+	local Y, H, F = ARENA_Y, ARENA_HALF, FIGHT_HALF
+	local dirt = COLORS.DirtDark
+
+	-- The block: studded dirt floor, a thick body and rock steps underneath
+	block(arena, "Floor", Vector3.new(H * 2, 2, H * 2), CFrame.new(0, Y - 1, 0), COLORS.ArenaFloor)
+	block(arena, "Body", Vector3.new(H * 2, 14, H * 2), CFrame.new(0, Y - 9, 0), dirt)
+	for i, k in { 0.8, 0.5, 0.22 } do
+		block(arena, "Rock", Vector3.new(H * 2 * k, 10, H * 2 * k), CFrame.new(0, Y - 11 - i * 10, 0), dirt)
+	end
+	-- Center emblem + white lines around the fighting square
+	local deco = { CanCollide = false, CanQuery = false }
+	block(arena, "Emblem", Vector3.new(36, 0.3, 36), CFrame.new(0, Y + 0.15, 0), COLORS.EmblemRing, deco)
+	block(arena, "Emblem", Vector3.new(28, 0.4, 28), CFrame.new(0, Y + 0.2, 0), COLORS.Emblem, deco)
+	for _, line in
+		{
+			{ F * 2 + 2, 1, 0, -F - 0.5 },
+			{ F * 2 + 2, 1, 0, F + 0.5 },
+			{ 1, F * 2, -F - 0.5, 0 },
+			{ 1, F * 2, F + 0.5, 0 },
+		}
+	do
+		block(
 			arena,
-			R + 3.5 + step * 7,
-			7,
-			3 * step + 7,
-			0,
-			if STUDS then COLORS.Stands[step] elseif step % 2 == 0 then STONE_DARK else STONE,
-			Enum.Material.Slate,
-			"Stand"
+			"Line",
+			Vector3.new(line[1], 0.3, line[2]),
+			CFrame.new(line[3], Y + 0.15, line[4]),
+			Color3.new(1, 1, 1),
+			deco
 		)
 	end
-
-	-- Gate arches + torches
-	for _, angle in GATE_ANGLES do
-		local dir = polar(angle, 1)
-		local gatePos = polar(angle, R + 12)
-		Props.GateArch(
-			arena,
-			CFrame.lookAt(gatePos, gatePos + dir),
-			GATE_WIDTH,
-			if STUDS then COLORS.Stands[2] else STONE_DARK
-		)
-		for _, side in { -1, 1 } do
-			local side3 = dir:Cross(Vector3.yAxis) * side * (GATE_WIDTH / 2 + 5)
-			Props.Torch(arena, polar(angle, R + 1) + side3)
+	-- Low wall + stepped team-color stands on all four sides
+	for side = 0, 3 do
+		local rot = CFrame.Angles(0, side * math.pi / 2, 0)
+		block(arena, "Wall", Vector3.new(F * 2 + 8, 4, 2), rot * CFrame.new(0, Y + 2, -(F + 4)), COLORS.Wall)
+		for step = 0, 2 do
+			local height = 3 + step * 3
+			block(
+				arena,
+				"Stand",
+				Vector3.new(F * 2 + 8 + step * 8, height, 5),
+				rot * CFrame.new(0, Y + height / 2, -(F + 7.5 + step * 5)),
+				COLORS.Stands[(step + side) % 3 + 1]
+			)
 		end
 	end
-
+	-- Corner towers with lamps
+	for _, x in { -1, 1 } do
+		for _, z in { -1, 1 } do
+			local c = Vector3.new(x * (H - 5), Y, z * (H - 5))
+			block(arena, "Tower", Vector3.new(8, 26, 8), CFrame.new(c + Vector3.new(0, 13, 0)), COLORS.Wall)
+			block(arena, "TowerTop", Vector3.new(10, 2, 10), CFrame.new(c + Vector3.new(0, 27, 0)), COLORS.Stands[2])
+			local lamp = Props.Part(arena, {
+				Name = "Lamp",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.one * 4,
+				CFrame = CFrame.new(c + Vector3.new(0, 30, 0)),
+				Color = Color3.fromRGB(255, 235, 180),
+				Material = Enum.Material.Neon,
+			})
+			local light = Instance.new("PointLight")
+			light.Range = 40
+			light.Brightness = 2
+			light.Parent = lamp
+		end
+	end
+	-- Big sign
+	local sign =
+		block(arena, "Sign", Vector3.new(64, 14, 1.5), CFrame.new(0, Y + 34, -(H - 3)), Color3.fromRGB(35, 38, 55))
+	local surface = Instance.new("SurfaceGui")
+	surface.Face = Enum.NormalId.Back -- faces the fighting square
+	surface.CanvasSize = Vector2.new(640, 140)
+	surface.LightInfluence = 0
+	surface.Parent = sign
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.fromScale(1, 1)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.FredokaOne
+	title.TextScaled = true
+	title.TextColor3 = Color3.fromRGB(255, 210, 60)
+	title.Text = "⚔️ TITAN ARENA"
+	title.Parent = surface
 	if STUDS then
 		StudGround.Style(arena)
 	end
 
+	-- Portals: plaza -> arena stands, arena -> back to the island
+	portal(ctx, arena, Vector3.new(0, if STUDS then 0.4 else 0, 0), "Arena", "⚔️ ARENA · step in")
+	portal(ctx, arena, Vector3.new(0, Y, H - 12), "Island", "🏝️ Back to the island")
+
 	-- Markers
-	marker(ctx, Tags.Arena, CFrame.new(0, 1, 0), Vector3.new(4, 1, 4), { Radius = R - 4 })
+	marker(ctx, Tags.Arena, CFrame.new(0, Y + 1, 0), Vector3.new(4, 1, 4), { Radius = F - 4 })
 	for i = 1, 12 do
-		local p = polar(i * 30, R * 0.7, 3)
-		marker(ctx, Tags.ArenaSpawn, CFrame.lookAt(p, Vector3.new(0, 3, 0)), Vector3.new(4, 1, 4), { Index = i })
+		local p = polar(i * 30, F * 0.6, Y + 3)
+		marker(ctx, Tags.ArenaSpawn, CFrame.lookAt(p, Vector3.new(0, Y + 3, 0)), Vector3.new(4, 1, 4), { Index = i })
 	end
-	for _, angle in { 45, 135, 225, 315 } do
-		local p = polar(angle, R + 3.5 + 21, 3 * 3 + 7 + 3)
+	for side = 0, 3 do
+		local rot = CFrame.Angles(0, side * math.pi / 2, 0)
+		local p = (rot * CFrame.new(0, Y + 12, -(F + 17.5))).Position
 		marker(ctx, Tags.Stands, CFrame.lookAt(p, Vector3.new(0, p.Y, 0)), Vector3.new(4, 1, 4))
 	end
 
-	-- Leaderboards facing the fields, next to three of the gates (past the moat)
+	-- Leaderboards around the plaza, facing out
 	for i, board in { "Trophies", "Biggest", "Rebirths" } do
-		local angle = GATE_ANGLES[i] + (if STUDS then 12 else 18)
-		local p = polar(angle, if STUDS then MOAT_OUTER + 8 else R + 36)
+		local angle = 45 + (i - 1) * 90
+		local p = polar(angle, PLAZA - 9)
 		local facing = polar(angle, 1)
 		for _, x in { -9, 9 } do
 			Props.Column(
-				arena,
+				ctx.Props,
 				CFrame.lookAt(p, p + facing) * CFrame.new(x, 0, 0).Position,
 				16,
 				1.2,

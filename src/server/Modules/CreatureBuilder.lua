@@ -5,6 +5,9 @@
 	the titan's Id (e.g. "Rex"), that model is used. Otherwise a placeholder
 	is built from parts using the Style and colors in Config/Creatures.lua.
 
+	The placeholder titans are cute "chibi" shapes: round shiny bodies (Parts
+	with Sphere meshes), big heads, big glossy eyes and rosy cheeks.
+
 	Custom model rules: set a PrimaryPart at the FEET, facing -Z (forward).
 	Give parts an attribute Paint = "Body" or "Accent" so mutations recolor
 	them correctly (parts without it count as "Body").
@@ -23,7 +26,8 @@ local Auras = require(Shared.Fx.Auras)
 local CreatureBuilder = {}
 
 local WHITE = Color3.new(1, 1, 1)
-local BLACK = Color3.new(0.05, 0.05, 0.05)
+local PUPIL = Color3.fromRGB(27, 27, 36)
+local CHEEK = Color3.fromRGB(255, 135, 160)
 
 local function part(model: Model, paint: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?): Part
 	local p = Instance.new("Part")
@@ -44,150 +48,149 @@ local function part(model: Model, paint: string, size: Vector3, cf: CFrame, colo
 	return p
 end
 
-local function eyes(model: Model, headCf: CFrame, headSize: Vector3)
-	local eyeSize = math.min(headSize.X, headSize.Y) * 0.35
+-- A smooth ellipsoid (a Part with a Sphere mesh stretched to its size).
+-- Cute round shapes are what make pets look "professional" in Roblox games.
+local function ell(model: Model, paint: string, sx: number, sy: number, sz: number, cf: CFrame, color: Color3): Part
+	local p = part(model, paint, Vector3.new(sx, sy, sz), cf, color)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = p
+	if paint == "Eye" then
+		p.Reflectance = 0.12
+	end
+	p.CastShadow = paint ~= "Eye" and paint ~= "Cheek"
+	return p
+end
+
+local function at(x: number, y: number, z: number, rx: number?, ry: number?, rz: number?): CFrame
+	return CFrame.new(x, y, z) * CFrame.Angles(rx or 0, ry or 0, rz or 0)
+end
+
+-- Big glossy eyes, rosy cheeks and a small smile on a face at (x, y, z) facing -Z.
+local function face(model: Model, x: number, y: number, z: number, size: number, spacing: number)
 	for _, side in { -1, 1 } do
-		local eyeCf = headCf * CFrame.new(side * headSize.X * 0.25, headSize.Y * 0.12, -headSize.Z / 2)
-		part(model, "Eye", Vector3.one * eyeSize, eyeCf, WHITE, Enum.PartType.Ball)
-		part(
+		local ex = x + side * spacing
+		ell(model, "Eye", size, size * 1.18, size * 0.55, at(ex, y, z), WHITE)
+		ell(
 			model,
 			"Eye",
-			Vector3.one * eyeSize * 0.5,
-			eyeCf * CFrame.new(0, 0, -eyeSize * 0.3),
-			BLACK,
-			Enum.PartType.Ball
+			size * 0.66,
+			size * 0.78,
+			size * 0.4,
+			at(ex + side * 0.04 * size, y - size * 0.08, z - size * 0.2),
+			PUPIL
 		)
-	end
-end
-
-local function spikes(model: Model, fromY: number, z: number, count: number, color: Color3)
-	for i = 0, count - 1 do
-		part(
+		ell(
 			model,
-			"Accent",
-			Vector3.new(0.7, 0.7, 0.7),
-			CFrame.new(0, fromY - i * 1.1, z) * CFrame.Angles(math.rad(45), 0, 0),
-			color
+			"Eye",
+			size * 0.24,
+			size * 0.26,
+			size * 0.14,
+			at(ex - size * 0.14, y + size * 0.16, z - size * 0.36),
+			WHITE
 		)
+		ell(
+			model,
+			"Cheek",
+			size * 0.6,
+			size * 0.34,
+			size * 0.2,
+			at(x + side * (spacing + size * 0.55), y - size * 0.72, z + size * 0.12),
+			CHEEK
+		)
+	end
+	ell(model, "Eye", size * 0.5, size * 0.16, size * 0.16, at(x, y - size * 0.75, z + size * 0.02), PUPIL)
+end
+
+local BUILDERS = {}
+
+function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
+	for _, s in { -1, 1 } do
+		ell(model, "Accent", 1.5, 0.8, 2, at(s * 0.95, 0.4, -0.25), accent) -- feet
+		ell(model, "Body", 0.95, 1.5, 0.95, at(s * 1.85, 3.1, -0.55, 0.3, 0, s * 0.55), body) -- arms
+	end
+	ell(model, "Body", 3.6, 3.8, 3.2, at(0, 2.6, 0), body)
+	ell(model, "Accent", 2.4, 2.7, 1, at(0, 2.4, -1.35), accent) -- belly
+	ell(model, "Body", 1.5, 1.4, 3, at(0, 1.5, 2.1, -0.45), body) -- tail
+	ell(model, "Body", 0.95, 0.95, 1.7, at(0, 1.0, 3.5, -0.3), body)
+	ell(model, "Body", 3.7, 3.3, 3.3, at(0, 5.6, -0.3), body) -- head
+	ell(model, "Body", 2.5, 1.5, 1.8, at(0, 5.0, -1.75), body) -- snout
+	for _, spike in { { 7.1, 0.5, 1 }, { 6.0, 1.45, 0.9 }, { 4.2, 1.7, 0.8 } } do
+		local k = spike[3]
+		ell(model, "Accent", 0.8 * k, 1.1 * k, 0.8 * k, at(0, spike[1], spike[2]), accent)
+	end
+	face(model, 0, 6.05, -1.85, 1.05, 0.82)
+	if def.Horn then
+		for _, s in { -1, 1 } do
+			ell(model, "Accent", 0.55, 1.4, 0.55, at(s * 0.85, 7.3, -0.5, 0, 0, -s * 0.35), accent)
+		end
 	end
 end
 
-local function quadBody(model: Model, def, body: Color3, accent: Color3, scaleBody: number)
-	local s = scaleBody
-	part(model, "Body", Vector3.new(3, 2.4, 5) * s, CFrame.new(0, 2.6 * s, 0), body)
-	for _, x in { -1.1, 1.1 } do
-		for _, z in { -1.7, 1.7 } do
-			part(model, "Accent", Vector3.new(0.9, 1.6, 0.9) * s, CFrame.new(x * s, 0.8 * s, z * s), accent)
+function BUILDERS.Quad(model: Model, def, body: Color3, accent: Color3)
+	local heads = def.Heads or 1
+	for _, x in { -1.35, 1.35 } do
+		for _, z in { -1.45, 1.8 } do
+			ell(model, "Body", 1.3, 1.9, 1.3, at(x, 0.95, z), body)
 		end
 	end
-	part(
-		model,
-		"Body",
-		Vector3.new(0.6, 0.6, 1.8) * s,
-		CFrame.new(0, 2.8 * s, 3.2 * s) * CFrame.Angles(math.rad(-20), 0, 0),
-		body
-	)
-	local heads = def.Heads or 1
+	ell(model, "Body", 3.9, 3.0, 5.0, at(0, 2.6, 0.2), body)
+	ell(model, "Accent", 3.5, 2.1, 4.3, at(0, 3.55, 0.4), accent) -- shell / back
+	ell(model, "Body", 1.0, 1.0, 1.9, at(0, 2.5, 2.9, -0.4), body) -- tail
 	for h = 1, heads do
-		local x = (h - (heads + 1) / 2) * 1.8 * s
-		local headSize = Vector3.new(1.8, 1.6, 1.8) * s
-		local headCf = CFrame.new(x, 3.4 * s + (heads > 1 and 0.8 or 0), -3.1 * s)
+		local x = if heads > 1 then (h - (heads + 1) / 2) * 2.3 else 0
+		local y = if heads > 1 then 4.6 else 3.4
 		if heads > 1 then
-			part(model, "Body", Vector3.new(0.7, 1.6, 0.7) * s, CFrame.new(x * 0.7, 3.2 * s, -2.6 * s), body)
+			ell(model, "Body", 1.0, 2.4, 1.0, at(x * 0.7, 3.7, -2.1, 0.35, 0, -x * 0.12), body)
 		end
-		part(model, "Body", headSize, headCf, body)
-		eyes(model, headCf, headSize)
+		ell(model, "Body", 3.0, 2.7, 2.7, at(x, y, -2.8), body)
+		face(model, x, y + 0.45, -4.05, 0.85, 0.62)
 		if def.Horn then
-			part(
+			ell(model, "Accent", 0.6, 1.7, 0.6, at(x, y + 1.3, -3.5, -0.5), accent)
+		end
+	end
+end
+
+function BUILDERS.Blob(model: Model, def, body: Color3, accent: Color3)
+	ell(model, "Body", 5.4, 4.7, 5.1, at(0, 2.35, 0), body)
+	ell(model, "Accent", 1.5, 1.5, 1.5, at(0, 4.9, 0.4), accent)
+	ell(model, "Eye", 1.1, 0.75, 0.4, at(-1.4, 3.9, -1.85, 0.5, 0.4, 0), WHITE) -- shine
+	face(model, 0, 3.0, -2.4, 1.2, 0.95)
+	if def.Tentacles then
+		for i = 0, 5 do
+			local angle = (i / 6) * math.pi * 2 + 0.5
+			ell(
 				model,
 				"Accent",
-				Vector3.new(0.5, 1.6, 0.5) * s,
-				headCf * CFrame.new(0, headSize.Y * 0.6, -headSize.Z * 0.3) * CFrame.Angles(math.rad(-25), 0, 0),
+				1.1,
+				0.9,
+				2.6,
+				at(math.sin(angle) * 2.5, 0.45, math.cos(angle) * 2.5, 0, angle, 0),
 				accent
 			)
 		end
 	end
 end
 
-local BUILDERS = {}
-
-function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
-	for _, side in { -1, 1 } do
-		part(model, "Accent", Vector3.new(1.2, 2.4, 1.2), CFrame.new(side * 0.9, 1.2, 0), accent)
-		part(
-			model,
-			"Body",
-			Vector3.new(0.9, 2.2, 0.9),
-			CFrame.new(side * 2.05, 4.2, -0.3) * CFrame.Angles(math.rad(-20), 0, 0),
-			body
-		)
+function BUILDERS.Winged(model: Model, def, body: Color3, accent: Color3)
+	for _, s in { -1, 1 } do
+		ell(model, "Accent", 1.3, 0.7, 1.8, at(s * 0.85, 0.35, -0.2), accent) -- feet
+		ell(model, "Accent", 4.4, 0.4, 2.6, at(s * 2.9, 4.0, 0.6, 0, s * 0.25, s * 0.5), accent) -- wings
+		ell(model, "Accent", 2.4, 0.35, 1.6, at(s * 4.6, 5.0, 1.0, 0, s * 0.4, s * 0.8), accent)
 	end
-	part(model, "Body", Vector3.new(3.2, 3.2, 2.4), CFrame.new(0, 4, 0), body)
-	part(model, "Accent", Vector3.new(2.2, 2.2, 0.2), CFrame.new(0, 3.8, -1.25), accent)
-	local headSize = Vector3.new(2.6, 2.2, 2.4)
-	local headCf = CFrame.new(0, 6.7, -0.4)
-	part(model, "Body", headSize, headCf, body)
-	part(model, "Body", Vector3.new(1.6, 1, 1), headCf * CFrame.new(0, -0.4, -1.5), body)
-	eyes(model, headCf, headSize)
-	part(model, "Body", Vector3.new(1, 1, 2.4), CFrame.new(0, 2.6, 1.9) * CFrame.Angles(math.rad(25), 0, 0), body)
-	spikes(model, 5.4, 1.25, 3, accent)
+	ell(model, "Body", 3.3, 3.3, 3.6, at(0, 2.4, 0), body)
+	ell(model, "Accent", 2.2, 2.3, 1, at(0, 2.2, -1.5), accent) -- belly
+	ell(model, "Body", 1.1, 1.1, 2.8, at(0, 1.7, 2.3, -0.4), body) -- tail
+	ell(model, "Accent", 1.0, 1.4, 0.4, at(0, 1.4, 3.7, -0.4), accent)
+	ell(model, "Body", 3.1, 2.9, 2.9, at(0, 5.0, -0.7), body) -- head
+	ell(model, "Body", 1.9, 1.2, 1.4, at(0, 4.5, -2.1), body) -- snout
+	ell(model, "Accent", 0.7, 1.2, 0.7, at(0, 6.5, -0.4), accent) -- crest
+	face(model, 0, 5.4, -2.1, 0.95, 0.72)
 	if def.Horn then
-		part(
-			model,
-			"Accent",
-			Vector3.new(0.5, 1.4, 0.5),
-			headCf * CFrame.new(-0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(20)),
-			accent
-		)
-		part(
-			model,
-			"Accent",
-			Vector3.new(0.5, 1.4, 0.5),
-			headCf * CFrame.new(0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(-20)),
-			accent
-		)
-	end
-end
-
-function BUILDERS.Quad(model: Model, def, body: Color3, accent: Color3)
-	quadBody(model, def, body, accent, 1)
-	-- shell / back plate
-	part(model, "Accent", Vector3.new(2.6, 0.8, 4), CFrame.new(0, 4.1, 0), accent)
-end
-
-function BUILDERS.Blob(model: Model, def, body: Color3, accent: Color3)
-	local bodySize = Vector3.new(5, 5, 5)
-	local bodyCf = CFrame.new(0, 2.5, 0)
-	part(model, "Body", bodySize, bodyCf, body, Enum.PartType.Ball)
-	part(model, "Accent", Vector3.new(3, 3, 3), CFrame.new(0, 4.2, 0.4), accent, Enum.PartType.Ball)
-	eyes(model, CFrame.new(0, 3, 0.2), bodySize)
-	if def.Tentacles then
-		for i = 1, 6 do
-			local angle = (i / 6) * math.pi * 2
-			part(
-				model,
-				"Accent",
-				Vector3.new(3.2, 0.8, 0.8),
-				CFrame.new(math.cos(angle) * 2.8, 0.4, math.sin(angle) * 2.8) * CFrame.Angles(0, -angle, 0),
-				accent,
-				Enum.PartType.Cylinder
-			)
+		for _, s in { -1, 1 } do
+			ell(model, "Accent", 0.5, 1.3, 0.5, at(s * 0.75, 6.4, -0.8, 0, 0, -s * 0.4), accent)
 		end
 	end
-end
-
-function BUILDERS.Winged(model: Model, def, body: Color3, accent: Color3)
-	quadBody(model, def, body, accent, 0.9)
-	for _, side in { -1, 1 } do
-		part(
-			model,
-			"Accent",
-			Vector3.new(4.5, 0.3, 2.8),
-			CFrame.new(side * 3.4, 4, 0.2) * CFrame.Angles(0, 0, math.rad(side * 25)),
-			accent
-		)
-	end
-	spikes(model, 4.2, 1.8, 2, accent)
 end
 
 local function buildPlaceholder(def): Model

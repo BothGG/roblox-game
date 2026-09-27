@@ -493,16 +493,16 @@ local GameConfig = {
 	Map = {
 		Seed = 2026, -- change for a different random layout of props/spawns
 		IslandRadius = 330,
-		ArenaRadius = 95,
-		FieldInner = 143, -- food fields ring
+		PlazaRadius = 40, -- stone plaza in the middle with the arena portal
+		FieldInner = 62, -- food fields ring
 		FieldOuter = 197,
 		-- "Studs" = classic Roblox look (Plastic parts with studs, like a baseplate).
 		-- "Terrain" = smooth terrain grass.
 		Style = "Studs",
-		-- The arena stands on its own ground in the middle, with a water moat
-		-- and 4 bridges around it.
-		ArenaPlatform = 30, -- ground around the arena wall (studs past ArenaRadius)
-		MoatWidth = 10,
+		-- The arena is its own square block floating high above the island.
+		-- Step into the portal in the plaza to go up; fighters are teleported.
+		ArenaHeight = 300,
+		ArenaSize = 180, -- the whole block (the fighting square is 48 studs smaller)
 	},
 
 	Plots = {
@@ -3964,7 +3964,8 @@ return {
 	Plot = "Plot", -- anchor part per base. Attribute PlotIndex (number). Front (-Z) faces the arena.
 	FoodSpawn = "FoodSpawn", -- where food grows.
 	WildSpawn = "WildSpawn", -- where wild titans appear and roam around.
-	Arena = "Arena", -- arena center part. Attribute Radius (fighting area).
+	Arena = "Arena", -- arena center part (on the floor). Attribute Radius (fighting area).
+	Portal = "Portal", -- touch to teleport. Attribute To = "Arena" (to the stands) | "Island" (back home).
 	ArenaSpawn = "ArenaSpawn", -- fighter start points (at least 2, around the arena edge).
 	Stands = "Stands", -- where spectators get moved during a match.
 	HubSpawn = "HubSpawn", -- where players appear before being sent to their base.
@@ -5152,6 +5153,9 @@ end
 	the titan's Id (e.g. "Rex"), that model is used. Otherwise a placeholder
 	is built from parts using the Style and colors in Config/Creatures.lua.
 
+	The placeholder titans are cute "chibi" shapes: round shiny bodies (Parts
+	with Sphere meshes), big heads, big glossy eyes and rosy cheeks.
+
 	Custom model rules: set a PrimaryPart at the FEET, facing -Z (forward).
 	Give parts an attribute Paint = "Body" or "Accent" so mutations recolor
 	them correctly (parts without it count as "Body").
@@ -5170,7 +5174,8 @@ local Auras = require(Shared.Fx.Auras)
 local CreatureBuilder = {}
 
 local WHITE = Color3.new(1, 1, 1)
-local BLACK = Color3.new(0.05, 0.05, 0.05)
+local PUPIL = Color3.fromRGB(27, 27, 36)
+local CHEEK = Color3.fromRGB(255, 135, 160)
 
 local function part(model: Model, paint: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?): Part
 	local p = Instance.new("Part")
@@ -5191,150 +5196,149 @@ local function part(model: Model, paint: string, size: Vector3, cf: CFrame, colo
 	return p
 end
 
-local function eyes(model: Model, headCf: CFrame, headSize: Vector3)
-	local eyeSize = math.min(headSize.X, headSize.Y) * 0.35
+-- A smooth ellipsoid (a Part with a Sphere mesh stretched to its size).
+-- Cute round shapes are what make pets look "professional" in Roblox games.
+local function ell(model: Model, paint: string, sx: number, sy: number, sz: number, cf: CFrame, color: Color3): Part
+	local p = part(model, paint, Vector3.new(sx, sy, sz), cf, color)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = p
+	if paint == "Eye" then
+		p.Reflectance = 0.12
+	end
+	p.CastShadow = paint ~= "Eye" and paint ~= "Cheek"
+	return p
+end
+
+local function at(x: number, y: number, z: number, rx: number?, ry: number?, rz: number?): CFrame
+	return CFrame.new(x, y, z) * CFrame.Angles(rx or 0, ry or 0, rz or 0)
+end
+
+-- Big glossy eyes, rosy cheeks and a small smile on a face at (x, y, z) facing -Z.
+local function face(model: Model, x: number, y: number, z: number, size: number, spacing: number)
 	for _, side in { -1, 1 } do
-		local eyeCf = headCf * CFrame.new(side * headSize.X * 0.25, headSize.Y * 0.12, -headSize.Z / 2)
-		part(model, "Eye", Vector3.one * eyeSize, eyeCf, WHITE, Enum.PartType.Ball)
-		part(
+		local ex = x + side * spacing
+		ell(model, "Eye", size, size * 1.18, size * 0.55, at(ex, y, z), WHITE)
+		ell(
 			model,
 			"Eye",
-			Vector3.one * eyeSize * 0.5,
-			eyeCf * CFrame.new(0, 0, -eyeSize * 0.3),
-			BLACK,
-			Enum.PartType.Ball
+			size * 0.66,
+			size * 0.78,
+			size * 0.4,
+			at(ex + side * 0.04 * size, y - size * 0.08, z - size * 0.2),
+			PUPIL
 		)
-	end
-end
-
-local function spikes(model: Model, fromY: number, z: number, count: number, color: Color3)
-	for i = 0, count - 1 do
-		part(
+		ell(
 			model,
-			"Accent",
-			Vector3.new(0.7, 0.7, 0.7),
-			CFrame.new(0, fromY - i * 1.1, z) * CFrame.Angles(math.rad(45), 0, 0),
-			color
+			"Eye",
+			size * 0.24,
+			size * 0.26,
+			size * 0.14,
+			at(ex - size * 0.14, y + size * 0.16, z - size * 0.36),
+			WHITE
 		)
+		ell(
+			model,
+			"Cheek",
+			size * 0.6,
+			size * 0.34,
+			size * 0.2,
+			at(x + side * (spacing + size * 0.55), y - size * 0.72, z + size * 0.12),
+			CHEEK
+		)
+	end
+	ell(model, "Eye", size * 0.5, size * 0.16, size * 0.16, at(x, y - size * 0.75, z + size * 0.02), PUPIL)
+end
+
+local BUILDERS = {}
+
+function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
+	for _, s in { -1, 1 } do
+		ell(model, "Accent", 1.5, 0.8, 2, at(s * 0.95, 0.4, -0.25), accent) -- feet
+		ell(model, "Body", 0.95, 1.5, 0.95, at(s * 1.85, 3.1, -0.55, 0.3, 0, s * 0.55), body) -- arms
+	end
+	ell(model, "Body", 3.6, 3.8, 3.2, at(0, 2.6, 0), body)
+	ell(model, "Accent", 2.4, 2.7, 1, at(0, 2.4, -1.35), accent) -- belly
+	ell(model, "Body", 1.5, 1.4, 3, at(0, 1.5, 2.1, -0.45), body) -- tail
+	ell(model, "Body", 0.95, 0.95, 1.7, at(0, 1.0, 3.5, -0.3), body)
+	ell(model, "Body", 3.7, 3.3, 3.3, at(0, 5.6, -0.3), body) -- head
+	ell(model, "Body", 2.5, 1.5, 1.8, at(0, 5.0, -1.75), body) -- snout
+	for _, spike in { { 7.1, 0.5, 1 }, { 6.0, 1.45, 0.9 }, { 4.2, 1.7, 0.8 } } do
+		local k = spike[3]
+		ell(model, "Accent", 0.8 * k, 1.1 * k, 0.8 * k, at(0, spike[1], spike[2]), accent)
+	end
+	face(model, 0, 6.05, -1.85, 1.05, 0.82)
+	if def.Horn then
+		for _, s in { -1, 1 } do
+			ell(model, "Accent", 0.55, 1.4, 0.55, at(s * 0.85, 7.3, -0.5, 0, 0, -s * 0.35), accent)
+		end
 	end
 end
 
-local function quadBody(model: Model, def, body: Color3, accent: Color3, scaleBody: number)
-	local s = scaleBody
-	part(model, "Body", Vector3.new(3, 2.4, 5) * s, CFrame.new(0, 2.6 * s, 0), body)
-	for _, x in { -1.1, 1.1 } do
-		for _, z in { -1.7, 1.7 } do
-			part(model, "Accent", Vector3.new(0.9, 1.6, 0.9) * s, CFrame.new(x * s, 0.8 * s, z * s), accent)
+function BUILDERS.Quad(model: Model, def, body: Color3, accent: Color3)
+	local heads = def.Heads or 1
+	for _, x in { -1.35, 1.35 } do
+		for _, z in { -1.45, 1.8 } do
+			ell(model, "Body", 1.3, 1.9, 1.3, at(x, 0.95, z), body)
 		end
 	end
-	part(
-		model,
-		"Body",
-		Vector3.new(0.6, 0.6, 1.8) * s,
-		CFrame.new(0, 2.8 * s, 3.2 * s) * CFrame.Angles(math.rad(-20), 0, 0),
-		body
-	)
-	local heads = def.Heads or 1
+	ell(model, "Body", 3.9, 3.0, 5.0, at(0, 2.6, 0.2), body)
+	ell(model, "Accent", 3.5, 2.1, 4.3, at(0, 3.55, 0.4), accent) -- shell / back
+	ell(model, "Body", 1.0, 1.0, 1.9, at(0, 2.5, 2.9, -0.4), body) -- tail
 	for h = 1, heads do
-		local x = (h - (heads + 1) / 2) * 1.8 * s
-		local headSize = Vector3.new(1.8, 1.6, 1.8) * s
-		local headCf = CFrame.new(x, 3.4 * s + (heads > 1 and 0.8 or 0), -3.1 * s)
+		local x = if heads > 1 then (h - (heads + 1) / 2) * 2.3 else 0
+		local y = if heads > 1 then 4.6 else 3.4
 		if heads > 1 then
-			part(model, "Body", Vector3.new(0.7, 1.6, 0.7) * s, CFrame.new(x * 0.7, 3.2 * s, -2.6 * s), body)
+			ell(model, "Body", 1.0, 2.4, 1.0, at(x * 0.7, 3.7, -2.1, 0.35, 0, -x * 0.12), body)
 		end
-		part(model, "Body", headSize, headCf, body)
-		eyes(model, headCf, headSize)
+		ell(model, "Body", 3.0, 2.7, 2.7, at(x, y, -2.8), body)
+		face(model, x, y + 0.45, -4.05, 0.85, 0.62)
 		if def.Horn then
-			part(
+			ell(model, "Accent", 0.6, 1.7, 0.6, at(x, y + 1.3, -3.5, -0.5), accent)
+		end
+	end
+end
+
+function BUILDERS.Blob(model: Model, def, body: Color3, accent: Color3)
+	ell(model, "Body", 5.4, 4.7, 5.1, at(0, 2.35, 0), body)
+	ell(model, "Accent", 1.5, 1.5, 1.5, at(0, 4.9, 0.4), accent)
+	ell(model, "Eye", 1.1, 0.75, 0.4, at(-1.4, 3.9, -1.85, 0.5, 0.4, 0), WHITE) -- shine
+	face(model, 0, 3.0, -2.4, 1.2, 0.95)
+	if def.Tentacles then
+		for i = 0, 5 do
+			local angle = (i / 6) * math.pi * 2 + 0.5
+			ell(
 				model,
 				"Accent",
-				Vector3.new(0.5, 1.6, 0.5) * s,
-				headCf * CFrame.new(0, headSize.Y * 0.6, -headSize.Z * 0.3) * CFrame.Angles(math.rad(-25), 0, 0),
+				1.1,
+				0.9,
+				2.6,
+				at(math.sin(angle) * 2.5, 0.45, math.cos(angle) * 2.5, 0, angle, 0),
 				accent
 			)
 		end
 	end
 end
 
-local BUILDERS = {}
-
-function BUILDERS.Biped(model: Model, def, body: Color3, accent: Color3)
-	for _, side in { -1, 1 } do
-		part(model, "Accent", Vector3.new(1.2, 2.4, 1.2), CFrame.new(side * 0.9, 1.2, 0), accent)
-		part(
-			model,
-			"Body",
-			Vector3.new(0.9, 2.2, 0.9),
-			CFrame.new(side * 2.05, 4.2, -0.3) * CFrame.Angles(math.rad(-20), 0, 0),
-			body
-		)
+function BUILDERS.Winged(model: Model, def, body: Color3, accent: Color3)
+	for _, s in { -1, 1 } do
+		ell(model, "Accent", 1.3, 0.7, 1.8, at(s * 0.85, 0.35, -0.2), accent) -- feet
+		ell(model, "Accent", 4.4, 0.4, 2.6, at(s * 2.9, 4.0, 0.6, 0, s * 0.25, s * 0.5), accent) -- wings
+		ell(model, "Accent", 2.4, 0.35, 1.6, at(s * 4.6, 5.0, 1.0, 0, s * 0.4, s * 0.8), accent)
 	end
-	part(model, "Body", Vector3.new(3.2, 3.2, 2.4), CFrame.new(0, 4, 0), body)
-	part(model, "Accent", Vector3.new(2.2, 2.2, 0.2), CFrame.new(0, 3.8, -1.25), accent)
-	local headSize = Vector3.new(2.6, 2.2, 2.4)
-	local headCf = CFrame.new(0, 6.7, -0.4)
-	part(model, "Body", headSize, headCf, body)
-	part(model, "Body", Vector3.new(1.6, 1, 1), headCf * CFrame.new(0, -0.4, -1.5), body)
-	eyes(model, headCf, headSize)
-	part(model, "Body", Vector3.new(1, 1, 2.4), CFrame.new(0, 2.6, 1.9) * CFrame.Angles(math.rad(25), 0, 0), body)
-	spikes(model, 5.4, 1.25, 3, accent)
+	ell(model, "Body", 3.3, 3.3, 3.6, at(0, 2.4, 0), body)
+	ell(model, "Accent", 2.2, 2.3, 1, at(0, 2.2, -1.5), accent) -- belly
+	ell(model, "Body", 1.1, 1.1, 2.8, at(0, 1.7, 2.3, -0.4), body) -- tail
+	ell(model, "Accent", 1.0, 1.4, 0.4, at(0, 1.4, 3.7, -0.4), accent)
+	ell(model, "Body", 3.1, 2.9, 2.9, at(0, 5.0, -0.7), body) -- head
+	ell(model, "Body", 1.9, 1.2, 1.4, at(0, 4.5, -2.1), body) -- snout
+	ell(model, "Accent", 0.7, 1.2, 0.7, at(0, 6.5, -0.4), accent) -- crest
+	face(model, 0, 5.4, -2.1, 0.95, 0.72)
 	if def.Horn then
-		part(
-			model,
-			"Accent",
-			Vector3.new(0.5, 1.4, 0.5),
-			headCf * CFrame.new(-0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(20)),
-			accent
-		)
-		part(
-			model,
-			"Accent",
-			Vector3.new(0.5, 1.4, 0.5),
-			headCf * CFrame.new(0.7, 1.4, 0) * CFrame.Angles(0, 0, math.rad(-20)),
-			accent
-		)
-	end
-end
-
-function BUILDERS.Quad(model: Model, def, body: Color3, accent: Color3)
-	quadBody(model, def, body, accent, 1)
-	-- shell / back plate
-	part(model, "Accent", Vector3.new(2.6, 0.8, 4), CFrame.new(0, 4.1, 0), accent)
-end
-
-function BUILDERS.Blob(model: Model, def, body: Color3, accent: Color3)
-	local bodySize = Vector3.new(5, 5, 5)
-	local bodyCf = CFrame.new(0, 2.5, 0)
-	part(model, "Body", bodySize, bodyCf, body, Enum.PartType.Ball)
-	part(model, "Accent", Vector3.new(3, 3, 3), CFrame.new(0, 4.2, 0.4), accent, Enum.PartType.Ball)
-	eyes(model, CFrame.new(0, 3, 0.2), bodySize)
-	if def.Tentacles then
-		for i = 1, 6 do
-			local angle = (i / 6) * math.pi * 2
-			part(
-				model,
-				"Accent",
-				Vector3.new(3.2, 0.8, 0.8),
-				CFrame.new(math.cos(angle) * 2.8, 0.4, math.sin(angle) * 2.8) * CFrame.Angles(0, -angle, 0),
-				accent,
-				Enum.PartType.Cylinder
-			)
+		for _, s in { -1, 1 } do
+			ell(model, "Accent", 0.5, 1.3, 0.5, at(s * 0.75, 6.4, -0.8, 0, 0, -s * 0.4), accent)
 		end
 	end
-end
-
-function BUILDERS.Winged(model: Model, def, body: Color3, accent: Color3)
-	quadBody(model, def, body, accent, 0.9)
-	for _, side in { -1, 1 } do
-		part(
-			model,
-			"Accent",
-			Vector3.new(4.5, 0.3, 2.8),
-			CFrame.new(side * 3.4, 4, 0.2) * CFrame.Angles(0, 0, math.rad(side * 25)),
-			accent
-		)
-	end
-	spikes(model, 4.2, 1.8, 2, accent)
 end
 
 local function buildPlaceholder(def): Model
@@ -5692,14 +5696,13 @@ local MAP = GameConfig.Map
 local PLOTS = GameConfig.Plots
 
 local GATE_ANGLES = { 0, 90, 180, 270 } -- degrees
-local GATE_WIDTH = 26
 local ROAD_RADIUS = PLOTS.RingRadius - PLOTS.Size / 2 - 16
-local STONE = Color3.fromRGB(150, 140, 130)
 local STONE_DARK = Color3.fromRGB(110, 100, 95)
 local STUDS = MAP.Style ~= "Terrain"
-local PLATFORM = MAP.ArenaRadius + MAP.ArenaPlatform -- outer edge of the arena's ground
-local MOAT_OUTER = PLATFORM + MAP.MoatWidth
-local BRIDGE_WIDTH = 20
+local PLAZA = MAP.PlazaRadius
+local ARENA_Y = MAP.ArenaHeight -- top of the floating arena block
+local ARENA_HALF = MAP.ArenaSize / 2
+local FIGHT_HALF = ARENA_HALF - 24 -- the square players fight in
 
 -- Classic studded colors (like the reference: bright grass, brown dirt)
 local COLORS = {
@@ -5710,7 +5713,11 @@ local COLORS = {
 	Road = Color3.fromRGB(215, 190, 140),
 	Sand = Color3.fromRGB(245, 220, 160),
 	ArenaFloor = Color3.fromRGB(175, 125, 75),
-	Bridge = Color3.fromRGB(140, 95, 55),
+	Plaza = Color3.fromRGB(163, 162, 165),
+	PlazaEdge = Color3.fromRGB(110, 110, 118),
+	Emblem = Color3.fromRGB(230, 60, 60),
+	EmblemRing = Color3.fromRGB(250, 200, 50),
+	Portal = Color3.fromRGB(120, 200, 255),
 	Wall = Color3.fromRGB(230, 230, 235),
 	Stands = { Color3.fromRGB(40, 110, 220), Color3.fromRGB(230, 60, 60), Color3.fromRGB(250, 200, 50) },
 }
@@ -5820,7 +5827,7 @@ local function buildTerrain(ctx: Context)
 	end
 	-- Paths from the arena gates to the road
 	for _, angle in GATE_ANGLES do
-		local from, to = MAP.ArenaRadius, ROAD_RADIUS
+		local from, to = PLAZA, ROAD_RADIUS
 		local mid = polar(angle, (from + to) / 2, -0.5)
 		local dir = polar(angle, 1)
 		terrain:FillBlock(CFrame.lookAt(mid, mid + dir), Vector3.new(18, 2, to - from + 6), Enum.Material.Ground)
@@ -5863,10 +5870,14 @@ local function studZone(x: number, z: number): string?
 		return nil -- ocean
 	elseif r > MAP.IslandRadius then
 		return "Sand"
-	elseif r <= PLATFORM then
-		return "ArenaFloor"
-	elseif r <= MOAT_OUTER then
-		return if onGatePath(x, z, BRIDGE_WIDTH / 2) then "Bridge" else nil -- moat
+	elseif r < 10 then
+		return "Emblem"
+	elseif r < 15 then
+		return "EmblemRing"
+	elseif r <= PLAZA - 5 then
+		return "Plaza"
+	elseif r <= PLAZA then
+		return "PlazaEdge"
 	elseif math.abs(r - ROAD_RADIUS) <= 8 then
 		return "Road"
 	elseif r < ROAD_RADIUS and onGatePath(x, z, 9) then
@@ -5902,8 +5913,10 @@ local function buildStudIsland(ctx: Context)
 		DirtDark = { Color = COLORS.DirtDark, Top = 0 },
 		Road = { Color = COLORS.Road, Top = 0 },
 		Sand = { Color = COLORS.Sand, Top = -1.5 },
-		ArenaFloor = { Color = COLORS.ArenaFloor, Top = 0 },
-		Bridge = { Color = COLORS.Bridge, Top = 0, Material = Enum.Material.WoodPlanks },
+		Plaza = { Color = COLORS.Plaza, Top = 0.4 },
+		PlazaEdge = { Color = COLORS.PlazaEdge, Top = 0.4 },
+		Emblem = { Color = COLORS.Emblem, Top = 0.4 },
+		EmblemRing = { Color = COLORS.EmblemRing, Top = 0.4 },
 	}
 	local ground = StudGround.Build(ctx.Map, {
 		Cell = 8,
@@ -5914,33 +5927,6 @@ local function buildStudIsland(ctx: Context)
 		ZoneAt = studZone,
 	})
 	table.insert(groundFilter, ground)
-
-	-- Bridge rails
-	local rails = folder(ctx.Map, "BridgeRails")
-	for _, g in GATE_ANGLES do
-		local dir = polar(g, 1)
-		local side = dir:Cross(Vector3.yAxis)
-		for _, s in { -1, 1 } do
-			for d = PLATFORM, MOAT_OUTER, MAP.MoatWidth / 2 do
-				local p = dir * d + side * s * (BRIDGE_WIDTH / 2 - 0.5)
-				Props.Part(rails, {
-					Name = "RailPost",
-					Size = Vector3.new(1, 4, 1),
-					CFrame = CFrame.new(p + Vector3.new(0, 2, 0)),
-					Color = COLORS.Bridge,
-					Material = Enum.Material.WoodPlanks,
-				})
-			end
-			local mid = dir * (PLATFORM + MOAT_OUTER) / 2 + side * s * (BRIDGE_WIDTH / 2 - 0.5)
-			Props.Part(rails, {
-				Name = "Rail",
-				Size = Vector3.new(1, 1, MAP.MoatWidth + 2),
-				CFrame = CFrame.lookAt(mid + Vector3.new(0, 3.5, 0), mid + Vector3.new(0, 3.5, 0) + dir),
-				Color = COLORS.Bridge,
-				Material = Enum.Material.WoodPlanks,
-			})
-		end
-	end
 
 	-- Invisible walls at the edge of the world
 	local edge = size / 2
@@ -5964,111 +5950,188 @@ end
 -- Arena
 --------------------------------------------------------------------------
 
--- A ring of box segments (walls, stand steps), leaving gaps at the gates.
-local function ringSegments(
+local function block(
 	parent: Instance,
-	radius: number,
-	depth: number,
-	height: number,
-	baseY: number,
+	name: string,
+	size: Vector3,
+	cf: CFrame,
 	color: Color3,
-	material: Enum.Material,
-	name: string
-)
-	local circumference = 2 * math.pi * radius
-	local count = math.floor(circumference / 8)
-	local segLength = circumference / count + 0.4
-	for i = 0, count - 1 do
-		local angle = (i + 0.5) / count * 360
-		local gapDeg = math.deg(GATE_WIDTH / 2 / radius) + 1
-		if not nearGate(angle, gapDeg) then
-			local p = polar(angle, radius, baseY + height / 2)
-			Props.Part(parent, {
-				Name = name,
-				Size = Vector3.new(segLength, height, depth),
-				CFrame = CFrame.lookAt(p, Vector3.new(0, p.Y, 0)),
-				Color = color,
-				Material = material,
-			})
-		end
+	props: { [string]: any }?
+): Part
+	local p = Props.Part(parent, { Name = name, Size = size, CFrame = cf, Color = color })
+	local extra: { [string]: any } = props or {}
+	for key, value in extra do
+		(p :: any)[key] = value
 	end
+	return p
 end
 
-local function buildArena(ctx: Context)
-	local arena = folder(ctx.Map, "Arena")
-	local R = MAP.ArenaRadius
-
-	-- Floor (the stud ground already has a dirt floor here)
-	if not STUDS then
-		Props.Column(
-			arena,
-			Vector3.new(0, -0.5, 0),
-			1.2,
-			R * 2,
-			{ Name = "Floor", Color = Color3.fromRGB(225, 200, 150), Material = Enum.Material.Sand }
-		)
-	end
-	Props.Column(arena, Vector3.new(0, 0.7, 0), 0.1, 30, {
-		Name = "CenterMark",
-		Color = Color3.fromRGB(200, 60, 60),
-		Material = Enum.Material.SmoothPlastic,
+-- A glowing portal pad. Touching its trigger teleports you (PortalService).
+local function portal(ctx: Context, parent: Instance, position: Vector3, to: string, label: string)
+	local model = Instance.new("Model")
+	model.Name = "Portal_" .. to
+	model.Parent = parent
+	Props.Column(model, position, 1, 18, { Name = "Pad", Color = Color3.fromRGB(70, 70, 80) })
+	Props.Column(model, position + Vector3.new(0, 1, 0), 0.2, 16, {
+		Name = "Glow",
+		Color = COLORS.Portal,
+		Material = Enum.Material.Neon,
 		CanCollide = false,
 	})
+	Props.Column(model, position + Vector3.new(0, 1.05, 0), 0.2, 13, {
+		Name = "Inner",
+		Color = Color3.fromRGB(40, 60, 110),
+		Material = Enum.Material.Glass,
+		Transparency = 0.2,
+		CanCollide = false,
+	})
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(COLORS.Portal)
+	emitter.LightEmission = 1
+	emitter.Rate = 20
+	emitter.Lifetime = NumberRange.new(1, 2)
+	emitter.Speed = NumberRange.new(6, 12)
+	emitter.EmissionDirection = Enum.NormalId.Right -- up (cylinders lie on their side)
+	emitter.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.8), NumberSequenceKeypoint.new(1, 0) })
+	emitter.Parent = model:FindFirstChild("Glow")
+	local light = Instance.new("PointLight")
+	light.Color = COLORS.Portal
+	light.Brightness = 3
+	light.Range = 20
+	light.Parent = model:FindFirstChild("Glow")
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(260, 50)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
+	gui.MaxDistance = 200
+	gui.LightInfluence = 0
+	gui.Parent = model:FindFirstChild("Pad")
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.Font = Enum.Font.FredokaOne
+	text.TextScaled = true
+	text.TextColor3 = Color3.fromRGB(160, 220, 255)
+	text.Text = label
+	text.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Parent = text
+	marker(ctx, Tags.Portal, CFrame.new(position + Vector3.new(0, 4, 0)), Vector3.new(12, 6, 12), { To = to })
+end
 
-	-- Wall (inner edge at R) and stands behind it
-	ringSegments(arena, R + 2, 3, 10, 0, if STUDS then COLORS.Wall else STONE, Enum.Material.Cobblestone, "Wall")
-	for step = 1, 3 do
-		ringSegments(
+-- The arena: its own square block floating high above the island.
+local function buildArena(ctx: Context)
+	local arena = folder(ctx.Map, "Arena")
+	local Y, H, F = ARENA_Y, ARENA_HALF, FIGHT_HALF
+	local dirt = COLORS.DirtDark
+
+	-- The block: studded dirt floor, a thick body and rock steps underneath
+	block(arena, "Floor", Vector3.new(H * 2, 2, H * 2), CFrame.new(0, Y - 1, 0), COLORS.ArenaFloor)
+	block(arena, "Body", Vector3.new(H * 2, 14, H * 2), CFrame.new(0, Y - 9, 0), dirt)
+	for i, k in { 0.8, 0.5, 0.22 } do
+		block(arena, "Rock", Vector3.new(H * 2 * k, 10, H * 2 * k), CFrame.new(0, Y - 11 - i * 10, 0), dirt)
+	end
+	-- Center emblem + white lines around the fighting square
+	local deco = { CanCollide = false, CanQuery = false }
+	block(arena, "Emblem", Vector3.new(36, 0.3, 36), CFrame.new(0, Y + 0.15, 0), COLORS.EmblemRing, deco)
+	block(arena, "Emblem", Vector3.new(28, 0.4, 28), CFrame.new(0, Y + 0.2, 0), COLORS.Emblem, deco)
+	for _, line in
+		{
+			{ F * 2 + 2, 1, 0, -F - 0.5 },
+			{ F * 2 + 2, 1, 0, F + 0.5 },
+			{ 1, F * 2, -F - 0.5, 0 },
+			{ 1, F * 2, F + 0.5, 0 },
+		}
+	do
+		block(
 			arena,
-			R + 3.5 + step * 7,
-			7,
-			3 * step + 7,
-			0,
-			if STUDS then COLORS.Stands[step] elseif step % 2 == 0 then STONE_DARK else STONE,
-			Enum.Material.Slate,
-			"Stand"
+			"Line",
+			Vector3.new(line[1], 0.3, line[2]),
+			CFrame.new(line[3], Y + 0.15, line[4]),
+			Color3.new(1, 1, 1),
+			deco
 		)
 	end
-
-	-- Gate arches + torches
-	for _, angle in GATE_ANGLES do
-		local dir = polar(angle, 1)
-		local gatePos = polar(angle, R + 12)
-		Props.GateArch(
-			arena,
-			CFrame.lookAt(gatePos, gatePos + dir),
-			GATE_WIDTH,
-			if STUDS then COLORS.Stands[2] else STONE_DARK
-		)
-		for _, side in { -1, 1 } do
-			local side3 = dir:Cross(Vector3.yAxis) * side * (GATE_WIDTH / 2 + 5)
-			Props.Torch(arena, polar(angle, R + 1) + side3)
+	-- Low wall + stepped team-color stands on all four sides
+	for side = 0, 3 do
+		local rot = CFrame.Angles(0, side * math.pi / 2, 0)
+		block(arena, "Wall", Vector3.new(F * 2 + 8, 4, 2), rot * CFrame.new(0, Y + 2, -(F + 4)), COLORS.Wall)
+		for step = 0, 2 do
+			local height = 3 + step * 3
+			block(
+				arena,
+				"Stand",
+				Vector3.new(F * 2 + 8 + step * 8, height, 5),
+				rot * CFrame.new(0, Y + height / 2, -(F + 7.5 + step * 5)),
+				COLORS.Stands[(step + side) % 3 + 1]
+			)
 		end
 	end
-
+	-- Corner towers with lamps
+	for _, x in { -1, 1 } do
+		for _, z in { -1, 1 } do
+			local c = Vector3.new(x * (H - 5), Y, z * (H - 5))
+			block(arena, "Tower", Vector3.new(8, 26, 8), CFrame.new(c + Vector3.new(0, 13, 0)), COLORS.Wall)
+			block(arena, "TowerTop", Vector3.new(10, 2, 10), CFrame.new(c + Vector3.new(0, 27, 0)), COLORS.Stands[2])
+			local lamp = Props.Part(arena, {
+				Name = "Lamp",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.one * 4,
+				CFrame = CFrame.new(c + Vector3.new(0, 30, 0)),
+				Color = Color3.fromRGB(255, 235, 180),
+				Material = Enum.Material.Neon,
+			})
+			local light = Instance.new("PointLight")
+			light.Range = 40
+			light.Brightness = 2
+			light.Parent = lamp
+		end
+	end
+	-- Big sign
+	local sign =
+		block(arena, "Sign", Vector3.new(64, 14, 1.5), CFrame.new(0, Y + 34, -(H - 3)), Color3.fromRGB(35, 38, 55))
+	local surface = Instance.new("SurfaceGui")
+	surface.Face = Enum.NormalId.Back -- faces the fighting square
+	surface.CanvasSize = Vector2.new(640, 140)
+	surface.LightInfluence = 0
+	surface.Parent = sign
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.fromScale(1, 1)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.FredokaOne
+	title.TextScaled = true
+	title.TextColor3 = Color3.fromRGB(255, 210, 60)
+	title.Text = "⚔️ TITAN ARENA"
+	title.Parent = surface
 	if STUDS then
 		StudGround.Style(arena)
 	end
 
+	-- Portals: plaza -> arena stands, arena -> back to the island
+	portal(ctx, arena, Vector3.new(0, if STUDS then 0.4 else 0, 0), "Arena", "⚔️ ARENA · step in")
+	portal(ctx, arena, Vector3.new(0, Y, H - 12), "Island", "🏝️ Back to the island")
+
 	-- Markers
-	marker(ctx, Tags.Arena, CFrame.new(0, 1, 0), Vector3.new(4, 1, 4), { Radius = R - 4 })
+	marker(ctx, Tags.Arena, CFrame.new(0, Y + 1, 0), Vector3.new(4, 1, 4), { Radius = F - 4 })
 	for i = 1, 12 do
-		local p = polar(i * 30, R * 0.7, 3)
-		marker(ctx, Tags.ArenaSpawn, CFrame.lookAt(p, Vector3.new(0, 3, 0)), Vector3.new(4, 1, 4), { Index = i })
+		local p = polar(i * 30, F * 0.6, Y + 3)
+		marker(ctx, Tags.ArenaSpawn, CFrame.lookAt(p, Vector3.new(0, Y + 3, 0)), Vector3.new(4, 1, 4), { Index = i })
 	end
-	for _, angle in { 45, 135, 225, 315 } do
-		local p = polar(angle, R + 3.5 + 21, 3 * 3 + 7 + 3)
+	for side = 0, 3 do
+		local rot = CFrame.Angles(0, side * math.pi / 2, 0)
+		local p = (rot * CFrame.new(0, Y + 12, -(F + 17.5))).Position
 		marker(ctx, Tags.Stands, CFrame.lookAt(p, Vector3.new(0, p.Y, 0)), Vector3.new(4, 1, 4))
 	end
 
-	-- Leaderboards facing the fields, next to three of the gates (past the moat)
+	-- Leaderboards around the plaza, facing out
 	for i, board in { "Trophies", "Biggest", "Rebirths" } do
-		local angle = GATE_ANGLES[i] + (if STUDS then 12 else 18)
-		local p = polar(angle, if STUDS then MOAT_OUTER + 8 else R + 36)
+		local angle = 45 + (i - 1) * 90
+		local p = polar(angle, PLAZA - 9)
 		local facing = polar(angle, 1)
 		for _, x in { -9, 9 } do
 			Props.Column(
-				arena,
+				ctx.Props,
 				CFrame.lookAt(p, p + facing) * CFrame.new(x, 0, 0).Position,
 				16,
 				1.2,
@@ -12174,6 +12237,9 @@ end
 
 function MapService:IsInArena(position: Vector3, margin: number?): boolean
 	local offset = position - self.Arena.Center
+	if math.abs(offset.Y) > 60 then
+		return false -- the arena floats high above the island
+	end
 	local r = self.Arena.Radius + (margin or 0)
 	return offset.X * offset.X + offset.Z * offset.Z <= r * r
 end
@@ -12211,27 +12277,102 @@ return MapService
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="93">
+            <Properties>
+              <string name="Name">PortalService</string>
+              <string name="Source"><![CDATA[--[[
+	PortalService: portal pads that teleport players (tag "Portal").
+
+	  To = "Arena"  -> up to the floating arena's stands (to watch / get ready)
+	  To = "Island" -> back to your own base
+
+	Fighters in a match are not teleported (BattleService keeps them inside).
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Tags = require(Shared.Game.Tags)
+local Net = require(Shared.Net)
+
+local PortalService = {
+	Priority = 50,
+}
+
+local Map, Base, Battle, Fx
+
+local COOLDOWN = 2
+
+function PortalService:Init(registry)
+	Map = registry.MapService
+	Base = registry.BaseService
+	Battle = registry.BattleService
+	Fx = registry.FxService
+end
+
+function PortalService:Start()
+	for _, pad in CollectionService:GetTagged(Tags.Portal) do
+		if pad:IsA("BasePart") then
+			pad.CanTouch = true
+			pad.Touched:Connect(function(hit)
+				local character = hit.Parent
+				local player = character and Players:GetPlayerFromCharacter(character)
+				if player then
+					self:Use(player, pad:GetAttribute("To"))
+				end
+			end)
+		end
+	end
+end
+
+function PortalService:Use(player: Player, to: string?)
+	if Battle:IsFighting(player) or not Net.Throttle(player, "Portal", COOLDOWN) then
+		return
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not character or not root then
+		return
+	end
+	local from = root.Position
+	if to == "Arena" and #Map.Stands > 0 then
+		character:PivotTo(Map.Stands[math.random(1, #Map.Stands)] + Vector3.new(0, 3, 0))
+		Net.Notify(player, "⚔️ Welcome to the Titan Arena! Challenge someone or open ⚔️ Battle.")
+	elseif to == "Island" then
+		Base:TeleportHome(player)
+	else
+		return
+	end
+	Fx:PlayAll("Spawn", { Position = from, Color = Color3.fromRGB(120, 200, 255) })
+end
+
+return PortalService
+]]></string>
+            </Properties>
+          </Item>
         </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="93">
+  <Item class="StarterPlayer" referent="94">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="94">
+    <Item class="StarterPlayerScripts" referent="95">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="95">
+      <Item class="Folder" referent="96">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="96">
+        <Item class="Folder" referent="97">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="97">
+          <Item class="ModuleScript" referent="98">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -12344,7 +12485,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="98">
+          <Item class="ModuleScript" referent="99">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -12447,7 +12588,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="99">
+          <Item class="ModuleScript" referent="100">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -12498,7 +12639,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="100">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -12552,7 +12693,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -12638,7 +12779,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="103">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -12701,7 +12842,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="103">
+          <Item class="ModuleScript" referent="104">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -12728,7 +12869,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="104">
+          <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -12796,6 +12937,12 @@ local function targetPosition(): Vector3?
 	elseif step.Target == "Wild" then
 		return nearest(Tags.WildTitan)
 	elseif step.Target == "Arena" then
+		-- The arena floats above the island: point at the portal that goes up.
+		for _, pad in CollectionService:GetTagged(Tags.Portal) do
+			if pad:IsA("BasePart") and pad:GetAttribute("To") == "Arena" then
+				return pad.Position
+			end
+		end
 		local arena = CollectionService:GetTagged(Tags.Arena)[1]
 		return if arena and arena:IsA("BasePart") then arena.Position else Vector3.new(0, 2, 0)
 	end
@@ -12893,7 +13040,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="105">
+          <Item class="ModuleScript" referent="106">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -13011,7 +13158,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="106">
+          <Item class="ModuleScript" referent="107">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -13081,7 +13228,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="107">
+        <Item class="LocalScript" referent="108">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -13098,11 +13245,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="108">
+        <Item class="Folder" referent="109">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="109">
+          <Item class="ModuleScript" referent="110">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -13137,11 +13284,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="110">
+        <Item class="Folder" referent="111">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="111">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -13360,7 +13507,7 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="112">
+          <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
@@ -13513,7 +13660,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="113">
+          <Item class="ModuleScript" referent="114">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -13554,131 +13701,188 @@ local EVENT_NAMES = {
 	TitanClash = "⚔️ Titan Clash",
 }
 
--- icon, label, page (or function), color
+-- icon, label, page, color, side. "Left" = wide buttons, "Right" = square icon buttons
+-- (the layout big simulator games use: Shop/Index on the left, icons on the right).
 local MENU = {
-	{ "🥚", "Eggs", "Eggs", Color3.fromRGB(240, 190, 60) },
-	{ "🍖", "Food", "Food", Color3.fromRGB(220, 90, 80) },
-	{ "🐾", "Titans", "Titans", Color3.fromRGB(90, 170, 110) },
-	{ "⚔️", "Battle", "Battle", Color3.fromRGB(200, 60, 70) },
-	{ "📜", "Quests", "Quests", Color3.fromRGB(200, 150, 80) },
-	{ "📅", "Daily", "Daily", Color3.fromRGB(80, 160, 230) },
-	{ "📖", "Index", "Index", Color3.fromRGB(150, 110, 220) },
-	{ "💎", "Store", "Store", Color3.fromRGB(60, 200, 200) },
-	{ "🌟", "Rebirth", "Rebirth", Color3.fromRGB(170, 110, 255) },
-	{ "⚙️", "Settings", "Settings", Color3.fromRGB(120, 120, 140) },
-	{ "🛠️", "Admin", "Admin", Color3.fromRGB(70, 80, 120) },
+	{ "🛒", "Shop", "Store", Color3.fromRGB(80, 210, 70), "Left" },
+	{ "📖", "Index", "Index", Color3.fromRGB(50, 190, 240), "Left" },
+	{ "📜", "Quests", "Quests", Color3.fromRGB(255, 170, 40), "Left" },
+	{ "📅", "Daily", "Daily", Color3.fromRGB(190, 110, 255), "Left" },
+	{ "🥚", "Eggs", "Eggs", Color3.fromRGB(235, 60, 60), "Right" },
+	{ "🐾", "Titans", "Titans", Color3.fromRGB(255, 140, 40), "Right" },
+	{ "🍖", "Food", "Food", Color3.fromRGB(110, 200, 70), "Right" },
+	{ "⚔️", "Battle", "Battle", Color3.fromRGB(200, 50, 70), "Right" },
+	{ "🌟", "Rebirth", "Rebirth", Color3.fromRGB(170, 110, 255), "Right" },
+	{ "⚙️", "Settings", "Settings", Color3.fromRGB(120, 120, 140), "Right" },
+	{ "🛠️", "Admin", "Admin", Color3.fromRGB(70, 80, 120), "Right" },
 }
 
+-- Money bottom-left (big green outlined text, like the reference), event
+-- timer and status lines top-center.
 local function buildTop(gui: ScreenGui)
-	local top = Theme.New("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 8),
-		Size = UDim2.fromOffset(320, 78),
-		BackgroundColor3 = Theme.Background,
-		BackgroundTransparency = 0.15,
+	local money = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 12, 1, -12),
+		Size = UDim2.fromOffset(300, 110),
+		BackgroundTransparency = 1,
 		Parent = gui,
-	}, { Theme.Corner(16), Theme.Stroke(Theme.Gold, 3) })
-	Theme.AutoScale(top)
-	refs.Cash = Theme.Label({
-		Size = UDim2.new(1, -16, 0.6, 0),
-		Position = UDim2.fromOffset(8, 4),
-		Text = "💰 $0",
-		TextColor3 = Theme.Gold,
-		Parent = top,
 	})
-	refs.Income = Theme.Label({
-		Size = UDim2.new(0.5, -8, 0.32, 0),
-		Position = UDim2.new(0, 8, 0.62, 0),
-		Text = "+$0/s",
-		TextColor3 = Theme.Green,
-		Parent = top,
-	})
-	refs.Trophies = Theme.Label({
-		Size = UDim2.new(0.5, -8, 0.32, 0),
-		Position = UDim2.new(0.5, 0, 0.62, 0),
+	Theme.AutoScale(money)
+	refs.Trophies = Theme.BigLabel({
+		Size = UDim2.new(1, 0, 0, 30),
+		Position = UDim2.fromOffset(0, 0),
 		Text = "🏆 0",
-		TextColor3 = Color3.fromRGB(255, 200, 120),
-		Parent = top,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Color3.fromRGB(255, 205, 90),
+		Parent = money,
 	})
+	refs.Cash = Theme.BigLabel({
+		Size = UDim2.new(1, 0, 0, 50),
+		Position = UDim2.fromOffset(0, 30),
+		Text = "💵 $0",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Color3.fromRGB(120, 255, 90),
+		Parent = money,
+	})
+	refs.Income = Theme.BigLabel({
+		Size = UDim2.new(1, 0, 0, 26),
+		Position = UDim2.fromOffset(4, 82),
+		Text = "+$0/s",
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Color3.fromRGB(200, 255, 190),
+		Parent = money,
+	})
+
 	local lines = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 1, 6),
-		Size = UDim2.fromOffset(420, 90),
+		Position = UDim2.new(0.5, 0, 0, 6),
+		Size = UDim2.fromOffset(460, 100),
 		BackgroundTransparency = 1,
-		Parent = top,
+		Parent = gui,
 	}, {
 		Theme.New(
 			"UIListLayout",
 			{ HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }
 		),
 	})
-	local function line(name: string, order: number, color: Color3)
-		refs[name] = Theme.Label({
-			Size = UDim2.fromOffset(420, 24),
+	Theme.AutoScale(lines)
+	local function line(name: string, order: number, color: Color3, height: number)
+		refs[name] = Theme.BigLabel({
+			Size = UDim2.fromOffset(460, height),
 			Text = "",
 			TextColor3 = color,
 			LayoutOrder = order,
 			Parent = lines,
 		})
 	end
-	line("King", 1, Theme.Gold)
-	line("Boosts", 2, Theme.Green)
-	line("Event", 3, Color3.fromRGB(255, 140, 120))
+	line("Event", 1, Color3.new(1, 1, 1), 30)
+	line("King", 2, Theme.Gold, 24)
+	line("Boosts", 3, Theme.Green, 24)
 end
 
-local function buildMenu(gui: ScreenGui)
-	local menu = Theme.New("Frame", {
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 10, 0.5, 0),
-		Size = UDim2.fromOffset(150, 440),
-		BackgroundTransparency = 1,
-		Parent = gui,
-	}, {
-		Theme.New("UIGridLayout", {
-			CellSize = UDim2.fromOffset(70, 70),
-			CellPadding = UDim2.fromOffset(8, 8),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}),
+local function menuButton(parent: Instance, info, order: number, wide: boolean): TextButton
+	local button = Theme.Button({
+		Text = "",
+		BackgroundColor3 = info[4],
+		LayoutOrder = order,
+		Size = if wide then UDim2.fromOffset(150, 48) else UDim2.fromOffset(64, 64),
+		Parent = parent,
 	})
-	Theme.AutoScale(menu)
-	for i, info in MENU do
-		local button = Theme.Button({ Text = "", BackgroundColor3 = info[4], LayoutOrder = i, Parent = menu })
+	if wide then
+		Theme.Label({ Size = UDim2.new(0, 38, 1, 0), Text = info[1], Parent = button })
+		Theme.BigLabel({
+			Position = UDim2.fromOffset(38, 0),
+			Size = UDim2.new(1, -40, 1, 0),
+			Text = info[2],
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = button,
+		})
+	else
 		Theme.Label({ Size = UDim2.fromScale(1, 0.62), Text = info[1], Parent = button })
-		Theme.Label({
+		Theme.BigLabel({
 			Position = UDim2.fromScale(0, 0.6),
 			Size = UDim2.fromScale(1, 0.38),
 			Text = info[2],
 			Parent = button,
 		})
-		Theme.New("Frame", {
-			Name = "Badge",
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, 4, 0, -4),
-			Size = UDim2.fromOffset(18, 18),
-			BackgroundColor3 = Color3.fromRGB(255, 60, 60),
-			Visible = false,
-			Parent = button,
-		}, { Theme.Corner(9), Theme.Stroke(Color3.new(1, 1, 1), 2) })
-		button.Activated:Connect(function()
-			window.Toggle(info[3])
-		end)
-		menuButtons[info[3]] = button
-		if info[3] == "Admin" then
-			button.Visible = false
-		end
+	end
+	Theme.New("Frame", {
+		Name = "Badge",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 6, 0, -6),
+		Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = Color3.fromRGB(255, 50, 50),
+		Visible = false,
+		Parent = button,
+	}, {
+		Theme.Corner(10),
+		Theme.Stroke(Color3.new(1, 1, 1), 2),
+		Theme.Label({ Size = UDim2.fromScale(1, 1), Text = "!" }),
+	})
+	button.Activated:Connect(function()
+		window.Toggle(info[3])
+	end)
+	menuButtons[info[3]] = button
+	if info[3] == "Admin" then
+		button.Visible = false
+	end
+	return button
+end
+
+local function buildMenu(gui: ScreenGui)
+	local function column(anchorX: number, x: UDim, width: number, fill: Enum.FillDirection?)
+		local frame = Theme.New("Frame", {
+			AnchorPoint = Vector2.new(anchorX, 0.5),
+			Position = UDim2.new(x.Scale, x.Offset, 0.45, 0),
+			Size = UDim2.fromOffset(width, 470),
+			BackgroundTransparency = 1,
+			Parent = gui,
+		}, {
+			Theme.New("UIListLayout", {
+				FillDirection = fill or Enum.FillDirection.Vertical,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+				HorizontalAlignment = if anchorX == 0
+					then Enum.HorizontalAlignment.Left
+					else Enum.HorizontalAlignment.Right,
+				Padding = UDim.new(0, 10),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+		})
+		Theme.AutoScale(frame)
+		return frame
+	end
+	local left = column(0, UDim.new(0, 12), 160)
+	-- Right side: a 2-wide grid of square icon buttons
+	local right = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.4, 0),
+		Size = UDim2.fromOffset(138, 290),
+		BackgroundTransparency = 1,
+		Parent = gui,
+	}, {
+		Theme.New("UIGridLayout", {
+			CellSize = UDim2.fromOffset(64, 64),
+			CellPadding = UDim2.fromOffset(10, 10),
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	Theme.AutoScale(right)
+	for i, info in MENU do
+		menuButton(if info[5] == "Left" then left else right, info, i, info[5] == "Left")
 	end
 
 	local corner = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -10, 1, -140),
-		Size = UDim2.fromOffset(120, 130),
+		Position = UDim2.new(1, -12, 1, -140),
+		Size = UDim2.fromOffset(130, 124),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	}, { Theme.New("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }) })
 	Theme.AutoScale(corner)
 	refs.Corner = corner
 	local home = Theme.Button({
-		Size = UDim2.fromOffset(120, 56),
+		Size = UDim2.fromOffset(130, 54),
 		Text = "🏠 Home",
 		BackgroundColor3 = Color3.fromRGB(110, 110, 130),
 		LayoutOrder = 1,
@@ -13688,7 +13892,7 @@ local function buildMenu(gui: ScreenGui)
 		Net.Send("TeleportHome")
 	end)
 	refs.LockButton = Theme.Button({
-		Size = UDim2.fromOffset(120, 56),
+		Size = UDim2.fromOffset(130, 54),
 		Text = "🔒 Lock",
 		BackgroundColor3 = Theme.Blue,
 		LayoutOrder = 2,
@@ -13713,11 +13917,9 @@ local function buildFoodBar(gui: ScreenGui)
 	local bar = Theme.New("Frame", {
 		Position = UDim2.fromOffset(0, 32),
 		Size = UDim2.new(1, 0, 0, 80),
-		BackgroundColor3 = Theme.Background,
-		BackgroundTransparency = 0.2,
+		BackgroundTransparency = 1,
 		Parent = bottom,
 	}, {
-		Theme.Corner(14),
 		Theme.New("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
 			HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -13728,12 +13930,21 @@ local function buildFoodBar(gui: ScreenGui)
 	})
 	for i, id in Foods.Order do
 		local def = Foods[id]
+		-- Hotbar slot (like the Roblox backpack bar): dark glass square with a number
 		local button = Theme.Button({
-			Size = UDim2.fromOffset(80, 66),
+			Size = UDim2.fromOffset(74, 74),
 			Text = "",
-			BackgroundColor3 = Theme.Panel,
+			BackgroundColor3 = Color3.fromRGB(40, 44, 40),
+			BackgroundTransparency = 0.25,
 			LayoutOrder = i,
 			Parent = bar,
+		})
+		Theme.Label({
+			Position = UDim2.fromOffset(3, 1),
+			Size = UDim2.fromOffset(16, 16),
+			Text = tostring(i),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = button,
 		})
 		Theme.New("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
@@ -13845,7 +14056,7 @@ function Hud.RefreshFoodBar()
 		local count = state.Food[id] or 0
 		local countLabel = button:FindFirstChild("Count") :: TextLabel
 		countLabel.Text = "x" .. count
-		button.BackgroundColor3 = if count > 0 then Theme.Panel else Color3.fromRGB(35, 35, 45)
+		button.BackgroundTransparency = if count > 0 then 0.25 else 0.55
 		local stroke = button:FindFirstChild("Border") :: UIStroke
 		local selected = state.SelectedFood == id
 		stroke.Color = if selected then Theme.Gold else Color3.new(0, 0, 0)
@@ -13859,7 +14070,8 @@ function Hud.RefreshTimers()
 	if event then
 		local endsAt = Workspace:GetAttribute("EventEndsAt")
 		local name = EVENT_NAMES[event] or event
-		refs.Event.Text = if endsAt and endsAt > now then name .. " • " .. Format.Time(endsAt - now) else name
+		refs.Event.Text = string.upper(name)
+			.. (if endsAt and endsAt > now then "  " .. Format.Time(endsAt - now) else "")
 	else
 		refs.Event.Text = ""
 	end
@@ -13888,7 +14100,7 @@ end
 
 function Hud.Update(snapshot)
 	state = snapshot
-	refs.Cash.Text = "💰 " .. Format.Money(snapshot.Cash)
+	refs.Cash.Text = "💵 " .. Format.Money(snapshot.Cash)
 	refs.Income.Text = "+" .. Format.Money(snapshot.Income or 0) .. "/s"
 	refs.Trophies.Text = "🏆 " .. Format.Number(snapshot.Trophies)
 	refs.King.Text = if snapshot.IsKing
@@ -13916,11 +14128,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="114">
+          <Item class="Folder" referent="115">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="115">
+            <Item class="ModuleScript" referent="116">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -13998,7 +14210,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="116">
+            <Item class="ModuleScript" referent="117">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -14225,7 +14437,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="117">
+            <Item class="ModuleScript" referent="118">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14312,7 +14524,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="118">
+            <Item class="ModuleScript" referent="119">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14405,7 +14617,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="119">
+            <Item class="ModuleScript" referent="120">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14492,7 +14704,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="120">
+            <Item class="ModuleScript" referent="121">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14621,7 +14833,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="121">
+            <Item class="ModuleScript" referent="122">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14699,7 +14911,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="122">
+            <Item class="ModuleScript" referent="123">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14765,7 +14977,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="123">
+            <Item class="ModuleScript" referent="124">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -14876,7 +15088,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="124">
+            <Item class="ModuleScript" referent="125">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -15000,7 +15212,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="125">
+            <Item class="ModuleScript" referent="126">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -15158,7 +15370,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="126">
+          <Item class="ModuleScript" referent="127">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -15392,7 +15604,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="127">
+          <Item class="ModuleScript" referent="128">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -15471,6 +15683,33 @@ function Theme.Label(props: { [string]: any }): TextLabel
 	return label
 end
 
+-- Glossy look (like big Roblox simulator games): lighter at the top,
+-- darker at the bottom. Works on any colored Frame or button.
+function Theme.Gloss(gui: GuiObject)
+	Theme.New("UIGradient", {
+		Name = "Gloss",
+		Rotation = 90,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(235, 235, 235)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 170, 170)),
+		}),
+		Parent = gui,
+	})
+end
+
+-- Big bold number text with a thick outline (money, counters).
+function Theme.BigLabel(props: { [string]: any }): TextLabel
+	local label = Theme.Label(props)
+	label.Font = Enum.Font.FredokaOne
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		stroke.Thickness = 3
+		stroke.LineJoinMode = Enum.LineJoinMode.Round
+	end
+	return label
+end
+
 -- A chunky button with hover and press animations.
 function Theme.Button(props: { [string]: any }): TextButton
 	local color = props.BackgroundColor3 or Theme.Blue
@@ -15484,7 +15723,7 @@ function Theme.Button(props: { [string]: any }): TextButton
 		Theme.Corner(10),
 		Theme.New("UIStroke", {
 			Name = "Border",
-			Thickness = 2,
+			Thickness = 3,
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		}),
 		Theme.New("UIPadding", {
@@ -15499,7 +15738,8 @@ function Theme.Button(props: { [string]: any }): TextButton
 			(button :: any)[key] = value
 		end
 	end
-	Theme.TextStroke(1.5).Parent = button
+	Theme.TextStroke(2.5).Parent = button
+	Theme.Gloss(button)
 	local scale = Theme.New("UIScale", { Parent = button })
 	local info = TweenInfo.new(0.12)
 	button.MouseEnter:Connect(function()
@@ -15579,7 +15819,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="128">
+          <Item class="ModuleScript" referent="129">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -15715,7 +15955,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="129">
+          <Item class="ModuleScript" referent="130">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -15846,7 +16086,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="130">
+  <Item class="Workspace" referent="131">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

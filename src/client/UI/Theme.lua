@@ -74,6 +74,33 @@ function Theme.Label(props: { [string]: any }): TextLabel
 	return label
 end
 
+-- Glossy look (like big Roblox simulator games): lighter at the top,
+-- darker at the bottom. Works on any colored Frame or button.
+function Theme.Gloss(gui: GuiObject)
+	Theme.New("UIGradient", {
+		Name = "Gloss",
+		Rotation = 90,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(235, 235, 235)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 170, 170)),
+		}),
+		Parent = gui,
+	})
+end
+
+-- Big bold number text with a thick outline (money, counters).
+function Theme.BigLabel(props: { [string]: any }): TextLabel
+	local label = Theme.Label(props)
+	label.Font = Enum.Font.FredokaOne
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		stroke.Thickness = 3
+		stroke.LineJoinMode = Enum.LineJoinMode.Round
+	end
+	return label
+end
+
 -- A chunky button with hover and press animations.
 function Theme.Button(props: { [string]: any }): TextButton
 	local color = props.BackgroundColor3 or Theme.Blue
@@ -87,7 +114,7 @@ function Theme.Button(props: { [string]: any }): TextButton
 		Theme.Corner(10),
 		Theme.New("UIStroke", {
 			Name = "Border",
-			Thickness = 2,
+			Thickness = 3,
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		}),
 		Theme.New("UIPadding", {
@@ -102,7 +129,8 @@ function Theme.Button(props: { [string]: any }): TextButton
 			(button :: any)[key] = value
 		end
 	end
-	Theme.TextStroke(1.5).Parent = button
+	Theme.TextStroke(2.5).Parent = button
+	Theme.Gloss(button)
 	local scale = Theme.New("UIScale", { Parent = button })
 	local info = TweenInfo.new(0.12)
 	button.MouseEnter:Connect(function()

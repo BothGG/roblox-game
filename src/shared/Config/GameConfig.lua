@@ -46,16 +46,16 @@ local GameConfig = {
 	Map = {
 		Seed = 2026, -- change for a different random layout of props/spawns
 		IslandRadius = 330,
-		ArenaRadius = 95,
-		FieldInner = 143, -- food fields ring
+		PlazaRadius = 40, -- stone plaza in the middle with the arena portal
+		FieldInner = 62, -- food fields ring
 		FieldOuter = 197,
 		-- "Studs" = classic Roblox look (Plastic parts with studs, like a baseplate).
 		-- "Terrain" = smooth terrain grass.
 		Style = "Studs",
-		-- The arena stands on its own ground in the middle, with a water moat
-		-- and 4 bridges around it.
-		ArenaPlatform = 30, -- ground around the arena wall (studs past ArenaRadius)
-		MoatWidth = 10,
+		-- The arena is its own square block floating high above the island.
+		-- Step into the portal in the plaza to go up; fighters are teleported.
+		ArenaHeight = 300,
+		ArenaSize = 180, -- the whole block (the fighting square is 48 studs smaller)
 	},
 
 	Plots = {

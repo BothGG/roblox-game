@@ -43,7 +43,13 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
 |---|---|
 | **Base** (1 per player) | Your titans stand in pens. Food storage crate (can be robbed). Lock bubble. Name sign. |
 | **Food fields** | Food grows at spawn points and regrows. **Wild titans roam here.** Meteors land here during Meteor Feast. |
-| **Arena** | Duels and Titan Clash. Its own studded dirt ground in the middle, ringed by a water moat with 4 bridges. Team-color stands for spectators. Leaderboards at the bridges. |
+| **Plaza** (center) | Stone plaza with the glowing **arena portal** and the leaderboards. |
+| **Arena** | Duels and Titan Clash on **its own square block floating high above the island**. Step into the plaza portal to go up and watch; fighters are teleported in. Team-color stands on all 4 sides. |
+
+**Titans** are cute chibi shapes (round shiny bodies, big glossy eyes, rosy cheeks) until real
+models are added (`ServerStorage/CreatureModels`).
+**UI** follows the big simulator games: big green outlined money bottom-left, glossy square
+buttons on the sides, a numbered food hotbar at the bottom, event countdown top-center.
 
 **Look:** classic Roblox studs (Plastic, studs on top, inlets on the sides): bright green grass,
 brown dirt patches in the food fields, tan roads (`GameConfig.Map.Style = "Studs"`).
