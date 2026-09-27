@@ -14,6 +14,8 @@
 	  Speed  = 4     -> +4 walk speed while carrying stolen food
 	Extra looks (optional): Heads = 3, Horn = true, Tentacles = true
 	Diet = favorite foods: feeding these gives bonus XP (GameConfig.FavoriteFoodBonus).
+	Temper = "Passive" (runs away when hit) | "Aggressive" (chases and attacks players).
+	Pack = true: wild ones spawn in groups of 3-5 that move together.
 	Stats = battle stats at level 1: HP, Attack, Speed (1 = normal walk speed).
 	  They grow with level (see shared/Game/Battle.lua). The special move comes
 	  from Style: Biped = Ground Slam, Quad = Charge, Blob = Bounce, Winged = Fire Breath.
@@ -26,6 +28,8 @@ end
 local Creatures = {
 	Gloop = {
 		Name = "Gloop",
+		Temper = "Passive", -- flees when hit
+		Pack = true, -- spawns in groups of 3-5
 		Rarity = "Common",
 		BaseIncome = 3,
 		Style = "Blob",
@@ -38,6 +42,7 @@ local Creatures = {
 	},
 	Rex = {
 		Name = "Rex",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Common",
 		BaseIncome = 5,
 		Style = "Biped",
@@ -50,6 +55,8 @@ local Creatures = {
 	},
 	Shellback = {
 		Name = "Shellback",
+		Temper = "Passive", -- flees when hit
+		Pack = true, -- spawns in groups of 3-5
 		Rarity = "Common",
 		BaseIncome = 4,
 		Style = "Quad",
@@ -62,6 +69,7 @@ local Creatures = {
 	},
 	Rhinobug = {
 		Name = "Rhinobug",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Rare",
 		BaseIncome = 12,
 		Style = "Quad",
@@ -75,6 +83,7 @@ local Creatures = {
 	},
 	Kong = {
 		Name = "Kong",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Rare",
 		BaseIncome = 10,
 		Style = "Biped",
@@ -87,6 +96,7 @@ local Creatures = {
 	},
 	Kraken = {
 		Name = "Kraken",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Epic",
 		BaseIncome = 30,
 		Style = "Blob",
@@ -100,6 +110,7 @@ local Creatures = {
 	},
 	Drake = {
 		Name = "Drake",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Epic",
 		BaseIncome = 35,
 		Style = "Winged",
@@ -112,6 +123,7 @@ local Creatures = {
 	},
 	Phoenix = {
 		Name = "Phoenix",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Legendary",
 		BaseIncome = 90,
 		Style = "Winged",
@@ -124,6 +136,7 @@ local Creatures = {
 	},
 	Hydra = {
 		Name = "Hydra",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Mythic",
 		BaseIncome = 250,
 		Style = "Quad",
@@ -137,6 +150,7 @@ local Creatures = {
 	},
 	Voidmaw = {
 		Name = "Voidmaw",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Secret",
 		BaseIncome = 1000,
 		Style = "Biped",
@@ -150,6 +164,8 @@ local Creatures = {
 	},
 	Pincher = {
 		Name = "Pincher",
+		Temper = "Passive", -- flees when hit
+		Pack = true, -- spawns in groups of 3-5
 		Rarity = "Common",
 		BaseIncome = 4,
 		Style = "Quad",
@@ -163,6 +179,7 @@ local Creatures = {
 	},
 	Frostbite = {
 		Name = "Frostbite",
+		Temper = "Passive", -- flees when hit
 		Rarity = "Rare",
 		BaseIncome = 14,
 		Style = "Biped",
@@ -175,6 +192,7 @@ local Creatures = {
 	},
 	Tuskar = {
 		Name = "Tuskar",
+		Temper = "Passive", -- flees when hit
 		Rarity = "Epic",
 		BaseIncome = 40,
 		Style = "Quad",

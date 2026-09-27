@@ -69,18 +69,66 @@ local GameConfig = {
 		RespawnTime = { Common = 20, Rare = 35, Epic = 60, Legendary = 120, Mythic = 300, Secret = 600 },
 	},
 
-	-- Wild titans roaming the fields: find them and tame them with food.
-	-- Per-rarity odds / tame time / food cost are in Rarities.lua.
+	-- Wild titans (WildService + shared/Game/WildBrain.lua).
+	-- Per-rarity odds and knock-out torpor are in Rarities.lua;
+	-- Temper (Passive / Aggressive) and Pack are per titan in Creatures.lua.
 	Wild = {
-		MaxWild = 8, -- wild titans on the island at once
-		RespawnDelay = 12, -- seconds between spawns (randomized a bit)
-		Lifetime = { Min = 120, Max = 240 }, -- then it wanders off
-		WanderRadius = 28,
-		MoveSpeed = 7,
-		TameDistance = 14,
+		MaxWild = 20, -- wild titans on the server at once (packs count each titan)
+		RespawnDelay = 6, -- seconds between spawn checks
+		Lifetime = { Min = 300, Max = 600 },
+		WanderRadius = 45,
+		MoveSpeed = 8, -- walking
+		RunSpeed = 22, -- fleeing / chasing
+		PackSize = { 3, 5 },
+		AggroRange = 45, -- aggressive titans chase players this close
+		AttackRange = 9, -- + the titan's size
+		LeashRange = 120, -- give up the chase this far from home
+		FleeTime = 7, -- passive titans run this long after being hit
+		AttackCooldown = 1.6,
+		AttackDamage = 0.12, -- share of the titan's battle Attack dealt to players per hit
+		SpawnNear = { Min = 70, Max = 260 }, -- new wild titans appear this far from a player
+		DespawnDistance = 520, -- no player this close for DespawnAfter seconds -> despawn
+		DespawnAfter = 40,
 		MutationChance = 0.04,
-		FavoriteBonus = 0.2, -- + tame chance when fed a favorite food
 		EventLuck = 3, -- rare weight multiplier during the Wild Rush event
+		-- Size rolls for wild titans: { chance, min size, max size }
+		SizeRolls = { { 0.72, 1, 3 }, { 0.2, 3, 10 }, { 0.065, 10, 100 }, { 0.015, 100, 1000 } },
+		-- Old quick-tame (hold E + food), still used when KnockOut = false
+		KnockOut = true,
+		TameDistance = 14,
+		FavoriteBonus = 0.2,
+	},
+
+	-- Knock-out taming (TameService + shared/Game/Taming.lua), ARK style:
+	-- hit it until it sleeps, then feed it until the taming bar is full.
+	Tame = {
+		SleepTime = 60, -- seconds asleep at full torpor
+		TorporDrain = 0.04, -- share of max torpor lost per second while awake
+		FoodPerRarity = 3, -- food needed = Rarity.TameFood * this (x size bonus)
+		FavoritePoints = 2, -- a favorite food counts this much
+		DamageLoss = 0.05, -- effectiveness lost per hit while asleep
+		MinEffectiveness = 0.4,
+		MaxBonusLevels = 6, -- tamed at level 1 + effectiveness * this
+		FeedDistance = 16, -- + the titan's size
+	},
+
+	-- Riding your titans anywhere (RideService + shared/Game/Riding.lua)
+	Riding = {
+		RequireSaddle = false, -- saddles are crafted in Phase 3; until then every titan can be ridden
+		SprintMult = 1.6,
+		SprintDrain = 18, -- stamina per second
+		FlyDrain = 11,
+		Regen = 12,
+		MinToStart = 10, -- stamina needed to start sprinting / flying
+		HpRegen = 0.03, -- share of max HP per second while not in combat
+		KnockOffDamage = true, -- your titan at 0 HP throws you off
+	},
+
+	-- Titans that follow you around (FollowerService)
+	Followers = {
+		Max = 3,
+		TeleportDistance = 140, -- farther than this -> teleport next to you
+		GuardRange = 40,
 	},
 
 	Steal = {

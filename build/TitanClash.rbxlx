@@ -71,6 +71,8 @@ return {
 	  Speed  = 4     -> +4 walk speed while carrying stolen food
 	Extra looks (optional): Heads = 3, Horn = true, Tentacles = true
 	Diet = favorite foods: feeding these gives bonus XP (GameConfig.FavoriteFoodBonus).
+	Temper = "Passive" (runs away when hit) | "Aggressive" (chases and attacks players).
+	Pack = true: wild ones spawn in groups of 3-5 that move together.
 	Stats = battle stats at level 1: HP, Attack, Speed (1 = normal walk speed).
 	  They grow with level (see shared/Game/Battle.lua). The special move comes
 	  from Style: Biped = Ground Slam, Quad = Charge, Blob = Bounce, Winged = Fire Breath.
@@ -83,6 +85,8 @@ end
 local Creatures = {
 	Gloop = {
 		Name = "Gloop",
+		Temper = "Passive", -- flees when hit
+		Pack = true, -- spawns in groups of 3-5
 		Rarity = "Common",
 		BaseIncome = 3,
 		Style = "Blob",
@@ -95,6 +99,7 @@ local Creatures = {
 	},
 	Rex = {
 		Name = "Rex",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Common",
 		BaseIncome = 5,
 		Style = "Biped",
@@ -107,6 +112,8 @@ local Creatures = {
 	},
 	Shellback = {
 		Name = "Shellback",
+		Temper = "Passive", -- flees when hit
+		Pack = true, -- spawns in groups of 3-5
 		Rarity = "Common",
 		BaseIncome = 4,
 		Style = "Quad",
@@ -119,6 +126,7 @@ local Creatures = {
 	},
 	Rhinobug = {
 		Name = "Rhinobug",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Rare",
 		BaseIncome = 12,
 		Style = "Quad",
@@ -132,6 +140,7 @@ local Creatures = {
 	},
 	Kong = {
 		Name = "Kong",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Rare",
 		BaseIncome = 10,
 		Style = "Biped",
@@ -144,6 +153,7 @@ local Creatures = {
 	},
 	Kraken = {
 		Name = "Kraken",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Epic",
 		BaseIncome = 30,
 		Style = "Blob",
@@ -157,6 +167,7 @@ local Creatures = {
 	},
 	Drake = {
 		Name = "Drake",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Epic",
 		BaseIncome = 35,
 		Style = "Winged",
@@ -169,6 +180,7 @@ local Creatures = {
 	},
 	Phoenix = {
 		Name = "Phoenix",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Legendary",
 		BaseIncome = 90,
 		Style = "Winged",
@@ -181,6 +193,7 @@ local Creatures = {
 	},
 	Hydra = {
 		Name = "Hydra",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Mythic",
 		BaseIncome = 250,
 		Style = "Quad",
@@ -194,6 +207,7 @@ local Creatures = {
 	},
 	Voidmaw = {
 		Name = "Voidmaw",
+		Temper = "Aggressive", -- chases players who come close
 		Rarity = "Secret",
 		BaseIncome = 1000,
 		Style = "Biped",
@@ -207,6 +221,8 @@ local Creatures = {
 	},
 	Pincher = {
 		Name = "Pincher",
+		Temper = "Passive", -- flees when hit
+		Pack = true, -- spawns in groups of 3-5
 		Rarity = "Common",
 		BaseIncome = 4,
 		Style = "Quad",
@@ -220,6 +236,7 @@ local Creatures = {
 	},
 	Frostbite = {
 		Name = "Frostbite",
+		Temper = "Passive", -- flees when hit
 		Rarity = "Rare",
 		BaseIncome = 14,
 		Style = "Biped",
@@ -232,6 +249,7 @@ local Creatures = {
 	},
 	Tuskar = {
 		Name = "Tuskar",
+		Temper = "Passive", -- flees when hit
 		Rarity = "Epic",
 		BaseIncome = 40,
 		Style = "Quad",
@@ -516,18 +534,66 @@ local GameConfig = {
 		RespawnTime = { Common = 20, Rare = 35, Epic = 60, Legendary = 120, Mythic = 300, Secret = 600 },
 	},
 
-	-- Wild titans roaming the fields: find them and tame them with food.
-	-- Per-rarity odds / tame time / food cost are in Rarities.lua.
+	-- Wild titans (WildService + shared/Game/WildBrain.lua).
+	-- Per-rarity odds and knock-out torpor are in Rarities.lua;
+	-- Temper (Passive / Aggressive) and Pack are per titan in Creatures.lua.
 	Wild = {
-		MaxWild = 8, -- wild titans on the island at once
-		RespawnDelay = 12, -- seconds between spawns (randomized a bit)
-		Lifetime = { Min = 120, Max = 240 }, -- then it wanders off
-		WanderRadius = 28,
-		MoveSpeed = 7,
-		TameDistance = 14,
+		MaxWild = 20, -- wild titans on the server at once (packs count each titan)
+		RespawnDelay = 6, -- seconds between spawn checks
+		Lifetime = { Min = 300, Max = 600 },
+		WanderRadius = 45,
+		MoveSpeed = 8, -- walking
+		RunSpeed = 22, -- fleeing / chasing
+		PackSize = { 3, 5 },
+		AggroRange = 45, -- aggressive titans chase players this close
+		AttackRange = 9, -- + the titan's size
+		LeashRange = 120, -- give up the chase this far from home
+		FleeTime = 7, -- passive titans run this long after being hit
+		AttackCooldown = 1.6,
+		AttackDamage = 0.12, -- share of the titan's battle Attack dealt to players per hit
+		SpawnNear = { Min = 70, Max = 260 }, -- new wild titans appear this far from a player
+		DespawnDistance = 520, -- no player this close for DespawnAfter seconds -> despawn
+		DespawnAfter = 40,
 		MutationChance = 0.04,
-		FavoriteBonus = 0.2, -- + tame chance when fed a favorite food
 		EventLuck = 3, -- rare weight multiplier during the Wild Rush event
+		-- Size rolls for wild titans: { chance, min size, max size }
+		SizeRolls = { { 0.72, 1, 3 }, { 0.2, 3, 10 }, { 0.065, 10, 100 }, { 0.015, 100, 1000 } },
+		-- Old quick-tame (hold E + food), still used when KnockOut = false
+		KnockOut = true,
+		TameDistance = 14,
+		FavoriteBonus = 0.2,
+	},
+
+	-- Knock-out taming (TameService + shared/Game/Taming.lua), ARK style:
+	-- hit it until it sleeps, then feed it until the taming bar is full.
+	Tame = {
+		SleepTime = 60, -- seconds asleep at full torpor
+		TorporDrain = 0.04, -- share of max torpor lost per second while awake
+		FoodPerRarity = 3, -- food needed = Rarity.TameFood * this (x size bonus)
+		FavoritePoints = 2, -- a favorite food counts this much
+		DamageLoss = 0.05, -- effectiveness lost per hit while asleep
+		MinEffectiveness = 0.4,
+		MaxBonusLevels = 6, -- tamed at level 1 + effectiveness * this
+		FeedDistance = 16, -- + the titan's size
+	},
+
+	-- Riding your titans anywhere (RideService + shared/Game/Riding.lua)
+	Riding = {
+		RequireSaddle = false, -- saddles are crafted in Phase 3; until then every titan can be ridden
+		SprintMult = 1.6,
+		SprintDrain = 18, -- stamina per second
+		FlyDrain = 11,
+		Regen = 12,
+		MinToStart = 10, -- stamina needed to start sprinting / flying
+		HpRegen = 0.03, -- share of max HP per second while not in combat
+		KnockOffDamage = true, -- your titan at 0 HP throws you off
+	},
+
+	-- Titans that follow you around (FollowerService)
+	Followers = {
+		Max = 3,
+		TeleportDistance = 140, -- farther than this -> teleport next to you
+		GuardRange = 40,
 	},
 
 	Steal = {
@@ -815,7 +881,9 @@ return {
 	              titans of that rarity).
 	TameTime    = seconds to hold the Tame prompt.
 	TameFood    = food it eats to be tamed.
-	TameChance  = chance taming works (favorite food adds GameConfig.Wild.FavoriteBonus).
+	TameChance  = (old quick-tame) chance taming works.
+	Torpor      = knock-out points (club hits, tranq darts) to put a wild titan to
+	              sleep (bigger sizes need more; see shared/Game/Taming.lua).
 ]]
 
 export type Rarity = {
@@ -828,6 +896,7 @@ export type Rarity = {
 	TameTime: number,
 	TameFood: number,
 	TameChance: number,
+	Torpor: number,
 }
 
 local function rarity(
@@ -848,17 +917,18 @@ local function rarity(
 		TameTime = wild[2],
 		TameFood = wild[3],
 		TameChance = wild[4],
+		Torpor = wild[5],
 	}
 end
 
---                                                                  { WildWeight, TameTime, TameFood, TameChance }
+--                                                                  { WildWeight, TameTime, TameFood, TameChance, Torpor }
 local Rarities: { [string]: Rarity } = {
-	Common = rarity("Common", 1, Color3.fromRGB(200, 200, 200), false, false, { 60, 1, 1, 1 }),
-	Rare = rarity("Rare", 2, Color3.fromRGB(70, 150, 255), false, false, { 26, 2, 2, 0.85 }),
-	Epic = rarity("Epic", 3, Color3.fromRGB(175, 90, 255), true, false, { 10, 3, 4, 0.7 }),
-	Legendary = rarity("Legendary", 4, Color3.fromRGB(255, 175, 0), true, true, { 3, 4.5, 6, 0.55 }),
-	Mythic = rarity("Mythic", 5, Color3.fromRGB(255, 60, 95), true, true, { 0.8, 6, 10, 0.4 }),
-	Secret = rarity("Secret", 6, Color3.fromRGB(20, 255, 200), true, true, { 0.2, 8, 15, 0.3 }),
+	Common = rarity("Common", 1, Color3.fromRGB(200, 200, 200), false, false, { 60, 1, 1, 1, 60 }),
+	Rare = rarity("Rare", 2, Color3.fromRGB(70, 150, 255), false, false, { 26, 2, 2, 0.85, 110 }),
+	Epic = rarity("Epic", 3, Color3.fromRGB(175, 90, 255), true, false, { 10, 3, 4, 0.7, 200 }),
+	Legendary = rarity("Legendary", 4, Color3.fromRGB(255, 175, 0), true, true, { 3, 4.5, 6, 0.55, 350 }),
+	Mythic = rarity("Mythic", 5, Color3.fromRGB(255, 60, 95), true, true, { 0.8, 6, 10, 0.4, 600 }),
+	Secret = rarity("Secret", 6, Color3.fromRGB(20, 255, 200), true, true, { 0.2, 8, 15, 0.3, 1000 }),
 }
 
 return Rarities
@@ -1049,6 +1119,61 @@ return Store
         </Item>
         <Item class="ModuleScript" referent="17">
           <Properties>
+            <string name="Name">Tools</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Taming tools every player gets (ToolService). Crafting better ones comes
+	in Phase 3; these are the starters.
+
+	Damage = HP taken from a wild titan per hit
+	Torpor = knock-out points added per hit (fill the titan's torpor to put it to sleep)
+	Range  = studs (melee tools also need the target in front of you)
+	Cooldown = seconds between uses
+]]
+
+export type Tool = {
+	Id: string,
+	Name: string,
+	Kind: "Melee" | "Ranged",
+	Damage: number,
+	Torpor: number,
+	Range: number,
+	Cooldown: number,
+	Color: Color3,
+	Tip: string,
+}
+
+local Tools: { [string]: Tool } = {
+	Club = {
+		Id = "Club",
+		Name = "Wooden Club",
+		Kind = "Melee",
+		Damage = 6,
+		Torpor = 14,
+		Range = 12,
+		Cooldown = 0.6,
+		Color = Color3.fromRGB(140, 95, 55),
+		Tip = "Bonk wild titans to knock them out",
+	},
+	Tranq = {
+		Id = "Tranq",
+		Name = "Tranq Blowgun",
+		Kind = "Ranged",
+		Damage = 1,
+		Torpor = 30,
+		Range = 120,
+		Cooldown = 1.4,
+		Color = Color3.fromRGB(90, 170, 90),
+		Tip = "Sleepy darts from far away",
+	},
+}
+
+return Tools
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
             <string name="Name">Tutorial</string>
             <string name="Source"><![CDATA[--[[
 	Tutorial steps, in order. Each step completes when its Event happens
@@ -1087,7 +1212,7 @@ return {
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">Upgrades</string>
             <string name="Source"><![CDATA[--!strict
@@ -1157,7 +1282,7 @@ return Upgrades
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">Fx</string>
           <string name="Source"><![CDATA[--[[
@@ -1221,7 +1346,7 @@ end
 return Fx
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">Auras</string>
             <string name="Source"><![CDATA[--[[
@@ -1487,7 +1612,7 @@ return Auras
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">Presets</string>
             <string name="Source"><![CDATA[--[[
@@ -2081,7 +2206,7 @@ return Presets
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">Primitives</string>
             <string name="Source"><![CDATA[--[[
@@ -2834,7 +2959,7 @@ return Primitives
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">RarityTag</string>
             <string name="Source"><![CDATA[--[[
@@ -2892,7 +3017,7 @@ return RarityTag
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">Textures</string>
             <string name="Source"><![CDATA[--[[
@@ -2921,11 +3046,11 @@ return {
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="25">
+      <Item class="Folder" referent="26">
         <Properties>
           <string name="Name">Game</string>
         </Properties>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">Battle</string>
             <string name="Source"><![CDATA[--!strict
@@ -3124,7 +3249,7 @@ return Battle
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">ConfigValidator</string>
             <string name="Source"><![CDATA[--[[
@@ -3362,7 +3487,7 @@ return ConfigValidator
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">CreatureMath</string>
             <string name="Source"><![CDATA[--[[
@@ -3567,7 +3692,7 @@ return CreatureMath
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">Progress</string>
             <string name="Source"><![CDATA[--[[
@@ -3861,7 +3986,88 @@ return Progress
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="31">
+          <Properties>
+            <string name="Name">Riding</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Riding: movement stats and stamina for riding your titans (pure, tested).
+
+	Styles move differently:
+	  Biped / Quad  runners: sprint with stamina
+	  Winged        flyers: hold jump to fly (stamina)
+	  Blob          bouncers: huge jumps
+	Swimming uses Roblox's normal swimming; Quads and Blobs swim faster.
+]]
+
+local Config = script.Parent.Parent.Config
+local Creatures = require(Config.Creatures)
+local GameConfig = require(Config.GameConfig)
+local Battle = require(script.Parent.Battle)
+
+local RIDE = GameConfig.Riding
+
+local Riding = {}
+
+export type Mode = "Walk" | "Sprint" | "Fly"
+export type RideStats = {
+	WalkSpeed: number,
+	SprintSpeed: number,
+	JumpPower: number,
+	CanSprint: boolean,
+	CanFly: boolean,
+	FlySpeed: number,
+	StaminaMax: number,
+	MaxHP: number,
+}
+
+function Riding.Stats(creature: { Id: string, Level: number, Mutation: string?, Size: number? }): RideStats
+	local def = Creatures[creature.Id]
+	local style = def and def.Style or "Biped"
+	local battle = Battle.Stats(creature :: any)
+	local walk = math.max(16, battle.Speed)
+	return {
+		WalkSpeed = walk,
+		SprintSpeed = walk * RIDE.SprintMult,
+		JumpPower = if style == "Blob" then 95 else 55,
+		CanSprint = style ~= "Blob",
+		CanFly = style == "Winged",
+		FlySpeed = walk * 1.4,
+		StaminaMax = 100 + creature.Level * 2,
+		MaxHP = battle.MaxHP,
+	}
+end
+
+-- New stamina after dt seconds in a mode. Walking regenerates.
+function Riding.UpdateStamina(current: number, max: number, dt: number, mode: Mode): number
+	if mode == "Sprint" then
+		return math.max(0, current - RIDE.SprintDrain * dt)
+	elseif mode == "Fly" then
+		return math.max(0, current - RIDE.FlyDrain * dt)
+	end
+	return math.min(max, current + RIDE.Regen * dt)
+end
+
+-- Can you start (or keep) sprinting / flying with this much stamina?
+function Riding.CanUse(current: number, mode: Mode, alreadyUsing: boolean?): boolean
+	if mode == "Walk" then
+		return true
+	end
+	return if alreadyUsing then current > 0 else current >= RIDE.MinToStart
+end
+
+-- Offsets for followers around the owner (behind, left, right).
+function Riding.FollowerOffset(index: number, spacing: number): Vector3
+	local slots = { { 0, 1 }, { -1, 0.6 }, { 1, 0.6 }, { 0, 2 } }
+	local slot = slots[((index - 1) % #slots) + 1]
+	return Vector3.new(slot[1] * spacing, 0, slot[2] * spacing)
+end
+
+return Riding
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">Rules</string>
             <string name="Source"><![CDATA[--!strict
@@ -4190,7 +4396,7 @@ return Rules
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">Tags</string>
             <string name="Source"><![CDATA[--!strict
@@ -4221,12 +4427,235 @@ return {
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="34">
+          <Properties>
+            <string name="Name">Taming</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Taming: ARK-style knock-out taming math (pure, unit tested).
+
+	1. Hit a wild titan with a club / tranq darts -> Torpor goes up.
+	   Torpor slowly drains while it's awake.
+	2. Torpor full -> it falls asleep for GameConfig.Tame.SleepTime seconds.
+	3. Feed the sleeping titan -> the taming bar fills. Favorite food counts
+	   double. Every player has their own bar: whoever fills theirs first
+	   gets the titan (so others can "steal" your tame by feeding faster).
+	4. Hitting it while asleep lowers taming effectiveness, which lowers
+	   the bonus levels it gets when tamed.
+]]
+
+local Config = script.Parent.Parent.Config
+local Creatures = require(Config.Creatures)
+local GameConfig = require(Config.GameConfig)
+local Rarities = require(Config.Rarities)
+local CreatureMath = require(script.Parent.CreatureMath)
+
+local TAME = GameConfig.Tame
+
+local Taming = {}
+
+type Creature = { Id: string, Level: number?, Size: number? }
+
+local function rarityOf(id: string)
+	return Rarities[Creatures[id].Rarity]
+end
+
+-- Bigger titans need more torpor (x1 = base, x1,000 = 2.8x, x100,000 = 4x).
+function Taming.MaxTorpor(creature: Creature): number
+	local size = CreatureMath.ClampSize(creature.Size)
+	return math.floor(rarityOf(creature.Id).Torpor * (1 + math.log10(size) * 0.6))
+end
+
+-- Adds torpor. Returns the new value and true if it just fell asleep.
+function Taming.AddTorpor(current: number, amount: number, max: number): (number, boolean)
+	local new = math.clamp(current + math.max(0, amount), 0, max)
+	return new, current < max and new >= max
+end
+
+-- Torpor drain while awake.
+function Taming.Drain(current: number, max: number, dt: number): number
+	return math.max(0, current - max * TAME.TorporDrain * dt)
+end
+
+-- Food points needed to tame a sleeping titan.
+function Taming.FoodNeeded(creature: Creature): number
+	local size = CreatureMath.ClampSize(creature.Size)
+	return math.ceil(rarityOf(creature.Id).TameFood * TAME.FoodPerRarity * (1 + math.log10(size) * 0.5))
+end
+
+-- How many points one food is worth for this titan.
+function Taming.FoodPoints(creatureId: string, foodId: string): number
+	local def = Creatures[creatureId]
+	if def and def.Diet and table.find(def.Diet, foodId) then
+		return TAME.FavoritePoints
+	end
+	return 1
+end
+
+function Taming.Effectiveness(hitsWhileAsleep: number): number
+	return math.max(TAME.MinEffectiveness, 1 - hitsWhileAsleep * TAME.DamageLoss)
+end
+
+-- Level the titan gets when tamed.
+function Taming.TamedLevel(effectiveness: number): number
+	return 1 + math.floor(effectiveness * TAME.MaxBonusLevels + 0.0001)
+end
+
+-- Per-player taming bars on one sleeping titan.
+export type Progress = { Points: { [number]: number } }
+
+function Taming.NewProgress(): Progress
+	return { Points = {} }
+end
+
+-- Adds food points for a player. Returns true if that player finished taming.
+function Taming.Feed(progress: Progress, userId: number, points: number, needed: number): boolean
+	local total = (progress.Points[userId] or 0) + points
+	progress.Points[userId] = total
+	return total >= needed
+end
+
+-- The player closest to finishing (for the shared taming bar), and their points.
+function Taming.Leader(progress: Progress): (number?, number)
+	local bestId, best = nil, 0
+	for userId, points in progress.Points do
+		if points > best or (points == best and bestId ~= nil and userId < bestId) then
+			bestId, best = userId, points
+		end
+	end
+	return bestId, best
+end
+
+return Taming
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="35">
+          <Properties>
+            <string name="Name">WildBrain</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	WildBrain: what a wild titan does next (pure, unit tested).
+	WildService calls Decide() a few times per second and then moves the
+	titan for the chosen state.
+
+	States
+	  Idle    stand around            Graze  eat grass (stands, head down)
+	  Wander  walk near its home      Flee   run away after being hit (Passive)
+	  Chase   run at a player         Attack hit the player in range
+	  Return  walk back home          Asleep knocked out (torpor full)
+]]
+
+local GameConfig = require(script.Parent.Parent.Config.GameConfig)
+
+local WILD = GameConfig.Wild
+
+export type State = "Idle" | "Graze" | "Wander" | "Flee" | "Chase" | "Attack" | "Return" | "Asleep"
+export type Temper = "Passive" | "Aggressive"
+
+export type Input = {
+	State: State,
+	StateSince: number, -- when the current state started
+	StateDuration: number, -- how long a timed state (Idle/Graze/Wander) lasts
+	Now: number,
+	Temper: Temper,
+	Asleep: boolean,
+	LastHitAt: number?, -- when it was last hit (nil = never)
+	TargetDistance: number, -- distance to the nearest player (math.huge = none)
+	HomeDistance: number,
+	Reach: number, -- attack range for this titan (AttackRange + size)
+	Roll: number, -- random 0..1 (passed in so tests are repeatable)
+}
+
+local WildBrain = {}
+
+local CALM: { [string]: boolean } = { Idle = true, Graze = true, Wander = true }
+
+-- How long a calm state lasts (seconds), from a 0..1 roll.
+function WildBrain.DurationFor(state: State, roll: number): number
+	if state == "Idle" then
+		return 2 + roll * 3
+	elseif state == "Graze" then
+		return 4 + roll * 4
+	elseif state == "Wander" then
+		return 5 + roll * 4
+	end
+	return 0
+end
+
+-- The next calm state, picked by a 0..1 roll.
+function WildBrain.NextCalm(roll: number): State
+	if roll < 0.45 then
+		return "Wander"
+	elseif roll < 0.75 then
+		return "Graze"
+	end
+	return "Idle"
+end
+
+function WildBrain.Decide(i: Input): State
+	if i.Asleep then
+		return "Asleep"
+	end
+	if i.State == "Asleep" then
+		return "Idle" -- just woke up
+	end
+	local recentlyHit = i.LastHitAt ~= nil and i.Now - i.LastHitAt < WILD.FleeTime
+	local tooFar = i.HomeDistance > WILD.LeashRange
+
+	if i.Temper == "Passive" then
+		if recentlyHit then
+			return "Flee"
+		end
+		if i.State == "Flee" then
+			return "Idle"
+		end
+	else
+		local hunting = recentlyHit or i.TargetDistance <= WILD.AggroRange
+		if hunting and not tooFar and i.TargetDistance < math.huge then
+			return if i.TargetDistance <= i.Reach then "Attack" else "Chase"
+		end
+		if i.State == "Chase" or i.State == "Attack" then
+			return "Return" -- lost the player or went too far
+		end
+	end
+
+	if i.State == "Return" then
+		return if i.HomeDistance < 8 then "Idle" else "Return"
+	end
+	if tooFar then
+		return "Return"
+	end
+	if not CALM[i.State] or i.Now - i.StateSince >= i.StateDuration then
+		return WildBrain.NextCalm(i.Roll)
+	end
+	return i.State
+end
+
+-- Size roll for a new wild titan from a 0..1 roll (GameConfig.Wild.SizeRolls).
+function WildBrain.RollSize(roll: number, roll2: number): number
+	local acc = 0
+	for _, entry in WILD.SizeRolls do
+		acc += entry[1]
+		if roll <= acc then
+			-- log-uniform inside the band so small sizes are more common
+			local lo, hi = math.log10(entry[2]), math.log10(entry[3])
+			return math.floor(10 ^ (lo + (hi - lo) * roll2) * 10 + 0.5) / 10
+		end
+	end
+	return 1
+end
+
+return WildBrain
+]]></string>
+          </Properties>
+        </Item>
       </Item>
-      <Item class="Folder" referent="32">
+      <Item class="Folder" referent="36">
         <Properties>
           <string name="Name">Lib</string>
         </Properties>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">Format</string>
             <string name="Source"><![CDATA[local Format = {}
@@ -4316,7 +4745,7 @@ return Format
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">Guard</string>
             <string name="Source"><![CDATA[--!strict
@@ -4379,7 +4808,7 @@ return Guard
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">Loader</string>
             <string name="Source"><![CDATA[--[[
@@ -4469,7 +4898,7 @@ return Loader
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">Log</string>
             <string name="Source"><![CDATA[--[[
@@ -4532,7 +4961,7 @@ return Log
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">Rng</string>
             <string name="Source"><![CDATA[--!strict
@@ -4576,7 +5005,7 @@ return Rng
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">Signal</string>
             <string name="Source"><![CDATA[--[[
@@ -4664,7 +5093,7 @@ return Signal
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">Trove</string>
             <string name="Source"><![CDATA[--[[
@@ -4732,7 +5161,7 @@ return Trove
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="44">
           <Properties>
             <string name="Name">WeightedRandom</string>
             <string name="Source"><![CDATA[local WeightedRandom = {}
@@ -4761,7 +5190,7 @@ return WeightedRandom
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="41">
+      <Item class="ModuleScript" referent="45">
         <Properties>
           <string name="Name">Net</string>
           <string name="Source"><![CDATA[--[[
@@ -4898,7 +5327,7 @@ end
 return Net
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="42">
+        <Item class="ModuleScript" referent="46">
           <Properties>
             <string name="Name">Remotes</string>
             <string name="Source"><![CDATA[--!strict
@@ -4966,7 +5395,7 @@ return Remotes
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="43">
+      <Item class="ModuleScript" referent="47">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
@@ -5079,19 +5508,19 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="44">
+  <Item class="ServerScriptService" referent="48">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="45">
+    <Item class="Folder" referent="49">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Folder" referent="46">
+      <Item class="Folder" referent="50">
         <Properties>
           <string name="Name">Data</string>
         </Properties>
-        <Item class="ModuleScript" referent="47">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">Schema</string>
             <string name="Source"><![CDATA[--!strict
@@ -5288,7 +5717,7 @@ return Schema
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="48">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">SessionStore</string>
             <string name="Source"><![CDATA[--[[
@@ -5419,7 +5848,7 @@ return SessionStore
           </Properties>
         </Item>
       </Item>
-      <Item class="Script" referent="49">
+      <Item class="Script" referent="53">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -5490,11 +5919,11 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="50">
+      <Item class="Folder" referent="54">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="55">
           <Properties>
             <string name="Name">CreatureBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -5786,7 +6215,7 @@ return CreatureBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="52">
+        <Item class="ModuleScript" referent="56">
           <Properties>
             <string name="Name">FoodBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -5958,7 +6387,7 @@ return FoodBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="53">
+        <Item class="ModuleScript" referent="57">
           <Properties>
             <string name="Name">GameEvents</string>
             <string name="Source"><![CDATA[--[[
@@ -6007,11 +6436,11 @@ return GameEvents
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="54">
+        <Item class="Folder" referent="58">
           <Properties>
             <string name="Name">Map</string>
           </Properties>
-          <Item class="ModuleScript" referent="55">
+          <Item class="ModuleScript" referent="59">
             <Properties>
               <string name="Name">MapGenerator</string>
               <string name="Source"><![CDATA[--[[
@@ -6643,7 +7072,7 @@ return MapGenerator
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="56">
+          <Item class="ModuleScript" referent="60">
             <Properties>
               <string name="Name">Props</string>
               <string name="Source"><![CDATA[--[[
@@ -7037,7 +7466,7 @@ return Props
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="57">
+          <Item class="ModuleScript" referent="61">
             <Properties>
               <string name="Name">StudGround</string>
               <string name="Source"><![CDATA[--[[
@@ -7204,15 +7633,15 @@ return StudGround
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="58">
+      <Item class="Folder" referent="62">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="Folder" referent="59">
+        <Item class="Folder" referent="63">
           <Properties>
             <string name="Name">Base</string>
           </Properties>
-          <Item class="ModuleScript" referent="60">
+          <Item class="ModuleScript" referent="64">
             <Properties>
               <string name="Name">BaseService</string>
               <string name="Source"><![CDATA[--[[
@@ -7674,7 +8103,7 @@ return BaseService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="61">
+          <Item class="ModuleScript" referent="65">
             <Properties>
               <string name="Name">CreatureService</string>
               <string name="Source"><![CDATA[--[[
@@ -8269,7 +8698,7 @@ return CreatureService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="62">
+          <Item class="ModuleScript" referent="66">
             <Properties>
               <string name="Name">UpgradeService</string>
               <string name="Source"><![CDATA[--[[
@@ -8471,11 +8900,11 @@ return UpgradeService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="63">
+        <Item class="Folder" referent="67">
           <Properties>
             <string name="Name">Battle</string>
           </Properties>
-          <Item class="ModuleScript" referent="64">
+          <Item class="ModuleScript" referent="68">
             <Properties>
               <string name="Name">BattleService</string>
               <string name="Source"><![CDATA[--[[
@@ -9566,11 +9995,11 @@ return BattleService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="65">
+        <Item class="Folder" referent="69">
           <Properties>
             <string name="Name">Core</string>
           </Properties>
-          <Item class="ModuleScript" referent="66">
+          <Item class="ModuleScript" referent="70">
             <Properties>
               <string name="Name">AdminService</string>
               <string name="Source"><![CDATA[--[[
@@ -9737,7 +10166,7 @@ return AdminService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="67">
+          <Item class="ModuleScript" referent="71">
             <Properties>
               <string name="Name">DataService</string>
               <string name="Source"><![CDATA[--[[
@@ -9961,7 +10390,7 @@ return DataService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="68">
+          <Item class="ModuleScript" referent="72">
             <Properties>
               <string name="Name">FxService</string>
               <string name="Source"><![CDATA[--[[
@@ -10004,7 +10433,7 @@ return FxService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="69">
+          <Item class="ModuleScript" referent="73">
             <Properties>
               <string name="Name">SettingsService</string>
               <string name="Source"><![CDATA[--[[
@@ -10042,11 +10471,11 @@ return SettingsService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="70">
+        <Item class="Folder" referent="74">
           <Properties>
             <string name="Name">Economy</string>
           </Properties>
-          <Item class="ModuleScript" referent="71">
+          <Item class="ModuleScript" referent="75">
             <Properties>
               <string name="Name">EggService</string>
               <string name="Source"><![CDATA[--[[
@@ -10171,7 +10600,7 @@ return EggService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="72">
+          <Item class="ModuleScript" referent="76">
             <Properties>
               <string name="Name">RebirthService</string>
               <string name="Source"><![CDATA[--[[
@@ -10254,11 +10683,11 @@ return RebirthService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="73">
+        <Item class="Folder" referent="77">
           <Properties>
             <string name="Name">Events</string>
           </Properties>
-          <Item class="ModuleScript" referent="74">
+          <Item class="ModuleScript" referent="78">
             <Properties>
               <string name="Name">EventService</string>
               <string name="Source"><![CDATA[--[[
@@ -10409,11 +10838,11 @@ return EventService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="75">
+        <Item class="Folder" referent="79">
           <Properties>
             <string name="Name">Food</string>
           </Properties>
-          <Item class="ModuleScript" referent="76">
+          <Item class="ModuleScript" referent="80">
             <Properties>
               <string name="Name">FoodService</string>
               <string name="Source"><![CDATA[--[[
@@ -10768,7 +11197,7 @@ return FoodService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="77">
+          <Item class="ModuleScript" referent="81">
             <Properties>
               <string name="Name">StealService</string>
               <string name="Source"><![CDATA[--[[
@@ -11078,11 +11507,11 @@ return StealService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="78">
+        <Item class="Folder" referent="82">
           <Properties>
             <string name="Name">Progress</string>
           </Properties>
-          <Item class="ModuleScript" referent="79">
+          <Item class="ModuleScript" referent="83">
             <Properties>
               <string name="Name">CodeService</string>
               <string name="Source"><![CDATA[--[[
@@ -11131,7 +11560,7 @@ return CodeService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="80">
+          <Item class="ModuleScript" referent="84">
             <Properties>
               <string name="Name">DailyRewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -11180,7 +11609,7 @@ return DailyRewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="81">
+          <Item class="ModuleScript" referent="85">
             <Properties>
               <string name="Name">IndexService</string>
               <string name="Source"><![CDATA[--[[
@@ -11230,7 +11659,7 @@ return IndexService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="82">
+          <Item class="ModuleScript" referent="86">
             <Properties>
               <string name="Name">OfflineService</string>
               <string name="Source"><![CDATA[--[[
@@ -11281,7 +11710,7 @@ return OfflineService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="83">
+          <Item class="ModuleScript" referent="87">
             <Properties>
               <string name="Name">QuestService</string>
               <string name="Source"><![CDATA[--[[
@@ -11385,7 +11814,7 @@ return QuestService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="84">
+          <Item class="ModuleScript" referent="88">
             <Properties>
               <string name="Name">RewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -11455,7 +11884,7 @@ return RewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="85">
+          <Item class="ModuleScript" referent="89">
             <Properties>
               <string name="Name">TutorialService</string>
               <string name="Source"><![CDATA[--[[
@@ -11530,11 +11959,11 @@ return TutorialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="86">
+        <Item class="Folder" referent="90">
           <Properties>
             <string name="Name">Social</string>
           </Properties>
-          <Item class="ModuleScript" referent="87">
+          <Item class="ModuleScript" referent="91">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -11722,7 +12151,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="88">
+          <Item class="ModuleScript" referent="92">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -11921,7 +12350,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="89">
+          <Item class="ModuleScript" referent="93">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -12097,11 +12526,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="90">
+        <Item class="Folder" referent="94">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="91">
+          <Item class="ModuleScript" referent="95">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -12239,11 +12668,11 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="92">
+        <Item class="Folder" referent="96">
           <Properties>
             <string name="Name">Wild</string>
           </Properties>
-          <Item class="ModuleScript" referent="93">
+          <Item class="ModuleScript" referent="97">
             <Properties>
               <string name="Name">WildService</string>
               <string name="Source"><![CDATA[--[[
@@ -12653,11 +13082,11 @@ return WildService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="94">
+        <Item class="Folder" referent="98">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="95">
+          <Item class="ModuleScript" referent="99">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -12869,7 +13298,7 @@ return MapService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="96">
+          <Item class="ModuleScript" referent="100">
             <Properties>
               <string name="Name">PortalService</string>
               <string name="Source"><![CDATA[--[[
@@ -12948,23 +13377,23 @@ return PortalService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="97">
+  <Item class="StarterPlayer" referent="101">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="98">
+    <Item class="StarterPlayerScripts" referent="102">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="99">
+      <Item class="Folder" referent="103">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="100">
+        <Item class="Folder" referent="104">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -13077,7 +13506,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="106">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -13180,7 +13609,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="103">
+          <Item class="ModuleScript" referent="107">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -13231,7 +13660,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="104">
+          <Item class="ModuleScript" referent="108">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -13285,7 +13714,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="105">
+          <Item class="ModuleScript" referent="109">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -13371,7 +13800,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="106">
+          <Item class="ModuleScript" referent="110">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -13434,7 +13863,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="107">
+          <Item class="ModuleScript" referent="111">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -13461,7 +13890,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="108">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -13632,7 +14061,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="109">
+          <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -13750,7 +14179,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="110">
+          <Item class="ModuleScript" referent="114">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -13820,7 +14249,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="111">
+        <Item class="LocalScript" referent="115">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -13837,11 +14266,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="112">
+        <Item class="Folder" referent="116">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="113">
+          <Item class="ModuleScript" referent="117">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -13876,11 +14305,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="114">
+        <Item class="Folder" referent="118">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="115">
+          <Item class="ModuleScript" referent="119">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -14099,7 +14528,7 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="116">
+          <Item class="ModuleScript" referent="120">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
@@ -14252,7 +14681,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="117">
+          <Item class="ModuleScript" referent="121">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -14720,11 +15149,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="118">
+          <Item class="Folder" referent="122">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="119">
+            <Item class="ModuleScript" referent="123">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -14806,7 +15235,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="120">
+            <Item class="ModuleScript" referent="124">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -15033,7 +15462,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="121">
+            <Item class="ModuleScript" referent="125">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15120,7 +15549,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="122">
+            <Item class="ModuleScript" referent="126">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15213,7 +15642,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="123">
+            <Item class="ModuleScript" referent="127">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15300,7 +15729,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="124">
+            <Item class="ModuleScript" referent="128">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15429,7 +15858,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="125">
+            <Item class="ModuleScript" referent="129">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15507,7 +15936,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="126">
+            <Item class="ModuleScript" referent="130">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15573,7 +16002,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="127">
+            <Item class="ModuleScript" referent="131">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -15684,7 +16113,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="128">
+            <Item class="ModuleScript" referent="132">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -15808,7 +16237,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="129">
+            <Item class="ModuleScript" referent="133">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -15966,7 +16395,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="130">
+          <Item class="ModuleScript" referent="134">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -16200,7 +16629,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="131">
+          <Item class="ModuleScript" referent="135">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -16415,7 +16844,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="132">
+          <Item class="ModuleScript" referent="136">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -16551,7 +16980,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="133">
+          <Item class="ModuleScript" referent="137">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -16682,7 +17111,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="134">
+  <Item class="Workspace" referent="138">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>
