@@ -34,6 +34,7 @@ local Remotes: { [string]: RemoteSpec } = {
 	BuyFood = { Direction = "ToServer", Args = { "string", "integer" }, RateLimit = 0.2 },
 	SelectFood = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.1 },
 	LockStorage = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	BuyUpgrade = { Direction = "ToServer", Args = { "string" }, RateLimit = 4 }, -- base upgrade id
 	Rebirth = { Direction = "ToServer", Args = {}, RateLimit = 2 },
 	TeleportHome = { Direction = "ToServer", Args = {}, RateLimit = 3 },
 	Equip = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },

@@ -21,6 +21,8 @@ local Quests = require(Config.Quests)
 local Rarities = require(Config.Rarities)
 local Store = require(Config.Store)
 local Tutorial = require(Config.Tutorial)
+local Sizes = require(Config.Sizes)
+local Upgrades = require(Config.Upgrades)
 
 local ConfigValidator = {}
 
@@ -208,7 +210,21 @@ function ConfigValidator.Validate(): { string }
 		check(isEntry(Foods, foodId), "Battle.ClashWinFood has unknown food %s", tostring(foodId))
 	end
 	check(GameConfig.Plots.Count >= 2 and GameConfig.Plots.Count <= 16, "GameConfig.Plots.Count must be 2..16")
-	check(GameConfig.MaxSlots <= 8, "GameConfig.MaxSlots can't be more than 8 (pens per base)")
+	check(GameConfig.MaxSlots <= 24, "GameConfig.MaxSlots can't be more than 24 (pens per base)")
+	local lastMin = 0
+	for i, tier in Sizes.Tiers do
+		check(tier.Min > lastMin, "Sizes tier %d (%s) must need a bigger size than the one before", i, tier.Id)
+		lastMin = tier.Min
+	end
+	check(Sizes.Tiers[1].Min == Sizes.Min, "The first size tier must start at Sizes.Min")
+	check(Sizes.Tiers[#Sizes.Tiers].Min <= Sizes.Max, "The last size tier can't be above Sizes.Max")
+	for _, id in Upgrades.Order do
+		local def = Upgrades[id]
+		check(def ~= nil and def.Id == id, "Upgrades.Order lists unknown upgrade %s", tostring(id))
+		if def then
+			check(def.Max >= 1 and def.BaseCost > 0 and def.Growth >= 1, "Upgrade %s needs Max, BaseCost, Growth", id)
+		end
+	end
 
 	return errors
 end

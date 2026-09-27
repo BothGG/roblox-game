@@ -7,6 +7,7 @@ local Config = script.Parent.Parent.Config
 local GameConfig = require(Config.GameConfig)
 local Creatures = require(Config.Creatures)
 local Mutations = require(Config.Mutations)
+local Sizes = require(Config.Sizes)
 
 local CreatureMath = {}
 
@@ -15,6 +16,7 @@ export type CreatureData = {
 	Level: number,
 	Xp: number,
 	Mutation: string?,
+	Size: number?, -- x1 .. x100,000 (missing = x1)
 }
 
 function CreatureMath.XpToNext(level: number): number
@@ -23,6 +25,56 @@ end
 
 function CreatureMath.Scale(level: number): number
 	return 1 + (level - 1) * GameConfig.ScalePerLevel
+end
+
+-- Size ------------------------------------------------------------------------
+
+function CreatureMath.ClampSize(size: number?): number
+	local n = tonumber(size) or 1
+	if n ~= n then -- NaN
+		return 1
+	end
+	return math.clamp(n, Sizes.Min, Sizes.Max)
+end
+
+function CreatureMath.SizeOf(creature: CreatureData): number
+	return CreatureMath.ClampSize(creature.Size)
+end
+
+-- The named tier a size belongs to (Tiny, Normal, Big ... Mythical).
+function CreatureMath.SizeTier(size: number?): Sizes.Tier
+	local n = CreatureMath.ClampSize(size)
+	local tier = Sizes.Tiers[1]
+	for _, t in Sizes.Tiers do
+		if n >= t.Min then
+			tier = t
+		end
+	end
+	return tier
+end
+
+-- How much bigger the model looks because of Size: grows with the log of
+-- size (x1 = 1, x10 = 1.4, x100,000 = 3).
+function CreatureMath.SizeScale(size: number?): number
+	return 1 + math.log10(CreatureMath.ClampSize(size)) * Sizes.ScalePerDecade
+end
+
+-- Final model scale from level and size, capped so giants stay on the map.
+function CreatureMath.VisualScale(creature: CreatureData): number
+	return math.min(Sizes.VisualCap, CreatureMath.Scale(creature.Level) * CreatureMath.SizeScale(creature.Size))
+end
+
+-- "x1", "x250", "x1.5K", "x100K"
+function CreatureMath.SizeLabel(size: number?): string
+	local n = CreatureMath.ClampSize(size)
+	if n < 1000 then
+		local rounded = math.floor(n * 10 + 0.5) / 10
+		return "x" .. (if rounded == math.floor(rounded) then tostring(math.floor(rounded)) else tostring(rounded))
+	end
+	local k = n / 1000
+	local text = if k >= 100 then string.format("%.0f", k) else string.format("%.1f", k)
+	text = (string.gsub(text, "%.0$", ""))
+	return "x" .. text .. "K"
 end
 
 function CreatureMath.Trait(creature: CreatureData, trait: string): number
@@ -38,8 +90,10 @@ function CreatureMath.BaseIncome(creature: CreatureData): number
 	end
 	local mutation = creature.Mutation and Mutations[creature.Mutation]
 	local mutationMult = mutation and mutation.IncomeMult or 1
+	-- Income = base income x level x size x mutation (x trait bonus)
 	return def.BaseIncome
 		* (1 + (creature.Level - 1) * GameConfig.IncomePerLevel)
+		* CreatureMath.SizeOf(creature)
 		* mutationMult
 		* (1 + CreatureMath.Trait(creature, "Income"))
 end
@@ -94,11 +148,16 @@ function CreatureMath.CountFood(food: { [string]: number }): number
 	return n
 end
 
+-- "Rex", "Lava Rex", "Giant Lava Rex" (size tier shown from Big and up)
 function CreatureMath.DisplayName(creature: CreatureData): string
 	local def = Creatures[creature.Id]
 	local name = def and def.Name or creature.Id
 	if creature.Mutation and Mutations[creature.Mutation] then
-		return Mutations[creature.Mutation].Name .. " " .. name
+		name = Mutations[creature.Mutation].Name .. " " .. name
+	end
+	local size = CreatureMath.SizeOf(creature)
+	if size >= Sizes.Tiers[3].Min then
+		name = CreatureMath.SizeTier(size).Id .. " " .. name
 	end
 	return name
 end

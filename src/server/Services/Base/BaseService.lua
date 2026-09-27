@@ -66,10 +66,11 @@ local PLOT_COLORS = {
 	Color3.fromRGB(230, 190, 140),
 }
 
--- Pen grid (plot-local X, Z). Front of the base is -Z (towards the arena).
-local PEN_X = { -24, -8, 8, 24 }
-local PEN_Z = { 2, 22 }
-local PEN_SIZE = 15
+-- Pen grid (plot-local X, Z): 6 x 4 = 24 pens. Front of the base is -Z
+-- (towards the island center). Order = unlock order (front rows first).
+local PEN_X = { -55, -33, -11, 11, 33, 55 }
+local PEN_Z = { -22, 2, 26, 50 }
+local PEN_SIZE = 20
 
 local function makePart(parent: Instance, props: { [string]: any }): Part
 	local part = Instance.new("Part")
@@ -275,7 +276,7 @@ function BaseService:_build(parent: Instance, index: number, anchorCf: CFrame): 
 			lockSign.LightInfluence = 0
 			lockSign.Enabled = false
 			lockSign.Parent = holder
-			textLabel(lockSign, "🔒 Rebirth to unlock", Color3.fromRGB(200, 200, 220))
+			textLabel(lockSign, "🔒 Upgrade or Rebirth", Color3.fromRGB(200, 200, 220))
 			table.insert(slots, slotCf * CFrame.new(0, 0.35, 0))
 			table.insert(penSigns, lockSign)
 		end

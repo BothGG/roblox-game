@@ -16,7 +16,7 @@ local GameConfig = {
 
 	-- Pens (titans per base) / food storage
 	StartingSlots = 3,
-	MaxSlots = 8, -- pens per base (the base has 8 pen spots)
+	MaxSlots = 24, -- pens per base (the base has 24 pen spots; unlock with rebirths/upgrades)
 	SlotsPerRebirth = 1,
 	StorageCap = 50,
 	StorageCapPerRebirth = 10,
@@ -45,10 +45,10 @@ local GameConfig = {
 	-- Island layout (used by the map generator; a hand-built map ignores these)
 	Map = {
 		Seed = 2026, -- change for a different random layout of props/spawns
-		IslandRadius = 330,
+		IslandRadius = 450,
 		PlazaRadius = 40, -- stone plaza in the middle with the arena portal
 		FieldInner = 62, -- food fields ring
-		FieldOuter = 197,
+		FieldOuter = 190,
 		-- "Studs" = classic Roblox look (Plastic parts with studs, like a baseplate).
 		-- "Terrain" = smooth terrain grass.
 		Style = "Studs",
@@ -59,9 +59,9 @@ local GameConfig = {
 	},
 
 	Plots = {
-		Count = 12, -- set the place's Max Players to this number (6 also works)
-		RingRadius = 262,
-		Size = 74,
+		Count = 6, -- set the place's Max Players to this number too
+		RingRadius = 310,
+		Size = 160,
 	},
 
 	Food = {
@@ -143,6 +143,13 @@ local GameConfig = {
 		StoreName = "TitanClash_v1",
 		AutosaveInterval = 120,
 		MaxReceipts = 100, -- purchase receipts remembered per player
+		-- Save size limits (a DataStore value must stay under 4 MB; these keep
+		-- a maxed-out save far below that; see Schema.Trim / EstimateSize).
+		Limits = {
+			Structures = 600, -- placed build pieces per base (Phase 4)
+			ItemStacks = 120, -- backpack + chest item stacks (Phase 3)
+			ResourceKinds = 40,
+		},
 	},
 
 	Leaderboards = {

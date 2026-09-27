@@ -32,6 +32,7 @@ local Net = require(Shared.Net)
 
 local ServerModules = ServerScriptService:WaitForChild("Server").Modules
 local CreatureBuilder = require(ServerModules.CreatureBuilder)
+local Schema = require(ServerModules.Parent.Data.Schema)
 local GameEvents = require(ServerModules.GameEvents)
 
 local CreatureService = {
@@ -270,7 +271,7 @@ function CreatureService:_rescale(player: Player, uid: string)
 	if not model or not creature then
 		return
 	end
-	local scale = CreatureMath.Scale(creature.Level)
+	local scale = CreatureMath.VisualScale(creature)
 	if math.abs(model:GetScale() - scale) > 1e-3 then
 		model:ScaleTo(scale)
 	end
@@ -301,7 +302,14 @@ function CreatureService:_refreshTag(player: Player, uid: string)
 	nameLabel.TextColor3 = if creature.Mutation then Mutations[creature.Mutation].Color else Rarities[def.Rarity].Color
 	local income = CreatureMath.BaseIncome(creature) * Rules.IncomeMultiplier(data, self:IncomeContext(player))
 	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
-	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
+	local tier = CreatureMath.SizeTier(creature.Size)
+	info.Text = string.format(
+		"Lv.%d • %s %s • %s/s",
+		creature.Level,
+		tier.Id,
+		CreatureMath.SizeLabel(creature.Size),
+		Format.Money(income)
+	)
 	info.TextColor3 = Color3.fromRGB(120, 255, 130)
 	model:SetAttribute("Income", income) -- client pops "+$" over your titans
 	local stats = Battle.Stats(creature)
@@ -340,6 +348,12 @@ function CreatureService:_layout(player: Player)
 	end
 end
 
+-- Rebuilds a titan's model (after its size, mutation or looks changed).
+function CreatureService:Rebuild(player: Player, uid: string)
+	self:_rebuild(player, uid)
+	self:_layout(player)
+end
+
 function CreatureService:_rebuild(player: Player, uid: string)
 	local model = self:GetModel(player, uid)
 	if model then
@@ -354,7 +368,7 @@ end
 -- Actions
 --------------------------------------------------------------------------
 
-function CreatureService:Add(player: Player, creatureId: string, mutation: string?): string?
+function CreatureService:Add(player: Player, creatureId: string, mutation: string?, size: number?): string?
 	local data = Data:Get(player)
 	if not data or not Creatures[creatureId] then
 		return nil
@@ -364,7 +378,9 @@ function CreatureService:Add(player: Player, creatureId: string, mutation: strin
 	end
 	local uid = tostring(data.NextUid)
 	data.NextUid += 1
-	data.Creatures[uid] = { Id = creatureId, Level = 1, Xp = 0, Mutation = mutation }
+	data.Creatures[uid] =
+		{ Id = creatureId, Level = 1, Xp = 0, Mutation = mutation, Size = CreatureMath.ClampSize(size) }
+	Schema.FillCreature(data.Creatures[uid])
 	data.Index[creatureId] = true
 	if mutation then
 		data.Index[creatureId .. ":" .. mutation] = true

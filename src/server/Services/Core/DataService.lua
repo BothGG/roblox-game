@@ -128,6 +128,10 @@ function DataService:Save(player: Player, release: boolean?)
 	data.Stats.PlayTime += os.time() - profile.JoinedAt
 	profile.JoinedAt = os.time()
 	data.LastOnline = os.time()
+	local trimmed = Schema.Trim(data)
+	if trimmed > 0 then
+		log:Warn("trimmed", trimmed, "entries from", player.Name, "'s save (over the limits)")
+	end
 	local ok, lostLock = self._store:Save(profile.Key, data, release)
 	if lostLock then
 		-- Another server loaded this player (e.g. they joined somewhere else).
@@ -180,6 +184,8 @@ function DataService:BuildSnapshot(player: Player): Types.Snapshot
 		Passes = data.Passes,
 		Settings = data.Settings,
 		Stats = data.Stats,
+		Upgrades = data.Upgrades,
+		Inventory = data.Inventory,
 		ServerTime = os.time(),
 	}
 	for _, hook in self._hooks do

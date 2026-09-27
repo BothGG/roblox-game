@@ -463,7 +463,7 @@ local GameConfig = {
 
 	-- Pens (titans per base) / food storage
 	StartingSlots = 3,
-	MaxSlots = 8, -- pens per base (the base has 8 pen spots)
+	MaxSlots = 24, -- pens per base (the base has 24 pen spots; unlock with rebirths/upgrades)
 	SlotsPerRebirth = 1,
 	StorageCap = 50,
 	StorageCapPerRebirth = 10,
@@ -492,10 +492,10 @@ local GameConfig = {
 	-- Island layout (used by the map generator; a hand-built map ignores these)
 	Map = {
 		Seed = 2026, -- change for a different random layout of props/spawns
-		IslandRadius = 330,
+		IslandRadius = 450,
 		PlazaRadius = 40, -- stone plaza in the middle with the arena portal
 		FieldInner = 62, -- food fields ring
-		FieldOuter = 197,
+		FieldOuter = 190,
 		-- "Studs" = classic Roblox look (Plastic parts with studs, like a baseplate).
 		-- "Terrain" = smooth terrain grass.
 		Style = "Studs",
@@ -506,9 +506,9 @@ local GameConfig = {
 	},
 
 	Plots = {
-		Count = 12, -- set the place's Max Players to this number (6 also works)
-		RingRadius = 262,
-		Size = 74,
+		Count = 6, -- set the place's Max Players to this number too
+		RingRadius = 310,
+		Size = 160,
 	},
 
 	Food = {
@@ -590,6 +590,13 @@ local GameConfig = {
 		StoreName = "TitanClash_v1",
 		AutosaveInterval = 120,
 		MaxReceipts = 100, -- purchase receipts remembered per player
+		-- Save size limits (a DataStore value must stay under 4 MB; these keep
+		-- a maxed-out save far below that; see Schema.Trim / EstimateSize).
+		Limits = {
+			Structures = 600, -- placed build pieces per base (Phase 4)
+			ItemStacks = 120, -- backpack + chest item stacks (Phase 3)
+			ResourceKinds = 40,
+		},
 	},
 
 	Leaderboards = {
@@ -860,6 +867,46 @@ return Rarities
         </Item>
         <Item class="ModuleScript" referent="14">
           <Properties>
+            <string name="Name">Sizes</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Sizes: every titan (and later every egg) has a Size multiplier from x1 to
+	x100,000. Size multiplies income. Bigger titans also LOOK bigger, but the
+	model only grows with the log of Size (and never past VisualCap), so
+	giants stay on the map.
+
+	Tiers are named by the smallest size that reaches them.
+]]
+
+export type Tier = { Id: string, Min: number, Color: Color3 }
+
+local function rgb(r: number, g: number, b: number): Color3
+	return Color3.fromRGB(r, g, b)
+end
+
+local Sizes = {
+	Min = 1,
+	Max = 100000,
+	ScalePerDecade = 0.4, -- model gets 40% bigger every x10 size (x100,000 = 3x)
+	VisualCap = 25, -- level scale x size scale never goes above this
+	Tiers = {
+		{ Id = "Tiny", Min = 1, Color = rgb(200, 200, 200) },
+		{ Id = "Normal", Min = 3, Color = rgb(255, 255, 255) },
+		{ Id = "Big", Min = 10, Color = rgb(120, 220, 120) },
+		{ Id = "Huge", Min = 100, Color = rgb(80, 170, 255) },
+		{ Id = "Giant", Min = 1000, Color = rgb(180, 110, 255) },
+		{ Id = "Colossal", Min = 10000, Color = rgb(255, 170, 40) },
+		{ Id = "Titanic", Min = 50000, Color = rgb(255, 80, 80) },
+		{ Id = "Mythical", Min = 100000, Color = rgb(255, 100, 220) },
+	} :: { Tier },
+}
+
+return Sizes
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
             <string name="Name">Sounds</string>
             <string name="Source"><![CDATA[--[[
 	Sound ids used by effects. The defaults are sounds built into Roblox.
@@ -889,7 +936,7 @@ return {
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">Store</string>
             <string name="Source"><![CDATA[--[[
@@ -1000,7 +1047,7 @@ return Store
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">Tutorial</string>
             <string name="Source"><![CDATA[--[[
@@ -1040,8 +1087,77 @@ return {
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">Upgrades</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Base upgrades, bought at the upgrade board in every base.
+	Cost of the next level = BaseCost * Growth ^ currentLevel.
+
+	  Pens       +1 pen per level (pens go up to GameConfig.MaxSlots = 24)
+	  Storage    +25 food storage per level
+	  Incubators for eggs (Phase 2: shown as "coming soon" until Enabled)
+]]
+
+export type Upgrade = {
+	Id: string,
+	Name: string,
+	Icon: string,
+	Text: string,
+	Max: number,
+	Per: number,
+	BaseCost: number,
+	Growth: number,
+	Enabled: boolean,
+}
+
+local Upgrades: { [string]: any } = {
+	Order = { "Pens", "Storage", "Incubators" },
+	Pens = {
+		Name = "Extra Pen",
+		Icon = "🐾",
+		Text = "+1 pen for a titan",
+		Max = 16,
+		Per = 1,
+		BaseCost = 2500,
+		Growth = 1.6,
+		Enabled = true,
+	},
+	Storage = {
+		Name = "Bigger Storage",
+		Icon = "📦",
+		Text = "+25 food storage",
+		Max = 10,
+		Per = 25,
+		BaseCost = 1500,
+		Growth = 1.8,
+		Enabled = true,
+	},
+	Incubators = {
+		Name = "Incubator",
+		Icon = "🥚",
+		Text = "+1 incubator for eggs",
+		Max = 5,
+		Per = 1,
+		BaseCost = 10000,
+		Growth = 2.5,
+		Enabled = false, -- turned on with breeding & eggs (Phase 2)
+	},
+}
+
+for id, def in Upgrades do
+	if type(def) == "table" and def.Name then
+		def.Id = id
+	end
+end
+
+return Upgrades
+]]></string>
+          </Properties>
+        </Item>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">Fx</string>
           <string name="Source"><![CDATA[--[[
@@ -1105,7 +1221,7 @@ end
 return Fx
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">Auras</string>
             <string name="Source"><![CDATA[--[[
@@ -1371,7 +1487,7 @@ return Auras
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">Presets</string>
             <string name="Source"><![CDATA[--[[
@@ -1965,7 +2081,7 @@ return Presets
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">Primitives</string>
             <string name="Source"><![CDATA[--[[
@@ -2718,7 +2834,7 @@ return Primitives
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">RarityTag</string>
             <string name="Source"><![CDATA[--[[
@@ -2776,7 +2892,7 @@ return RarityTag
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">Textures</string>
             <string name="Source"><![CDATA[--[[
@@ -2805,11 +2921,11 @@ return {
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="23">
+      <Item class="Folder" referent="25">
         <Properties>
           <string name="Name">Game</string>
         </Properties>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">Battle</string>
             <string name="Source"><![CDATA[--!strict
@@ -2879,7 +2995,7 @@ function Battle.Stats(creature: CreatureData): Stats
 	local base = def and def.Stats or { HP = 100, Attack = 10, Speed = 1 }
 	local mutation = creature.Mutation and Mutations[creature.Mutation]
 	local mult = mutation and mutation.StatMult or 1
-	local scale = CreatureMath.Scale(creature.Level)
+	local scale = CreatureMath.VisualScale(creature)
 	return {
 		MaxHP = math.floor(base.HP * (1 + (creature.Level - 1) * 0.12) * mult),
 		Attack = math.floor(base.Attack * (1 + (creature.Level - 1) * 0.10) * mult),
@@ -3008,7 +3124,7 @@ return Battle
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">ConfigValidator</string>
             <string name="Source"><![CDATA[--[[
@@ -3034,6 +3150,8 @@ local Quests = require(Config.Quests)
 local Rarities = require(Config.Rarities)
 local Store = require(Config.Store)
 local Tutorial = require(Config.Tutorial)
+local Sizes = require(Config.Sizes)
+local Upgrades = require(Config.Upgrades)
 
 local ConfigValidator = {}
 
@@ -3221,7 +3339,21 @@ function ConfigValidator.Validate(): { string }
 		check(isEntry(Foods, foodId), "Battle.ClashWinFood has unknown food %s", tostring(foodId))
 	end
 	check(GameConfig.Plots.Count >= 2 and GameConfig.Plots.Count <= 16, "GameConfig.Plots.Count must be 2..16")
-	check(GameConfig.MaxSlots <= 8, "GameConfig.MaxSlots can't be more than 8 (pens per base)")
+	check(GameConfig.MaxSlots <= 24, "GameConfig.MaxSlots can't be more than 24 (pens per base)")
+	local lastMin = 0
+	for i, tier in Sizes.Tiers do
+		check(tier.Min > lastMin, "Sizes tier %d (%s) must need a bigger size than the one before", i, tier.Id)
+		lastMin = tier.Min
+	end
+	check(Sizes.Tiers[1].Min == Sizes.Min, "The first size tier must start at Sizes.Min")
+	check(Sizes.Tiers[#Sizes.Tiers].Min <= Sizes.Max, "The last size tier can't be above Sizes.Max")
+	for _, id in Upgrades.Order do
+		local def = Upgrades[id]
+		check(def ~= nil and def.Id == id, "Upgrades.Order lists unknown upgrade %s", tostring(id))
+		if def then
+			check(def.Max >= 1 and def.BaseCost > 0 and def.Growth >= 1, "Upgrade %s needs Max, BaseCost, Growth", id)
+		end
+	end
 
 	return errors
 end
@@ -3230,7 +3362,7 @@ return ConfigValidator
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">CreatureMath</string>
             <string name="Source"><![CDATA[--[[
@@ -3242,6 +3374,7 @@ local Config = script.Parent.Parent.Config
 local GameConfig = require(Config.GameConfig)
 local Creatures = require(Config.Creatures)
 local Mutations = require(Config.Mutations)
+local Sizes = require(Config.Sizes)
 
 local CreatureMath = {}
 
@@ -3250,6 +3383,7 @@ export type CreatureData = {
 	Level: number,
 	Xp: number,
 	Mutation: string?,
+	Size: number?, -- x1 .. x100,000 (missing = x1)
 }
 
 function CreatureMath.XpToNext(level: number): number
@@ -3258,6 +3392,56 @@ end
 
 function CreatureMath.Scale(level: number): number
 	return 1 + (level - 1) * GameConfig.ScalePerLevel
+end
+
+-- Size ------------------------------------------------------------------------
+
+function CreatureMath.ClampSize(size: number?): number
+	local n = tonumber(size) or 1
+	if n ~= n then -- NaN
+		return 1
+	end
+	return math.clamp(n, Sizes.Min, Sizes.Max)
+end
+
+function CreatureMath.SizeOf(creature: CreatureData): number
+	return CreatureMath.ClampSize(creature.Size)
+end
+
+-- The named tier a size belongs to (Tiny, Normal, Big ... Mythical).
+function CreatureMath.SizeTier(size: number?): Sizes.Tier
+	local n = CreatureMath.ClampSize(size)
+	local tier = Sizes.Tiers[1]
+	for _, t in Sizes.Tiers do
+		if n >= t.Min then
+			tier = t
+		end
+	end
+	return tier
+end
+
+-- How much bigger the model looks because of Size: grows with the log of
+-- size (x1 = 1, x10 = 1.4, x100,000 = 3).
+function CreatureMath.SizeScale(size: number?): number
+	return 1 + math.log10(CreatureMath.ClampSize(size)) * Sizes.ScalePerDecade
+end
+
+-- Final model scale from level and size, capped so giants stay on the map.
+function CreatureMath.VisualScale(creature: CreatureData): number
+	return math.min(Sizes.VisualCap, CreatureMath.Scale(creature.Level) * CreatureMath.SizeScale(creature.Size))
+end
+
+-- "x1", "x250", "x1.5K", "x100K"
+function CreatureMath.SizeLabel(size: number?): string
+	local n = CreatureMath.ClampSize(size)
+	if n < 1000 then
+		local rounded = math.floor(n * 10 + 0.5) / 10
+		return "x" .. (if rounded == math.floor(rounded) then tostring(math.floor(rounded)) else tostring(rounded))
+	end
+	local k = n / 1000
+	local text = if k >= 100 then string.format("%.0f", k) else string.format("%.1f", k)
+	text = (string.gsub(text, "%.0$", ""))
+	return "x" .. text .. "K"
 end
 
 function CreatureMath.Trait(creature: CreatureData, trait: string): number
@@ -3273,8 +3457,10 @@ function CreatureMath.BaseIncome(creature: CreatureData): number
 	end
 	local mutation = creature.Mutation and Mutations[creature.Mutation]
 	local mutationMult = mutation and mutation.IncomeMult or 1
+	-- Income = base income x level x size x mutation (x trait bonus)
 	return def.BaseIncome
 		* (1 + (creature.Level - 1) * GameConfig.IncomePerLevel)
+		* CreatureMath.SizeOf(creature)
 		* mutationMult
 		* (1 + CreatureMath.Trait(creature, "Income"))
 end
@@ -3329,11 +3515,16 @@ function CreatureMath.CountFood(food: { [string]: number }): number
 	return n
 end
 
+-- "Rex", "Lava Rex", "Giant Lava Rex" (size tier shown from Big and up)
 function CreatureMath.DisplayName(creature: CreatureData): string
 	local def = Creatures[creature.Id]
 	local name = def and def.Name or creature.Id
 	if creature.Mutation and Mutations[creature.Mutation] then
-		return Mutations[creature.Mutation].Name .. " " .. name
+		name = Mutations[creature.Mutation].Name .. " " .. name
+	end
+	local size = CreatureMath.SizeOf(creature)
+	if size >= Sizes.Tiers[3].Min then
+		name = CreatureMath.SizeTier(size).Id .. " " .. name
 	end
 	return name
 end
@@ -3376,7 +3567,7 @@ return CreatureMath
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">Progress</string>
             <string name="Source"><![CDATA[--[[
@@ -3670,7 +3861,7 @@ return Progress
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">Rules</string>
             <string name="Source"><![CDATA[--!strict
@@ -3686,6 +3877,7 @@ local Foods = require(Config.Foods)
 local GameConfig = require(Config.GameConfig)
 local Rarities = require(Config.Rarities)
 local Store = require(Config.Store)
+local Upgrades = require(Config.Upgrades)
 local Types = require(script.Parent.Parent.Types)
 local CreatureMath = require(script.Parent.CreatureMath)
 local Progress = require(script.Parent.Progress)
@@ -3734,16 +3926,64 @@ end
 
 -- Pens / storage -------------------------------------------------------------
 
+-- Level of a base upgrade (0 if never bought).
+function Rules.UpgradeLevel(data: PlayerData, id: string): number
+	local levels = (data :: any).Upgrades
+	return if levels and type(levels[id]) == "number" then levels[id] else 0
+end
+
 function Rules.MaxSlots(data: PlayerData): number
 	local perks = Rules.Perks(data)
 	return math.min(
 		GameConfig.MaxSlots,
-		GameConfig.StartingSlots + data.Rebirths * GameConfig.SlotsPerRebirth + perks.ExtraSlots
+		GameConfig.StartingSlots
+			+ data.Rebirths * GameConfig.SlotsPerRebirth
+			+ perks.ExtraSlots
+			+ Rules.UpgradeLevel(data, "Pens") * Upgrades.Pens.Per
 	)
 end
 
 function Rules.StorageCap(data: PlayerData): number
-	return CreatureMath.StorageCap(data.Rebirths) + Rules.Perks(data).ExtraStorage
+	return CreatureMath.StorageCap(data.Rebirths)
+		+ Rules.Perks(data).ExtraStorage
+		+ Rules.UpgradeLevel(data, "Storage") * Upgrades.Storage.Per
+end
+
+-- Base upgrades ---------------------------------------------------------------
+
+-- Cash cost of the next level, or nil when maxed / not available yet.
+function Rules.UpgradeCost(data: PlayerData, id: string): number?
+	local def = Upgrades[id]
+	if not def or not def.Enabled then
+		return nil
+	end
+	local level = Rules.UpgradeLevel(data, id)
+	if level >= def.Max then
+		return nil
+	end
+	return math.floor(def.BaseCost * def.Growth ^ level)
+end
+
+-- Buys one level of an upgrade. Returns ok, and a reason when it fails.
+function Rules.BuyUpgrade(data: PlayerData, id: string): (boolean, string?)
+	local def = Upgrades[id]
+	if not def then
+		return false, "Unknown upgrade"
+	end
+	if not def.Enabled then
+		return false, "Coming soon!"
+	end
+	local cost = Rules.UpgradeCost(data, id)
+	if not cost then
+		return false, "Already maxed!"
+	end
+	if data.Cash < cost then
+		return false, "Not enough cash"
+	end
+	data.Cash -= cost
+	local levels = (data :: any).Upgrades
+	levels[id] = Rules.UpgradeLevel(data, id) + 1
+	return true, nil
 end
 
 function Rules.HasFreeSlot(data: PlayerData): boolean
@@ -3950,7 +4190,7 @@ return Rules
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">Tags</string>
             <string name="Source"><![CDATA[--!strict
@@ -3982,22 +4222,53 @@ return {
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="30">
+      <Item class="Folder" referent="32">
         <Properties>
           <string name="Name">Lib</string>
         </Properties>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">Format</string>
             <string name="Source"><![CDATA[local Format = {}
 
-local SUFFIXES = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc" }
+local SUFFIXES = {
+	"",
+	"K",
+	"M",
+	"B",
+	"T",
+	"Qa",
+	"Qi",
+	"Sx",
+	"Sp",
+	"Oc",
+	"No",
+	"Dc",
+	"Ud",
+	"Dd",
+	"Td",
+	"Qad",
+	"Qid",
+	"Sxd",
+	"Spd",
+	"Ocd",
+	"Nod",
+	"Vg",
+}
 
 -- 1234 -> "1.23K", 5000000 -> "5M"
 function Format.Number(n: number): string
 	n = n or 0
-	if n < 1000 then
+	if n ~= n then
+		return "0"
+	elseif n < 0 then
+		return "-" .. Format.Number(-n)
+	elseif n == math.huge then
+		return "∞"
+	elseif n < 1000 then
 		return tostring(math.floor(n))
+	elseif n >= 1e66 then
+		return string.format("%.2e", n) -- past Vigintillion: scientific notation
 	end
 	local i = 1
 	-- 999.5 so that values which round up (999999 -> "1000K") use the next suffix
@@ -4045,7 +4316,7 @@ return Format
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">Guard</string>
             <string name="Source"><![CDATA[--!strict
@@ -4108,7 +4379,7 @@ return Guard
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">Loader</string>
             <string name="Source"><![CDATA[--[[
@@ -4198,7 +4469,7 @@ return Loader
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">Log</string>
             <string name="Source"><![CDATA[--[[
@@ -4261,7 +4532,7 @@ return Log
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">Rng</string>
             <string name="Source"><![CDATA[--!strict
@@ -4305,7 +4576,7 @@ return Rng
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">Signal</string>
             <string name="Source"><![CDATA[--[[
@@ -4393,7 +4664,7 @@ return Signal
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">Trove</string>
             <string name="Source"><![CDATA[--[[
@@ -4461,7 +4732,7 @@ return Trove
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">WeightedRandom</string>
             <string name="Source"><![CDATA[local WeightedRandom = {}
@@ -4490,7 +4761,7 @@ return WeightedRandom
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="39">
+      <Item class="ModuleScript" referent="41">
         <Properties>
           <string name="Name">Net</string>
           <string name="Source"><![CDATA[--[[
@@ -4627,7 +4898,7 @@ end
 return Net
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="40">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">Remotes</string>
             <string name="Source"><![CDATA[--!strict
@@ -4666,6 +4937,7 @@ local Remotes: { [string]: RemoteSpec } = {
 	BuyFood = { Direction = "ToServer", Args = { "string", "integer" }, RateLimit = 0.2 },
 	SelectFood = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.1 },
 	LockStorage = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	BuyUpgrade = { Direction = "ToServer", Args = { "string" }, RateLimit = 4 }, -- base upgrade id
 	Rebirth = { Direction = "ToServer", Args = {}, RateLimit = 2 },
 	TeleportHome = { Direction = "ToServer", Args = {}, RateLimit = 3 },
 	Equip = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },
@@ -4694,7 +4966,7 @@ return Remotes
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="41">
+      <Item class="ModuleScript" referent="43">
         <Properties>
           <string name="Name">Types</string>
           <string name="Source"><![CDATA[--!strict
@@ -4708,7 +4980,20 @@ export type CreatureData = {
 	Level: number,
 	Xp: number,
 	Mutation: string?,
+	Size: number?, -- x1 .. x100,000 size multiplier (Config/Sizes.lua)
+	Tamed: boolean?, -- false while a wild titan is being tamed (Phase 1)
+	Saddle: string?, -- saddle item id; needed to ride (Phase 1)
+	Hunger: number?, -- 0..100 (Phase 3)
 }
+
+export type InventoryItem = { Id: string, Count: number }
+export type Inventory = {
+	Resources: { [string]: number }, -- wood, stone, fiber, metal, crystal...
+	Items: { InventoryItem }, -- tools, saddles, food, ammo (stacks)
+}
+-- A placed build piece in the base (plot-local position, rotation in degrees).
+export type Structure = { Id: string, X: number, Y: number, Z: number, R: number, Hp: number? }
+export type Upgrades = { Pens: number, Storage: number, Incubators: number }
 
 export type PlayerStats = {
 	StarterGiven: boolean,
@@ -4748,6 +5033,9 @@ export type PlayerData = {
 	Settings: { Music: boolean, Sfx: boolean },
 	Stats: PlayerStats,
 	LastOnline: number,
+	Inventory: Inventory,
+	Structures: { Structure },
+	Upgrades: Upgrades,
 }
 
 -- What the client UI receives (PlayerData + computed values).
@@ -4780,6 +5068,8 @@ export type Snapshot = {
 	LockCooldownUntil: number?,
 	ServerTime: number?,
 	IsAdmin: boolean?,
+	Upgrades: Upgrades?,
+	Inventory: Inventory?,
 }
 
 -- Modules must return exactly one non-nil value.
@@ -4789,19 +5079,19 @@ return {}
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="42">
+  <Item class="ServerScriptService" referent="44">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="43">
+    <Item class="Folder" referent="45">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Folder" referent="44">
+      <Item class="Folder" referent="46">
         <Properties>
           <string name="Name">Data</string>
         </Properties>
-        <Item class="ModuleScript" referent="45">
+        <Item class="ModuleScript" referent="47">
           <Properties>
             <string name="Name">Schema</string>
             <string name="Source"><![CDATA[--!strict
@@ -4826,7 +5116,7 @@ type PlayerData = Types.PlayerData
 
 local Schema = {}
 
-Schema.CURRENT_VERSION = 3
+Schema.CURRENT_VERSION = 4
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -4875,7 +5165,19 @@ function Schema.Template(): PlayerData
 			CashEarned = 0,
 		},
 		LastOnline = 0,
+		-- v4 (ARK-style foundation)
+		Inventory = { Resources = {}, Items = {} },
+		Structures = {},
+		Upgrades = { Pens = 0, Storage = 0, Incubators = 0 },
 	}
+end
+
+-- Defaults for the titan fields added in v4 (used by migration and new titans).
+function Schema.FillCreature(creature: any)
+	creature.Size = if type(creature.Size) == "number" then creature.Size else 1
+	creature.Tamed = if creature.Tamed == nil then true else creature.Tamed
+	creature.Hunger = if type(creature.Hunger) == "number" then creature.Hunger else 100
+	-- Saddle stays nil until one is crafted (Phase 3)
 end
 
 -- Migrations[v] upgrades a save from version v to v + 1.
@@ -4894,6 +5196,13 @@ local Migrations: { [number]: (any) -> () } = {
 		local played = data.Stats and (data.Stats.FoodEaten or 0) > 30
 		data.Tutorial = if played then 0 else 1
 	end,
+	[3] = function(data)
+		-- v4: ARK-style foundation. Titans get Size/Tamed/Hunger; the save gets
+		-- Inventory, Structures and base Upgrades (reconcile adds the tables).
+		for _, creature in data.Creatures or {} do
+			Schema.FillCreature(creature)
+		end
+	end,
 }
 Schema.Migrations = Migrations
 
@@ -4906,13 +5215,55 @@ local function reconcile(data: any)
 			data[key] = value
 		end
 	end
-	for _, section in { "Stats", "Settings", "Daily", "Quests" } do
+	for _, section in { "Stats", "Settings", "Daily", "Quests", "Inventory", "Upgrades" } do
 		for key, value in template[section] do
 			if data[section][key] == nil then
 				data[section][key] = value
 			end
 		end
 	end
+end
+
+-- Keeps a save inside GameConfig.Data.Limits (drops the newest extra
+-- structures / item stacks). Returns how many entries were removed.
+function Schema.Trim(data: PlayerData): number
+	local limits = GameConfig.Data.Limits
+	local removed = 0
+	while #data.Structures > limits.Structures do
+		table.remove(data.Structures)
+		removed += 1
+	end
+	while #data.Inventory.Items > limits.ItemStacks do
+		table.remove(data.Inventory.Items)
+		removed += 1
+	end
+	local kinds = {}
+	for id in data.Inventory.Resources do
+		table.insert(kinds, id)
+	end
+	table.sort(kinds)
+	for i = limits.ResourceKinds + 1, #kinds do
+		data.Inventory.Resources[kinds[i]] = nil
+		removed += 1
+	end
+	return removed
+end
+
+-- Rough size of the save in bytes when stored as JSON (for tests and warnings).
+function Schema.EstimateSize(value: any): number
+	local t = type(value)
+	if t == "table" then
+		local size = 2
+		for k, v in value do
+			size += Schema.EstimateSize(k) + Schema.EstimateSize(v) + 2
+		end
+		return size
+	elseif t == "string" then
+		return #value + 2
+	elseif t == "number" then
+		return #tostring(value)
+	end
+	return 5
 end
 
 -- Turns any stored value into a valid, up-to-date save.
@@ -4937,7 +5288,7 @@ return Schema
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="46">
+        <Item class="ModuleScript" referent="48">
           <Properties>
             <string name="Name">SessionStore</string>
             <string name="Source"><![CDATA[--[[
@@ -5068,7 +5419,7 @@ return SessionStore
           </Properties>
         </Item>
       </Item>
-      <Item class="Script" referent="47">
+      <Item class="Script" referent="49">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -5139,11 +5490,11 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="48">
+      <Item class="Folder" referent="50">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="49">
+        <Item class="ModuleScript" referent="51">
           <Properties>
             <string name="Name">CreatureBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -5435,7 +5786,7 @@ return CreatureBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="50">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">FoodBuilder</string>
             <string name="Source"><![CDATA[--[[
@@ -5607,7 +5958,7 @@ return FoodBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="51">
+        <Item class="ModuleScript" referent="53">
           <Properties>
             <string name="Name">GameEvents</string>
             <string name="Source"><![CDATA[--[[
@@ -5656,11 +6007,11 @@ return GameEvents
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="52">
+        <Item class="Folder" referent="54">
           <Properties>
             <string name="Name">Map</string>
           </Properties>
-          <Item class="ModuleScript" referent="53">
+          <Item class="ModuleScript" referent="55">
             <Properties>
               <string name="Name">MapGenerator</string>
               <string name="Source"><![CDATA[--[[
@@ -6292,7 +6643,7 @@ return MapGenerator
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="54">
+          <Item class="ModuleScript" referent="56">
             <Properties>
               <string name="Name">Props</string>
               <string name="Source"><![CDATA[--[[
@@ -6686,7 +7037,7 @@ return Props
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="55">
+          <Item class="ModuleScript" referent="57">
             <Properties>
               <string name="Name">StudGround</string>
               <string name="Source"><![CDATA[--[[
@@ -6853,15 +7204,15 @@ return StudGround
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="56">
+      <Item class="Folder" referent="58">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="Folder" referent="57">
+        <Item class="Folder" referent="59">
           <Properties>
             <string name="Name">Base</string>
           </Properties>
-          <Item class="ModuleScript" referent="58">
+          <Item class="ModuleScript" referent="60">
             <Properties>
               <string name="Name">BaseService</string>
               <string name="Source"><![CDATA[--[[
@@ -6932,10 +7283,11 @@ local PLOT_COLORS = {
 	Color3.fromRGB(230, 190, 140),
 }
 
--- Pen grid (plot-local X, Z). Front of the base is -Z (towards the arena).
-local PEN_X = { -24, -8, 8, 24 }
-local PEN_Z = { 2, 22 }
-local PEN_SIZE = 15
+-- Pen grid (plot-local X, Z): 6 x 4 = 24 pens. Front of the base is -Z
+-- (towards the island center). Order = unlock order (front rows first).
+local PEN_X = { -55, -33, -11, 11, 33, 55 }
+local PEN_Z = { -22, 2, 26, 50 }
+local PEN_SIZE = 20
 
 local function makePart(parent: Instance, props: { [string]: any }): Part
 	local part = Instance.new("Part")
@@ -7141,7 +7493,7 @@ function BaseService:_build(parent: Instance, index: number, anchorCf: CFrame): 
 			lockSign.LightInfluence = 0
 			lockSign.Enabled = false
 			lockSign.Parent = holder
-			textLabel(lockSign, "🔒 Rebirth to unlock", Color3.fromRGB(200, 200, 220))
+			textLabel(lockSign, "🔒 Upgrade or Rebirth", Color3.fromRGB(200, 200, 220))
 			table.insert(slots, slotCf * CFrame.new(0, 0.35, 0))
 			table.insert(penSigns, lockSign)
 		end
@@ -7322,7 +7674,7 @@ return BaseService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="59">
+          <Item class="ModuleScript" referent="61">
             <Properties>
               <string name="Name">CreatureService</string>
               <string name="Source"><![CDATA[--[[
@@ -7359,6 +7711,7 @@ local Net = require(Shared.Net)
 
 local ServerModules = ServerScriptService:WaitForChild("Server").Modules
 local CreatureBuilder = require(ServerModules.CreatureBuilder)
+local Schema = require(ServerModules.Parent.Data.Schema)
 local GameEvents = require(ServerModules.GameEvents)
 
 local CreatureService = {
@@ -7597,7 +7950,7 @@ function CreatureService:_rescale(player: Player, uid: string)
 	if not model or not creature then
 		return
 	end
-	local scale = CreatureMath.Scale(creature.Level)
+	local scale = CreatureMath.VisualScale(creature)
 	if math.abs(model:GetScale() - scale) > 1e-3 then
 		model:ScaleTo(scale)
 	end
@@ -7628,7 +7981,14 @@ function CreatureService:_refreshTag(player: Player, uid: string)
 	nameLabel.TextColor3 = if creature.Mutation then Mutations[creature.Mutation].Color else Rarities[def.Rarity].Color
 	local income = CreatureMath.BaseIncome(creature) * Rules.IncomeMultiplier(data, self:IncomeContext(player))
 	local info = tag:FindFirstChild("InfoLabel") :: TextLabel
-	info.Text = string.format("Lv.%d • %s/s", creature.Level, Format.Money(income))
+	local tier = CreatureMath.SizeTier(creature.Size)
+	info.Text = string.format(
+		"Lv.%d • %s %s • %s/s",
+		creature.Level,
+		tier.Id,
+		CreatureMath.SizeLabel(creature.Size),
+		Format.Money(income)
+	)
 	info.TextColor3 = Color3.fromRGB(120, 255, 130)
 	model:SetAttribute("Income", income) -- client pops "+$" over your titans
 	local stats = Battle.Stats(creature)
@@ -7667,6 +8027,12 @@ function CreatureService:_layout(player: Player)
 	end
 end
 
+-- Rebuilds a titan's model (after its size, mutation or looks changed).
+function CreatureService:Rebuild(player: Player, uid: string)
+	self:_rebuild(player, uid)
+	self:_layout(player)
+end
+
 function CreatureService:_rebuild(player: Player, uid: string)
 	local model = self:GetModel(player, uid)
 	if model then
@@ -7681,7 +8047,7 @@ end
 -- Actions
 --------------------------------------------------------------------------
 
-function CreatureService:Add(player: Player, creatureId: string, mutation: string?): string?
+function CreatureService:Add(player: Player, creatureId: string, mutation: string?, size: number?): string?
 	local data = Data:Get(player)
 	if not data or not Creatures[creatureId] then
 		return nil
@@ -7691,7 +8057,9 @@ function CreatureService:Add(player: Player, creatureId: string, mutation: strin
 	end
 	local uid = tostring(data.NextUid)
 	data.NextUid += 1
-	data.Creatures[uid] = { Id = creatureId, Level = 1, Xp = 0, Mutation = mutation }
+	data.Creatures[uid] =
+		{ Id = creatureId, Level = 1, Xp = 0, Mutation = mutation, Size = CreatureMath.ClampSize(size) }
+	Schema.FillCreature(data.Creatures[uid])
 	data.Index[creatureId] = true
 	if mutation then
 		data.Index[creatureId .. ":" .. mutation] = true
@@ -7901,12 +8269,213 @@ return CreatureService
 ]]></string>
             </Properties>
           </Item>
+          <Item class="ModuleScript" referent="62">
+            <Properties>
+              <string name="Name">UpgradeService</string>
+              <string name="Source"><![CDATA[--[[
+	UpgradeService: the upgrade board at every base (pens, storage,
+	incubators). Walk up to it and hold E on an upgrade to buy one level.
+	Costs and effects are in Config/Upgrades.lua; the rules (cost, max,
+	how many pens) are in shared/Game/Rules.lua so the UI shows the same.
+
+	Remote: BuyUpgrade(id) for menus.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Upgrades = require(Shared.Config.Upgrades)
+local Rules = require(Shared.Game.Rules)
+local Format = require(Shared.Lib.Format)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+
+local StudGround = require(ServerScriptService:WaitForChild("Server").Modules.Map.StudGround)
+
+local log = Log.new("UpgradeService")
+
+local UpgradeService = {
+	Priority = 22, -- after BaseService (10) built the plots
+	Boards = {} :: { [number]: { Prompts: { [string]: ProximityPrompt }, Labels: { [string]: TextLabel } } },
+}
+
+local Data, Base, Creature, Food, Fx
+
+local RED = Color3.fromRGB(255, 90, 90)
+local GOLD = Color3.fromRGB(255, 210, 60)
+
+function UpgradeService:Init(registry)
+	Data = registry.DataService
+	Base = registry.BaseService
+	Creature = registry.CreatureService
+	Food = registry.FoodService
+	Fx = registry.FxService
+end
+
+local function label(parent: Instance, text: string, color: Color3?, size: UDim2, position: UDim2): TextLabel
+	local l = Instance.new("TextLabel")
+	l.Size = size
+	l.Position = position
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.FredokaOne
+	l.TextScaled = true
+	l.TextColor3 = color or Color3.new(1, 1, 1)
+	l.Text = text
+	l.Parent = parent
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Parent = l
+	return l
+end
+
+-- Builds the board next to the entrance of one plot.
+function UpgradeService:_build(plot)
+	local S = GameConfig.Plots.Size
+	local cf = plot.CFrame * CFrame.new(24, 0, -S / 2 + 12)
+	local model = Instance.new("Model")
+	model.Name = "UpgradeBoard"
+	local function part(name: string, size: Vector3, offset: CFrame, color: Color3): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Anchored = true
+		p.Size = size
+		p.CFrame = cf * offset
+		p.Color = color
+		p.Parent = model
+		return p
+	end
+	for _, x in { -9, 9 } do
+		part("Post", Vector3.new(1.5, 14, 1.5), CFrame.new(x, 7, 0), Color3.fromRGB(110, 80, 55))
+	end
+	local board = part("Board", Vector3.new(20, 11, 1), CFrame.new(0, 9, 0), Color3.fromRGB(35, 38, 55))
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front -- faces the entrance (-Z)
+	gui.CanvasSize = Vector2.new(400, 220)
+	gui.LightInfluence = 0
+	gui.Parent = board
+	label(gui, "⬆️ BASE UPGRADES", GOLD, UDim2.new(1, 0, 0, 44), UDim2.fromOffset(0, 4))
+	local entry = { Prompts = {}, Labels = {} }
+	for i, id in Upgrades.Order do
+		local def = Upgrades[id]
+		entry.Labels[id] = label(
+			gui,
+			def.Icon .. " " .. def.Name,
+			if def.Enabled then Color3.new(1, 1, 1) else Color3.fromRGB(150, 150, 170),
+			UDim2.new(1, -16, 0, 50),
+			UDim2.fromOffset(8, 50 + (i - 1) * 56)
+		)
+		-- A button pad per upgrade in front of the board
+		local pad = part(
+			"Pad_" .. id,
+			Vector3.new(5, 1, 3),
+			CFrame.new((i - 2) * 6.5, 0.5, -4),
+			if def.Enabled then Color3.fromRGB(80, 200, 90) else Color3.fromRGB(120, 120, 130)
+		)
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "Upgrade_" .. id
+		prompt.ActionText = def.Icon .. " " .. def.Name
+		prompt.HoldDuration = 0.4
+		prompt.MaxActivationDistance = 10
+		prompt.RequiresLineOfSight = false
+		prompt:SetAttribute("OnlyUserId", -1) -- only the owner sees it
+		prompt.Parent = pad
+		prompt.Triggered:Connect(function(player)
+			if Base:GetPlot(player) == plot then
+				self:Buy(player, id)
+			end
+		end)
+		entry.Prompts[id] = prompt
+	end
+	if GameConfig.Map.Style ~= "Terrain" then
+		StudGround.Style(model)
+	end
+	model.Parent = plot.Model
+	self.Boards[plot.Index] = entry
+end
+
+function UpgradeService:Start()
+	for _, plot in Base.Plots do
+		self:_build(plot)
+	end
+	Net.On("BuyUpgrade", function(player, id)
+		self:Buy(player, id)
+	end)
+	log:Info("upgrade boards built:", #Base.Plots)
+end
+
+function UpgradeService:OnPlayerReady(player: Player)
+	self:Refresh(player)
+end
+
+function UpgradeService:OnPlayerRemoving(player: Player)
+	local plot = Base:GetPlot(player)
+	local board = plot and self.Boards[plot.Index]
+	if board then
+		for id, prompt in board.Prompts do
+			prompt:SetAttribute("OnlyUserId", -1)
+			board.Labels[id].Text = Upgrades[id].Icon .. " " .. Upgrades[id].Name
+		end
+	end
+end
+
+-- Updates the board text and prompt prices for a player's base.
+function UpgradeService:Refresh(player: Player)
+	local plot = Base:GetPlot(player)
+	local data = Data:Get(player)
+	local board = plot and self.Boards[plot.Index]
+	if not board or not data then
+		return
+	end
+	for id, prompt in board.Prompts do
+		local def = Upgrades[id]
+		local level = Rules.UpgradeLevel(data, id)
+		local cost = Rules.UpgradeCost(data, id)
+		prompt:SetAttribute("OnlyUserId", player.UserId)
+		local status = if not def.Enabled then "Coming soon" elseif cost then Format.Money(cost) else "MAX"
+		prompt.ObjectText = def.Text .. " • " .. status
+		board.Labels[id].Text = string.format("%s %s  Lv.%d/%d  %s", def.Icon, def.Name, level, def.Max, status)
+	end
+end
+
+function UpgradeService:Buy(player: Player, id: string)
+	local data = Data:Get(player)
+	if not data or not Upgrades[id] then
+		return
+	end
+	local ok, reason = Rules.BuyUpgrade(data, id)
+	if not ok then
+		Net.Notify(player, "⬆️ " .. (reason or "Can't upgrade"), RED)
+		return
+	end
+	log:Info(player.Name, "bought", id, "level", Rules.UpgradeLevel(data, id))
+	local plot = Base:GetPlot(player)
+	if plot then
+		Fx:PlayAll("LevelUp", {
+			Position = plot.CFrame.Position + Vector3.new(0, 6, 0),
+			Level = Rules.UpgradeLevel(data, id),
+			Owner = player.UserId,
+		})
+	end
+	Net.Notify(player, "⬆️ " .. Upgrades[id].Name .. " upgraded! " .. Upgrades[id].Text, GOLD)
+	Base:RefreshPens(player)
+	Food:RefreshStorage(player)
+	Creature:RefreshAllTags(player)
+	self:Refresh(player)
+	Data:Changed(player)
+end
+
+return UpgradeService
+]]></string>
+            </Properties>
+          </Item>
         </Item>
-        <Item class="Folder" referent="60">
+        <Item class="Folder" referent="63">
           <Properties>
             <string name="Name">Battle</string>
           </Properties>
-          <Item class="ModuleScript" referent="61">
+          <Item class="ModuleScript" referent="64">
             <Properties>
               <string name="Name">BattleService</string>
               <string name="Source"><![CDATA[--[[
@@ -8997,11 +9566,11 @@ return BattleService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="62">
+        <Item class="Folder" referent="65">
           <Properties>
             <string name="Name">Core</string>
           </Properties>
-          <Item class="ModuleScript" referent="63">
+          <Item class="ModuleScript" referent="66">
             <Properties>
               <string name="Name">AdminService</string>
               <string name="Source"><![CDATA[--[[
@@ -9010,7 +9579,8 @@ return BattleService
 	Use the 🛠️ Admin page in the menu. Commands:
 
 	  cash <amount>            food <FoodId> <amount>     trophies <amount>
-	  give <TitanId> [Mutation] level <1-100>              boost <Id> <minutes>
+	  give <TitanId> [Mutation] [Size]                     level <1-100>   boost <Id> <minutes>
+	  size <1-100000>  (all your titans)   res <Resource> <amount>   upgrade <Pens|Storage|Incubators>
 	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
 	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
 	  tutorial                 daily                      quests
@@ -9026,6 +9596,8 @@ local Creatures = require(Shared.Config.Creatures)
 local Foods = require(Shared.Config.Foods)
 local GameConfig = require(Shared.Config.GameConfig)
 local Mutations = require(Shared.Config.Mutations)
+local Upgrades = require(Shared.Config.Upgrades)
+local CreatureMath = require(Shared.Game.CreatureMath)
 local Progress = require(Shared.Game.Progress)
 local Guard = require(Shared.Lib.Guard)
 local Log = require(Shared.Lib.Log)
@@ -9037,7 +9609,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle, Wild
+local Data, Creature, Food, Event, Battle, Wild, Base
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -9046,6 +9618,7 @@ function AdminService:Init(registry)
 	Event = registry.EventService
 	Battle = registry.BattleService
 	Wild = registry.WildService
+	Base = registry.BaseService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -9099,9 +9672,22 @@ function AdminService:Run(player: Player, text: string): string?
 		Food:RefreshStorage(player)
 	elseif command == "give" and Creatures[args[2] or ""] then
 		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
-		if not Creature:Add(player, args[2], mutation) then
+		local size = tonumber(args[4]) or tonumber(args[3])
+		if not Creature:Add(player, args[2], mutation, size) then
 			return "No free pen!"
 		end
+	elseif command == "size" and number then
+		for uid, creature in data.Creatures do
+			creature.Size = CreatureMath.ClampSize(number)
+			Creature:Rebuild(player, uid)
+		end
+	elseif command == "res" and args[2] then
+		local id = string.sub(args[2], 1, 24)
+		data.Inventory.Resources[id] = (data.Inventory.Resources[id] or 0) + (tonumber(args[3]) or 50)
+	elseif command == "upgrade" and args[2] and Upgrades[args[2]] and Upgrades[args[2]].Name then
+		data.Upgrades[args[2]] = math.min(Upgrades[args[2]].Max, (data.Upgrades[args[2]] or 0) + 1)
+		Base:RefreshPens(player)
+		Food:RefreshStorage(player)
 	elseif command == "wild" then
 		local id = if Creatures[args[2] or ""] then args[2] else nil
 		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
@@ -9128,7 +9714,7 @@ function AdminService:Run(player: Player, text: string): string?
 		data.Quests.Day = -1
 		Progress.EnsureQuests(data.Quests, Progress.Day(os.time()), player.UserId + math.random(1, 1e6), data.Rebirths)
 	else
-		return "Unknown command. Try: cash 100000, food StarFood 5, give Hydra Golden, level 50, event TitanClash"
+		return "Unknown command. Try: cash 100000, give Hydra Golden 5000, size 1000, res Wood 50, upgrade Pens, level 50"
 	end
 	Data:Changed(player)
 	return "Done: " .. text
@@ -9151,7 +9737,7 @@ return AdminService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="64">
+          <Item class="ModuleScript" referent="67">
             <Properties>
               <string name="Name">DataService</string>
               <string name="Source"><![CDATA[--[[
@@ -9284,6 +9870,10 @@ function DataService:Save(player: Player, release: boolean?)
 	data.Stats.PlayTime += os.time() - profile.JoinedAt
 	profile.JoinedAt = os.time()
 	data.LastOnline = os.time()
+	local trimmed = Schema.Trim(data)
+	if trimmed > 0 then
+		log:Warn("trimmed", trimmed, "entries from", player.Name, "'s save (over the limits)")
+	end
 	local ok, lostLock = self._store:Save(profile.Key, data, release)
 	if lostLock then
 		-- Another server loaded this player (e.g. they joined somewhere else).
@@ -9336,6 +9926,8 @@ function DataService:BuildSnapshot(player: Player): Types.Snapshot
 		Passes = data.Passes,
 		Settings = data.Settings,
 		Stats = data.Stats,
+		Upgrades = data.Upgrades,
+		Inventory = data.Inventory,
 		ServerTime = os.time(),
 	}
 	for _, hook in self._hooks do
@@ -9369,7 +9961,7 @@ return DataService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="65">
+          <Item class="ModuleScript" referent="68">
             <Properties>
               <string name="Name">FxService</string>
               <string name="Source"><![CDATA[--[[
@@ -9412,7 +10004,7 @@ return FxService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="66">
+          <Item class="ModuleScript" referent="69">
             <Properties>
               <string name="Name">SettingsService</string>
               <string name="Source"><![CDATA[--[[
@@ -9450,11 +10042,11 @@ return SettingsService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="67">
+        <Item class="Folder" referent="70">
           <Properties>
             <string name="Name">Economy</string>
           </Properties>
-          <Item class="ModuleScript" referent="68">
+          <Item class="ModuleScript" referent="71">
             <Properties>
               <string name="Name">EggService</string>
               <string name="Source"><![CDATA[--[[
@@ -9579,7 +10171,7 @@ return EggService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="69">
+          <Item class="ModuleScript" referent="72">
             <Properties>
               <string name="Name">RebirthService</string>
               <string name="Source"><![CDATA[--[[
@@ -9662,11 +10254,11 @@ return RebirthService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="70">
+        <Item class="Folder" referent="73">
           <Properties>
             <string name="Name">Events</string>
           </Properties>
-          <Item class="ModuleScript" referent="71">
+          <Item class="ModuleScript" referent="74">
             <Properties>
               <string name="Name">EventService</string>
               <string name="Source"><![CDATA[--[[
@@ -9817,11 +10409,11 @@ return EventService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="72">
+        <Item class="Folder" referent="75">
           <Properties>
             <string name="Name">Food</string>
           </Properties>
-          <Item class="ModuleScript" referent="73">
+          <Item class="ModuleScript" referent="76">
             <Properties>
               <string name="Name">FoodService</string>
               <string name="Source"><![CDATA[--[[
@@ -10176,7 +10768,7 @@ return FoodService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="74">
+          <Item class="ModuleScript" referent="77">
             <Properties>
               <string name="Name">StealService</string>
               <string name="Source"><![CDATA[--[[
@@ -10486,11 +11078,11 @@ return StealService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="75">
+        <Item class="Folder" referent="78">
           <Properties>
             <string name="Name">Progress</string>
           </Properties>
-          <Item class="ModuleScript" referent="76">
+          <Item class="ModuleScript" referent="79">
             <Properties>
               <string name="Name">CodeService</string>
               <string name="Source"><![CDATA[--[[
@@ -10539,7 +11131,7 @@ return CodeService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="77">
+          <Item class="ModuleScript" referent="80">
             <Properties>
               <string name="Name">DailyRewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -10588,7 +11180,7 @@ return DailyRewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="78">
+          <Item class="ModuleScript" referent="81">
             <Properties>
               <string name="Name">IndexService</string>
               <string name="Source"><![CDATA[--[[
@@ -10638,7 +11230,7 @@ return IndexService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="79">
+          <Item class="ModuleScript" referent="82">
             <Properties>
               <string name="Name">OfflineService</string>
               <string name="Source"><![CDATA[--[[
@@ -10689,7 +11281,7 @@ return OfflineService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="80">
+          <Item class="ModuleScript" referent="83">
             <Properties>
               <string name="Name">QuestService</string>
               <string name="Source"><![CDATA[--[[
@@ -10793,7 +11385,7 @@ return QuestService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="81">
+          <Item class="ModuleScript" referent="84">
             <Properties>
               <string name="Name">RewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -10863,7 +11455,7 @@ return RewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="82">
+          <Item class="ModuleScript" referent="85">
             <Properties>
               <string name="Name">TutorialService</string>
               <string name="Source"><![CDATA[--[[
@@ -10938,11 +11530,11 @@ return TutorialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="83">
+        <Item class="Folder" referent="86">
           <Properties>
             <string name="Name">Social</string>
           </Properties>
-          <Item class="ModuleScript" referent="84">
+          <Item class="ModuleScript" referent="87">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -11130,7 +11722,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="85">
+          <Item class="ModuleScript" referent="88">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -11329,7 +11921,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="86">
+          <Item class="ModuleScript" referent="89">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -11505,11 +12097,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="87">
+        <Item class="Folder" referent="90">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="88">
+          <Item class="ModuleScript" referent="91">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -11647,11 +12239,11 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="89">
+        <Item class="Folder" referent="92">
           <Properties>
             <string name="Name">Wild</string>
           </Properties>
-          <Item class="ModuleScript" referent="90">
+          <Item class="ModuleScript" referent="93">
             <Properties>
               <string name="Name">WildService</string>
               <string name="Source"><![CDATA[--[[
@@ -12061,11 +12653,11 @@ return WildService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="91">
+        <Item class="Folder" referent="94">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="92">
+          <Item class="ModuleScript" referent="95">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -12277,7 +12869,7 @@ return MapService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="93">
+          <Item class="ModuleScript" referent="96">
             <Properties>
               <string name="Name">PortalService</string>
               <string name="Source"><![CDATA[--[[
@@ -12356,23 +12948,23 @@ return PortalService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="94">
+  <Item class="StarterPlayer" referent="97">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="95">
+    <Item class="StarterPlayerScripts" referent="98">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="96">
+      <Item class="Folder" referent="99">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="97">
+        <Item class="Folder" referent="100">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="98">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -12485,7 +13077,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="99">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -12588,7 +13180,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="100">
+          <Item class="ModuleScript" referent="103">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -12639,7 +13231,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="104">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -12693,7 +13285,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -12779,7 +13371,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="103">
+          <Item class="ModuleScript" referent="106">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -12842,7 +13434,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="104">
+          <Item class="ModuleScript" referent="107">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -12869,7 +13461,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="105">
+          <Item class="ModuleScript" referent="108">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -13040,7 +13632,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="106">
+          <Item class="ModuleScript" referent="109">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -13158,7 +13750,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="107">
+          <Item class="ModuleScript" referent="110">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -13228,7 +13820,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="108">
+        <Item class="LocalScript" referent="111">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -13245,11 +13837,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="109">
+        <Item class="Folder" referent="112">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="110">
+          <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -13284,11 +13876,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="111">
+        <Item class="Folder" referent="114">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="112">
+          <Item class="ModuleScript" referent="115">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -13507,7 +14099,7 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="113">
+          <Item class="ModuleScript" referent="116">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
@@ -13660,7 +14252,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="114">
+          <Item class="ModuleScript" referent="117">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -14128,11 +14720,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="115">
+          <Item class="Folder" referent="118">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="116">
+            <Item class="ModuleScript" referent="119">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -14150,6 +14742,10 @@ local QUICK = {
 	"give Drake",
 	"trophies 100",
 	"boost Luck 30",
+	"give Rex Lava 5000",
+	"size 1000",
+	"upgrade Pens",
+	"res Wood 50",
 	"wild Hydra",
 	"wild Phoenix Golden",
 	"event TitanClash",
@@ -14210,7 +14806,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="117">
+            <Item class="ModuleScript" referent="120">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -14437,7 +15033,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="118">
+            <Item class="ModuleScript" referent="121">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14524,7 +15120,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="119">
+            <Item class="ModuleScript" referent="122">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14617,7 +15213,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="120">
+            <Item class="ModuleScript" referent="123">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14704,7 +15300,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="121">
+            <Item class="ModuleScript" referent="124">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14833,7 +15429,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="122">
+            <Item class="ModuleScript" referent="125">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14911,7 +15507,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="123">
+            <Item class="ModuleScript" referent="126">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14977,7 +15573,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="124">
+            <Item class="ModuleScript" referent="127">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -15088,7 +15684,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="125">
+            <Item class="ModuleScript" referent="128">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -15212,7 +15808,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="126">
+            <Item class="ModuleScript" referent="129">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -15370,7 +15966,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="127">
+          <Item class="ModuleScript" referent="130">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -15604,7 +16200,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="128">
+          <Item class="ModuleScript" referent="131">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -15819,7 +16415,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="129">
+          <Item class="ModuleScript" referent="132">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -15955,7 +16551,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="130">
+          <Item class="ModuleScript" referent="133">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -16086,7 +16682,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="131">
+  <Item class="Workspace" referent="134">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

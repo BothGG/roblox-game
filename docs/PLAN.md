@@ -20,11 +20,11 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
 4. **Fight like the movies:** you *become* your titan in the arena: walk, punch, special moves.
 5. **Effects sell it:** every action has a layered effect (charge-up → flash + shockwave + sparks →
    aftermath) and rare titans glow (ground ring, sparkles, sky beam). See §12.
-6. **Server drama:** 6–12 players on one island, so everyone sees who steals, who wins, who's King.
+6. **Server drama:** 6 players on one island, so everyone sees who steals, who wins, who's King.
 
 ## 2. Server & map
 
-- **Max players: 12** (`GameConfig.Plots.Count = 12`; set Max Players to 12 in Game Settings.
+- **Max players: 6** (`GameConfig.Plots.Count = 6`; set Max Players to 6 in Game Settings.
   Lower it to 6 by changing the one number.)
 - **Titan Island** (generated from code; replaceable with a hand-built map via tags):
 
@@ -33,7 +33,7 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
       [base]  [base]  [base]  [base]
    [base]    🌾 food fields 🌾    [base]
   [base]   🌾  ┌──────────┐  🌾    [base]
-  [base]   🌾  │  ARENA   │  🌾    [base]    12 bases around the island
+  [base]   🌾  │  ARENA   │  🌾    [base]    6 big bases (160 studs)
    [base]   🌾 │ (stands) │ 🌾    [base]    food fields in the ring
       [base]   └──────────┘   [base]         arena in the middle
              [base]   [base]

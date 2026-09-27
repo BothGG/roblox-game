@@ -1,12 +1,43 @@
 local Format = {}
 
-local SUFFIXES = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc" }
+local SUFFIXES = {
+	"",
+	"K",
+	"M",
+	"B",
+	"T",
+	"Qa",
+	"Qi",
+	"Sx",
+	"Sp",
+	"Oc",
+	"No",
+	"Dc",
+	"Ud",
+	"Dd",
+	"Td",
+	"Qad",
+	"Qid",
+	"Sxd",
+	"Spd",
+	"Ocd",
+	"Nod",
+	"Vg",
+}
 
 -- 1234 -> "1.23K", 5000000 -> "5M"
 function Format.Number(n: number): string
 	n = n or 0
-	if n < 1000 then
+	if n ~= n then
+		return "0"
+	elseif n < 0 then
+		return "-" .. Format.Number(-n)
+	elseif n == math.huge then
+		return "∞"
+	elseif n < 1000 then
 		return tostring(math.floor(n))
+	elseif n >= 1e66 then
+		return string.format("%.2e", n) -- past Vigintillion: scientific notation
 	end
 	local i = 1
 	-- 999.5 so that values which round up (999999 -> "1000K") use the next suffix

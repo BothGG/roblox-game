@@ -122,4 +122,57 @@ return function(t)
 		t.expect(Rules.TameChance("Rhinobug", true)).toBeGreaterThan(Rules.TameChance("Rhinobug", false))
 		t.expect(Rules.TameChance("Gloop", true) <= 1).toBe(true)
 	end)
+
+	t.test("size tiers, labels and caps", function()
+		t.expect(CreatureMath.SizeTier(1).Id).toBe("Tiny")
+		t.expect(CreatureMath.SizeTier(3).Id).toBe("Normal")
+		t.expect(CreatureMath.SizeTier(99).Id).toBe("Big")
+		t.expect(CreatureMath.SizeTier(1000).Id).toBe("Giant")
+		t.expect(CreatureMath.SizeTier(50000).Id).toBe("Titanic")
+		t.expect(CreatureMath.SizeTier(100000).Id).toBe("Mythical")
+		t.expect(CreatureMath.ClampSize(5e9)).toBe(100000)
+		t.expect(CreatureMath.ClampSize(0)).toBe(1)
+		t.expect(CreatureMath.ClampSize(nil)).toBe(1)
+		t.expect(CreatureMath.ClampSize(0 / 0)).toBe(1)
+		t.expect(CreatureMath.SizeLabel(1)).toBe("x1")
+		t.expect(CreatureMath.SizeLabel(2.5)).toBe("x2.5")
+		t.expect(CreatureMath.SizeLabel(1500)).toBe("x1.5K")
+		t.expect(CreatureMath.SizeLabel(100000)).toBe("x100K")
+	end)
+
+	t.test("income multiplies by size; model scale grows with log(size) and is capped", function()
+		local small = { Id = "Rex", Level = 10, Xp = 0 }
+		local big = { Id = "Rex", Level = 10, Xp = 0, Size = 1000 }
+		t.expect(CreatureMath.BaseIncome(big)).toBeCloseTo(CreatureMath.BaseIncome(small) * 1000, 1e-6)
+		t.expect(CreatureMath.SizeScale(1)).toBe(1)
+		t.expect(CreatureMath.SizeScale(100000)).toBeCloseTo(3, 1e-9)
+		local huge = { Id = "Rex", Level = 100, Xp = 0, Size = 100000 }
+		t.expect(CreatureMath.VisualScale(huge)).toBe(25) -- 12.88 * 3 would be 38.6
+		t.expect(CreatureMath.DisplayName(big)).toBe("Giant Rex")
+		t.expect(CreatureMath.DisplayName(small)).toBe("Rex")
+	end)
+
+	t.test("base upgrades: cost grows, pens and storage go up, capped at 24 pens", function()
+		local data = Schema.Template()
+		data.Cash = 1e12
+		local slots = Rules.MaxSlots(data)
+		local storage = Rules.StorageCap(data)
+		local first = Rules.UpgradeCost(data, "Pens")
+		t.expect(Rules.BuyUpgrade(data, "Pens")).toBe(true)
+		t.expect(Rules.MaxSlots(data)).toBe(slots + 1)
+		t.expect(Rules.UpgradeCost(data, "Pens") > (first :: number)).toBe(true)
+		t.expect(Rules.BuyUpgrade(data, "Storage")).toBe(true)
+		t.expect(Rules.StorageCap(data)).toBe(storage + 25)
+		t.expect((Rules.BuyUpgrade(data, "Incubators"))).toBe(false) -- Phase 2
+		for _ = 1, 40 do
+			Rules.BuyUpgrade(data, "Pens")
+		end
+		data.Rebirths = 50
+		t.expect(Rules.MaxSlots(data)).toBe(GameConfig.MaxSlots)
+		local poor = Schema.Template()
+		poor.Cash = 0
+		local ok, reason = Rules.BuyUpgrade(poor, "Pens")
+		t.expect(ok).toBe(false)
+		t.expect(reason).toBe("Not enough cash")
+	end)
 end

@@ -4,7 +4,8 @@
 	Use the 🛠️ Admin page in the menu. Commands:
 
 	  cash <amount>            food <FoodId> <amount>     trophies <amount>
-	  give <TitanId> [Mutation] level <1-100>              boost <Id> <minutes>
+	  give <TitanId> [Mutation] [Size]                     level <1-100>   boost <Id> <minutes>
+	  size <1-100000>  (all your titans)   res <Resource> <amount>   upgrade <Pens|Storage|Incubators>
 	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
 	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
 	  tutorial                 daily                      quests
@@ -20,6 +21,8 @@ local Creatures = require(Shared.Config.Creatures)
 local Foods = require(Shared.Config.Foods)
 local GameConfig = require(Shared.Config.GameConfig)
 local Mutations = require(Shared.Config.Mutations)
+local Upgrades = require(Shared.Config.Upgrades)
+local CreatureMath = require(Shared.Game.CreatureMath)
 local Progress = require(Shared.Game.Progress)
 local Guard = require(Shared.Lib.Guard)
 local Log = require(Shared.Lib.Log)
@@ -31,7 +34,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle, Wild
+local Data, Creature, Food, Event, Battle, Wild, Base
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -40,6 +43,7 @@ function AdminService:Init(registry)
 	Event = registry.EventService
 	Battle = registry.BattleService
 	Wild = registry.WildService
+	Base = registry.BaseService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -93,9 +97,22 @@ function AdminService:Run(player: Player, text: string): string?
 		Food:RefreshStorage(player)
 	elseif command == "give" and Creatures[args[2] or ""] then
 		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
-		if not Creature:Add(player, args[2], mutation) then
+		local size = tonumber(args[4]) or tonumber(args[3])
+		if not Creature:Add(player, args[2], mutation, size) then
 			return "No free pen!"
 		end
+	elseif command == "size" and number then
+		for uid, creature in data.Creatures do
+			creature.Size = CreatureMath.ClampSize(number)
+			Creature:Rebuild(player, uid)
+		end
+	elseif command == "res" and args[2] then
+		local id = string.sub(args[2], 1, 24)
+		data.Inventory.Resources[id] = (data.Inventory.Resources[id] or 0) + (tonumber(args[3]) or 50)
+	elseif command == "upgrade" and args[2] and Upgrades[args[2]] and Upgrades[args[2]].Name then
+		data.Upgrades[args[2]] = math.min(Upgrades[args[2]].Max, (data.Upgrades[args[2]] or 0) + 1)
+		Base:RefreshPens(player)
+		Food:RefreshStorage(player)
 	elseif command == "wild" then
 		local id = if Creatures[args[2] or ""] then args[2] else nil
 		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
@@ -122,7 +139,7 @@ function AdminService:Run(player: Player, text: string): string?
 		data.Quests.Day = -1
 		Progress.EnsureQuests(data.Quests, Progress.Day(os.time()), player.UserId + math.random(1, 1e6), data.Rebirths)
 	else
-		return "Unknown command. Try: cash 100000, food StarFood 5, give Hydra Golden, level 50, event TitanClash"
+		return "Unknown command. Try: cash 100000, give Hydra Golden 5000, size 1000, res Wood 50, upgrade Pens, level 50"
 	end
 	Data:Changed(player)
 	return "Done: " .. text

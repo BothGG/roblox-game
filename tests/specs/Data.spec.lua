@@ -33,7 +33,7 @@ return function(t)
 		t.expect(next(data.Food)).toBe(nil) -- empty food stays empty
 	end)
 
-	t.test("v2 saves (big land update) migrate to v3", function()
+	t.test("v2 saves (big land update) migrate to the current version", function()
 		local old = {
 			Version = 2,
 			Cash = 50,
@@ -55,12 +55,76 @@ return function(t)
 			LastOnline = 123,
 		}
 		local data = Schema.Prepare(old)
-		t.expect(data.Version).toBe(3)
+		t.expect(data.Version).toBe(Schema.CURRENT_VERSION)
 		t.expect(data.Unlocks).toBe(nil)
 		t.expect(data.Stats.Caught).toBe(nil)
 		t.expect(data.Tutorial).toBe(1)
 		t.expect(data.LastOnline).toBe(123)
 		t.expect(data.Food.Meat).toBe(1)
+	end)
+
+	t.test("v3 saves migrate to v4 keeping titans, food and cash", function()
+		local old = Schema.Template() :: any
+		old.Version = 3
+		old.Cash = 98765
+		old.Food = { Meat = 7, StarFood = 1 }
+		old.Creatures = {
+			["1"] = { Id = "Rex", Level = 30, Xp = 12, Mutation = "Lava" },
+			["2"] = { Id = "Gloop", Level = 2, Xp = 0 },
+		}
+		old.Inventory = nil
+		old.Structures = nil
+		old.Upgrades = nil
+		local data = Schema.Prepare(old)
+		t.expect(data.Version).toBe(4)
+		t.expect(data.Cash).toBe(98765)
+		t.expect(data.Food.StarFood).toBe(1)
+		t.expect(data.Creatures["1"].Level).toBe(30)
+		t.expect(data.Creatures["1"].Mutation).toBe("Lava")
+		t.expect(data.Creatures["1"].Size).toBe(1)
+		t.expect(data.Creatures["1"].Tamed).toBe(true)
+		t.expect(data.Creatures["2"].Hunger).toBe(100)
+		t.expect(data.Creatures["2"].Saddle).toBe(nil)
+		t.expect(data.Upgrades.Pens).toBe(0)
+		t.expect(#data.Structures).toBe(0)
+		t.expect(data.Inventory.Resources ~= nil).toBe(true)
+	end)
+
+	t.test("a maxed-out save stays far under the 4 MB DataStore limit", function()
+		local GameConfig = t.require(t.Shared.Config.GameConfig)
+		local limits = GameConfig.Data.Limits
+		local data = Schema.Template() :: any
+		for i = 1, GameConfig.MaxSlots do
+			data.Creatures[tostring(i)] = {
+				Id = "Hydra",
+				Level = 100,
+				Xp = 123456,
+				Mutation = "Rainbow",
+				Size = 100000,
+				Tamed = true,
+				Hunger = 100,
+				Saddle = "SaddleQuadMetal",
+			}
+		end
+		for i = 1, limits.Structures + 50 do
+			table.insert(
+				data.Structures,
+				{ Id = "StoneWall", X = i * 4.5, Y = 12.25, Z = -i * 3.75, R = 270, Hp = 1500 }
+			)
+		end
+		for i = 1, limits.ItemStacks + 10 do
+			table.insert(data.Inventory.Items, { Id = "TranqArrow" .. i, Count = 999 })
+		end
+		for i = 1, limits.ResourceKinds + 5 do
+			data.Inventory.Resources["Resource" .. i] = 99999
+		end
+		for i = 1, 300 do
+			data.Index["Titan" .. i .. ":Rainbow"] = true
+		end
+		local removed = Schema.Trim(data)
+		t.expect(removed).toBe(50 + 10 + 5)
+		t.expect(#data.Structures).toBe(limits.Structures)
+		t.expect(Schema.EstimateSize(data) < 200 * 1024).toBe(true) -- 4 MB limit, keep a huge margin
 	end)
 
 	t.test("every old version has a migration", function()

@@ -1,7 +1,7 @@
 # ⚔️ Titan Clash
 
 **Find** wild titans, grab and **steal food** to tame and **feed** them, then **pilot your titan into
-the arena** and fight other players' titans, like a monster movie. 6–12 players per server.
+the arena** and fight other players' titans, like a monster movie. 6 players per server.
 
 🎮 **Browser preview (playable):** walk around the island, tame wild titans, feed them and fight.
 The file is [`preview/index.html`](preview/index.html): open it in any browser.
@@ -43,9 +43,10 @@ in battle: **Click / F = Attack, Q = Special** (or the on-screen buttons on mobi
 
 ## 🧱 For developers
 
+- **[docs/ROADMAP.md](docs/ROADMAP.md)**: the ARK-style survival roadmap (phases 0–4, status)
 - **[docs/PLAN.md](docs/PLAN.md)**: the full game plan (systems, numbers, save data)
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: how the code is organized + recipes for adding things
 - **[docs/MAP_GUIDE.md](docs/MAP_GUIDE.md)**: replacing the generated island with a hand-built map
 - **[docs/LAUNCH.md](docs/LAUNCH.md)**: publishing checklist
 
-`scripts/check.sh` runs formatting, build, type check and **53 unit tests**. CI runs it on every push.
+`scripts/check.sh` runs formatting, build, type check and **59 unit tests**. CI runs it on every push.

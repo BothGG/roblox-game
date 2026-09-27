@@ -17,7 +17,7 @@ Open `build/TitanClash.rbxlx` (or `rojo serve`) and check each item:
 
 - [ ] File → **Publish to Roblox** (new experience).
 - [ ] Game Settings → **Security → Enable Studio Access to API Services** (saving works in Studio).
-- [ ] Game Settings → **Places → Max Players = 12** (must match `GameConfig.Plots.Count`).
+- [ ] Game Settings → **Places → Max Players = 6** (must match `GameConfig.Plots.Count`).
 - [ ] Game Settings → **Avatar**: R15, scale limits default (titan piloting is tuned for normal avatars).
 - [ ] Rejoin twice and check your cash, titans and trophies were **saved**.
 

@@ -11,6 +11,7 @@ local Foods = require(Config.Foods)
 local GameConfig = require(Config.GameConfig)
 local Rarities = require(Config.Rarities)
 local Store = require(Config.Store)
+local Upgrades = require(Config.Upgrades)
 local Types = require(script.Parent.Parent.Types)
 local CreatureMath = require(script.Parent.CreatureMath)
 local Progress = require(script.Parent.Progress)
@@ -59,16 +60,64 @@ end
 
 -- Pens / storage -------------------------------------------------------------
 
+-- Level of a base upgrade (0 if never bought).
+function Rules.UpgradeLevel(data: PlayerData, id: string): number
+	local levels = (data :: any).Upgrades
+	return if levels and type(levels[id]) == "number" then levels[id] else 0
+end
+
 function Rules.MaxSlots(data: PlayerData): number
 	local perks = Rules.Perks(data)
 	return math.min(
 		GameConfig.MaxSlots,
-		GameConfig.StartingSlots + data.Rebirths * GameConfig.SlotsPerRebirth + perks.ExtraSlots
+		GameConfig.StartingSlots
+			+ data.Rebirths * GameConfig.SlotsPerRebirth
+			+ perks.ExtraSlots
+			+ Rules.UpgradeLevel(data, "Pens") * Upgrades.Pens.Per
 	)
 end
 
 function Rules.StorageCap(data: PlayerData): number
-	return CreatureMath.StorageCap(data.Rebirths) + Rules.Perks(data).ExtraStorage
+	return CreatureMath.StorageCap(data.Rebirths)
+		+ Rules.Perks(data).ExtraStorage
+		+ Rules.UpgradeLevel(data, "Storage") * Upgrades.Storage.Per
+end
+
+-- Base upgrades ---------------------------------------------------------------
+
+-- Cash cost of the next level, or nil when maxed / not available yet.
+function Rules.UpgradeCost(data: PlayerData, id: string): number?
+	local def = Upgrades[id]
+	if not def or not def.Enabled then
+		return nil
+	end
+	local level = Rules.UpgradeLevel(data, id)
+	if level >= def.Max then
+		return nil
+	end
+	return math.floor(def.BaseCost * def.Growth ^ level)
+end
+
+-- Buys one level of an upgrade. Returns ok, and a reason when it fails.
+function Rules.BuyUpgrade(data: PlayerData, id: string): (boolean, string?)
+	local def = Upgrades[id]
+	if not def then
+		return false, "Unknown upgrade"
+	end
+	if not def.Enabled then
+		return false, "Coming soon!"
+	end
+	local cost = Rules.UpgradeCost(data, id)
+	if not cost then
+		return false, "Already maxed!"
+	end
+	if data.Cash < cost then
+		return false, "Not enough cash"
+	end
+	data.Cash -= cost
+	local levels = (data :: any).Upgrades
+	levels[id] = Rules.UpgradeLevel(data, id) + 1
+	return true, nil
 end
 
 function Rules.HasFreeSlot(data: PlayerData): boolean

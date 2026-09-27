@@ -65,7 +65,7 @@ function Battle.Stats(creature: CreatureData): Stats
 	local base = def and def.Stats or { HP = 100, Attack = 10, Speed = 1 }
 	local mutation = creature.Mutation and Mutations[creature.Mutation]
 	local mult = mutation and mutation.StatMult or 1
-	local scale = CreatureMath.Scale(creature.Level)
+	local scale = CreatureMath.VisualScale(creature)
 	return {
 		MaxHP = math.floor(base.HP * (1 + (creature.Level - 1) * 0.12) * mult),
 		Attack = math.floor(base.Attack * (1 + (creature.Level - 1) * 0.10) * mult),

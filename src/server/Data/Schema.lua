@@ -20,7 +20,7 @@ type PlayerData = Types.PlayerData
 
 local Schema = {}
 
-Schema.CURRENT_VERSION = 3
+Schema.CURRENT_VERSION = 4
 
 local function deepCopy<T>(value: T): T
 	if type(value) ~= "table" then
@@ -69,7 +69,19 @@ function Schema.Template(): PlayerData
 			CashEarned = 0,
 		},
 		LastOnline = 0,
+		-- v4 (ARK-style foundation)
+		Inventory = { Resources = {}, Items = {} },
+		Structures = {},
+		Upgrades = { Pens = 0, Storage = 0, Incubators = 0 },
 	}
+end
+
+-- Defaults for the titan fields added in v4 (used by migration and new titans).
+function Schema.FillCreature(creature: any)
+	creature.Size = if type(creature.Size) == "number" then creature.Size else 1
+	creature.Tamed = if creature.Tamed == nil then true else creature.Tamed
+	creature.Hunger = if type(creature.Hunger) == "number" then creature.Hunger else 100
+	-- Saddle stays nil until one is crafted (Phase 3)
 end
 
 -- Migrations[v] upgrades a save from version v to v + 1.
@@ -88,6 +100,13 @@ local Migrations: { [number]: (any) -> () } = {
 		local played = data.Stats and (data.Stats.FoodEaten or 0) > 30
 		data.Tutorial = if played then 0 else 1
 	end,
+	[3] = function(data)
+		-- v4: ARK-style foundation. Titans get Size/Tamed/Hunger; the save gets
+		-- Inventory, Structures and base Upgrades (reconcile adds the tables).
+		for _, creature in data.Creatures or {} do
+			Schema.FillCreature(creature)
+		end
+	end,
 }
 Schema.Migrations = Migrations
 
@@ -100,13 +119,55 @@ local function reconcile(data: any)
 			data[key] = value
 		end
 	end
-	for _, section in { "Stats", "Settings", "Daily", "Quests" } do
+	for _, section in { "Stats", "Settings", "Daily", "Quests", "Inventory", "Upgrades" } do
 		for key, value in template[section] do
 			if data[section][key] == nil then
 				data[section][key] = value
 			end
 		end
 	end
+end
+
+-- Keeps a save inside GameConfig.Data.Limits (drops the newest extra
+-- structures / item stacks). Returns how many entries were removed.
+function Schema.Trim(data: PlayerData): number
+	local limits = GameConfig.Data.Limits
+	local removed = 0
+	while #data.Structures > limits.Structures do
+		table.remove(data.Structures)
+		removed += 1
+	end
+	while #data.Inventory.Items > limits.ItemStacks do
+		table.remove(data.Inventory.Items)
+		removed += 1
+	end
+	local kinds = {}
+	for id in data.Inventory.Resources do
+		table.insert(kinds, id)
+	end
+	table.sort(kinds)
+	for i = limits.ResourceKinds + 1, #kinds do
+		data.Inventory.Resources[kinds[i]] = nil
+		removed += 1
+	end
+	return removed
+end
+
+-- Rough size of the save in bytes when stored as JSON (for tests and warnings).
+function Schema.EstimateSize(value: any): number
+	local t = type(value)
+	if t == "table" then
+		local size = 2
+		for k, v in value do
+			size += Schema.EstimateSize(k) + Schema.EstimateSize(v) + 2
+		end
+		return size
+	elseif t == "string" then
+		return #value + 2
+	elseif t == "number" then
+		return #tostring(value)
+	end
+	return 5
 end
 
 -- Turns any stored value into a valid, up-to-date save.

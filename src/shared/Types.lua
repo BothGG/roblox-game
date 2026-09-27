@@ -9,7 +9,20 @@ export type CreatureData = {
 	Level: number,
 	Xp: number,
 	Mutation: string?,
+	Size: number?, -- x1 .. x100,000 size multiplier (Config/Sizes.lua)
+	Tamed: boolean?, -- false while a wild titan is being tamed (Phase 1)
+	Saddle: string?, -- saddle item id; needed to ride (Phase 1)
+	Hunger: number?, -- 0..100 (Phase 3)
 }
+
+export type InventoryItem = { Id: string, Count: number }
+export type Inventory = {
+	Resources: { [string]: number }, -- wood, stone, fiber, metal, crystal...
+	Items: { InventoryItem }, -- tools, saddles, food, ammo (stacks)
+}
+-- A placed build piece in the base (plot-local position, rotation in degrees).
+export type Structure = { Id: string, X: number, Y: number, Z: number, R: number, Hp: number? }
+export type Upgrades = { Pens: number, Storage: number, Incubators: number }
 
 export type PlayerStats = {
 	StarterGiven: boolean,
@@ -49,6 +62,9 @@ export type PlayerData = {
 	Settings: { Music: boolean, Sfx: boolean },
 	Stats: PlayerStats,
 	LastOnline: number,
+	Inventory: Inventory,
+	Structures: { Structure },
+	Upgrades: Upgrades,
 }
 
 -- What the client UI receives (PlayerData + computed values).
@@ -81,6 +97,8 @@ export type Snapshot = {
 	LockCooldownUntil: number?,
 	ServerTime: number?,
 	IsAdmin: boolean?,
+	Upgrades: Upgrades?,
+	Inventory: Inventory?,
 }
 
 -- Modules must return exactly one non-nil value.
