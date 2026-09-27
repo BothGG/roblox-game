@@ -25,7 +25,6 @@ This is the master plan. Other docs go deeper: [ARCHITECTURE.md](ARCHITECTURE.md
 ## 2. Server & map
 
 - **Max players: 6** (`GameConfig.Plots.Count = 6`; set Max Players to 6 in Game Settings.
-  Lower it to 6 by changing the one number.)
 - **Titan Island** (generated from code; replaceable with a hand-built map via tags):
 
 ```
