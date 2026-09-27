@@ -22,4 +22,5 @@ return {
 	BaseTitan = "BaseTitan",
 	FoodPickup = "FoodPickup",
 	WildTitan = "WildTitan",
+	Mover = "Mover", -- models the client moves smoothly (wild titans, followers)
 }

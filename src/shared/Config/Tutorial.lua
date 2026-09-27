@@ -11,7 +11,7 @@ return {
 		{ Text = "Walk to your titan and press E to feed it", Event = "Fed", Count = 1, Target = "MyTitan" },
 		{ Text = "Grab 3 food in the fields around the arena", Event = "FoodPicked", Count = 3, Target = "Food" },
 		{
-			Text = "Find a wild titan in the fields, hold E to tame it with food",
+			Text = "Knock out a wild titan with your 🏏 club, then hold E to feed it until it's tamed",
 			Event = "Tamed",
 			Count = 1,
 			Target = "Wild",

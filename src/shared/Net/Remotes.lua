@@ -40,6 +40,12 @@ local Remotes: { [string]: RemoteSpec } = {
 	Equip = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },
 	SellTitan = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 },
 
+	-- Client -> server: Phase 1 (tools, riding, followers)
+	UseTool = { Direction = "ToServer", Args = { "string", "number", "number", "number" }, RateLimit = 0.15 },
+	Ride = { Direction = "ToServer", Args = { "string" }, RateLimit = 0.5 }, -- titan uid
+	RideAction = { Direction = "ToServer", Args = { "string", "boolean?" }, RateLimit = 0.05 },
+	FollowerCommand = { Direction = "ToServer", Args = { "string", "string?" }, RateLimit = 0.3 },
+
 	-- Client -> server: battles
 	Challenge = { Direction = "ToServer", Args = { "integer" }, RateLimit = 1 },
 	DuelRespond = { Direction = "ToServer", Args = { "integer", "boolean" }, RateLimit = 0.3 },

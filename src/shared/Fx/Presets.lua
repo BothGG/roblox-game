@@ -186,6 +186,93 @@ function Presets.WildSpawn(p, P)
 	end
 end
 
+-- Knocked out: dizzy stars + a sleepy puff (Phase 1 knock-out taming).
+function Presets.KnockOut(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	local color = p.Color or WHITE
+	P.Glow(p.Position, { Color = Color3.fromRGB(200, 180, 255), Size = 10, Duration = 0.4 })
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(255, 240, 120),
+		Count = 14,
+		Speed = 8,
+		Size = 1.2,
+		Lifetime = 1.4,
+		Gravity = -2,
+		Texture = Textures.Star,
+	})
+	P.Shockwave(p.Position - Vector3.new(0, 2, 0), { Color = color, Radius = 10, Duration = 0.6 })
+	P.FloatText(
+		p.Position + Vector3.new(0, 2, 0),
+		"💫 KNOCKED OUT!",
+		{ Color = Color3.fromRGB(200, 170, 255), Size = 3 }
+	)
+	P.Sound("Pop", p.Position, 0.7, 0.6)
+	if P.IsMe(p.Owner) then
+		P.FovPunch(-4, 0.35)
+	end
+end
+
+-- Feeding a sleeping titan while taming: hearts float up.
+function Presets.TameFeed(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(255, 100, 150),
+		Count = if p.Favorite then 10 else 5,
+		Speed = 6,
+		Size = 1.4,
+		Lifetime = 1.3,
+		Gravity = -4,
+		Texture = Textures.Sparkle,
+	})
+	if P.IsMe(p.Owner) then
+		P.FloatText(p.Position, p.Text or "❤️", { Color = Color3.fromRGB(255, 130, 170), Size = 2 })
+	end
+end
+
+-- Mounting / dismounting a titan: dust puff at the feet.
+function Presets.MountDust(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(215, 195, 160),
+		Count = 14,
+		Speed = 12,
+		Size = 3 * (p.Size or 1),
+		Lifetime = 0.9,
+		Gravity = 2,
+		LightEmission = 0,
+		Texture = Textures.Dust,
+	})
+	P.Shockwave(p.Position, { Color = Color3.fromRGB(230, 220, 200), Radius = 6 * (p.Size or 1), Duration = 0.4 })
+	P.Sound("Whoosh", p.Position, 0.5, 0.8)
+end
+
+-- A tranq dart flying from the shooter to where it landed.
+function Presets.Dart(p, P)
+	if not p.From or not p.To then
+		return
+	end
+	local direction = p.To - p.From
+	for i = 1, 6 do
+		task.delay(i * 0.02, function()
+			P.Glow(p.From + direction * (i / 6), {
+				Color = Color3.fromRGB(120, 255, 140),
+				Size = 1.4,
+				Duration = 0.15,
+			})
+		end)
+	end
+	if p.Hit then
+		P.Sparks(p.To, { Color = Color3.fromRGB(160, 255, 170), Count = 8, Speed = 25, Size = 0.4 })
+	end
+	P.Sound("Whoosh", p.From, 0.4, 1.6)
+end
+
 -- Someone started taming a wild titan.
 function Presets.TameStart(p, P)
 	if P.Distance(p.Position) > FAR then
