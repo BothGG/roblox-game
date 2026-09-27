@@ -51,7 +51,7 @@ local function rebuild(state)
 		local special = Battle.SpecialFor(creature.Id)
 		local active = state.Active == uid
 		local color = if creature.Mutation then Mutations[creature.Mutation].Color else Rarities[def.Rarity].Color
-		local r = Theme.Row(container, i, 92)
+		local r = Theme.Row(container, i, 128)
 		if active then
 			Theme.Stroke(Theme.Gold, 3).Parent = r
 		end
@@ -112,6 +112,29 @@ local function rebuild(state)
 			BackgroundColor3 = Theme.Red,
 			Parent = r,
 		})
+		-- Ride / follow buttons (Phase 1)
+		local following = state.Following ~= nil and state.Following[uid] == true
+		local ride = Theme.Button({
+			Position = UDim2.fromOffset(14, 88),
+			Size = UDim2.fromOffset(110, 34),
+			Text = "🐎 Ride",
+			BackgroundColor3 = Color3.fromRGB(70, 150, 240),
+			Parent = r,
+		})
+		ride.Activated:Connect(function()
+			context.Net.Send("Ride", uid)
+			context.Window.Close()
+		end)
+		local follow = Theme.Button({
+			Position = UDim2.fromOffset(132, 88),
+			Size = UDim2.fromOffset(130, 34),
+			Text = if following then "🏠 Send home" else "🐾 Follow me",
+			BackgroundColor3 = if following then Color3.fromRGB(110, 110, 140) else Color3.fromRGB(80, 190, 90),
+			Parent = r,
+		})
+		follow.Activated:Connect(function()
+			context.Net.Send("FollowerCommand", "Follow", uid)
+		end)
 		sell.Activated:Connect(function()
 			if confirmSell == uid then
 				confirmSell = nil
@@ -132,6 +155,9 @@ end
 
 function Page.Update(state)
 	local parts = { tostring(state.Active), tostring(state.Slots), tostring(confirmSell) }
+	for uid in state.Following or {} do
+		table.insert(parts, "f" .. uid)
+	end
 	for uid, creature in state.Creatures do
 		table.insert(parts, uid .. ":" .. creature.Level .. ":" .. tostring(creature.Mutation))
 	end

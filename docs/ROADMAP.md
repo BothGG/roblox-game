@@ -50,24 +50,45 @@ Each phase ships a playable game. Status: ✅ done · 🟡 partly · ⬜ not sta
 
 ---
 
-## Phase 1: Living island ⬜
-**Wild titans:** cap 20 per server · spawn tables per biome · states idle / wander / graze / flee /
-chase / attack · passive flee, aggressive chase · packs of 3–5 small titans · health bar + size
-tier tag · despawn far / respawn near players.
-*(Today: up to 8 wild titans wander the fields and are tamed with food by holding E.)*
+## Phase 1: Living island ✅ (21 done · 3 partly · 2 later)
 
-**Knock-out taming:** torpor meter (club / tranq darts, drains over time) · asleep 60 s at full
-torpor · feed favorite food to fill the taming bar · effectiveness drops when damaged · others
-can steal a tame by feeding first · tamed titan walks home or follows · sleep bubbles, hearts,
-taming bar UI, success burst.
+### Wild titans (`WildService`, `shared/Game/WildBrain.lua`)
+- ✅ Up to **20** wild titans per server
+- 🟡 Spawn tables per biome: rarity-weighted pool for now; per-biome tables come with the 8 biomes (map phase)
+- ✅ States: idle, graze, wander, flee, chase, attack, return, asleep
+- ✅ Passive titans flee when hit; aggressive ones chase players in range and attack
+- ✅ Packs of 3–5 for pack titans (Gloop, Shellback, Pincher); the pack reacts together
+- ✅ Name tag with size tier, temper, HP bar, torpor bar, taming bar
+- ✅ Spawn near players, despawn when nobody is near for 40 s
 
-**Riding:** mount/dismount with a saddle (E) · riding camera · movement per style (runners
-sprint, flyers fly, swimmers dive, blobs bounce) · stamina · attack (click) + special (Q) ·
-mobile controls · carry an egg on the saddle, drop it when knocked off.
+### Knock-out taming (`ToolService`, `TameService`, `shared/Game/Taming.lua`)
+- ✅ Torpor meter: **Wooden Club** and **Tranq Blowgun** add torpor; it drains over time
+- ✅ Full torpor → asleep for 60 s
+- ✅ Feed it (hold E): favorite food counts double; food needed grows with rarity and size
+- ✅ Hitting it while asleep lowers effectiveness (and the tamed level)
+- ✅ Every player has their own taming bar: first to fill it gets the titan (tame stealing)
+- ✅ Tamed titan follows you (if a slot is free) or goes to your base
+- ✅ Effects: knocked-out stars, 💤 Zzz, hearts while feeding, taming bar, success burst
 
-**Followers:** up to 3 follow and defend · follow / stay / guard base / attack · teleport when stuck.
+### Riding (`RideService`, `RideController`, `RideHud`, `shared/Game/Riding.lua`)
+- 🟡 Mount/dismount any owned titan (R at the pen or follower, or the Titans menu). Saddles are
+  required only after crafting exists (`Riding.RequireSaddle = false` until Phase 3)
+- ✅ Riding camera zooms out for the titan's size
+- 🟡 Runners sprint (Shift), flyers fly (V, Space up, Ctrl down), blobs bounce; swimmers diving ⬜ (needs deep-water biomes)
+- ✅ Stamina for sprinting and flying
+- ✅ Attack (click) and style special (Q) hit wild titans
+- ✅ Phone controls: big buttons on the ride panel
+- ⬜ Carry an egg on the saddle (eggs as items arrive in Phase 2)
+- ✅ Wild titans hit your mount; at 0 HP you're knocked off (30 s rest)
 
-**Tests:** torpor, taming math, stamina. `WildService`, `TameService`, `RideService` log with tags.
+### Followers (`FollowerService`)
+- ✅ Up to 3 titans follow you and defend you (they attack whatever attacks you or what you hit)
+- ✅ Commands: Follow, Stay, Attack, Guard base (go home); per-titan Follow / Send home in the Titans menu
+- ✅ Teleport to you when stuck far away
+
+### Logging and tests
+- ✅ `WildService`, `ToolService`, `TameService`, `RideService`, `FollowerService` log with their tags
+- ✅ Unit tests for the wild brain, torpor, taming math, stamina and ride stats (`tests/specs/Phase1.spec.lua`)
 
 ## Phase 2: Eggs and breeding ⬜
 Breeding pen (2 of a species) · timer by rarity (2 min … 2 h) · stat inheritance + small bonus ·

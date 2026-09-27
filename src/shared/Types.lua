@@ -99,6 +99,7 @@ export type Snapshot = {
 	IsAdmin: boolean?,
 	Upgrades: Upgrades?,
 	Inventory: Inventory?,
+	Following: { [string]: boolean }?, -- titans following you (FollowerService)
 }
 
 -- Modules must return exactly one non-nil value.

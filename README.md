@@ -38,7 +38,8 @@ press **Play (F5)**. The island is generated when the server starts (a few secon
 | **Effects** | Glow flashes, textured shockwaves, spark streaks, slash arcs, light beams, rock chunks, camera punch; rarity auras (ring, sparkles, sky beam, outline); +$ money popups; shiny rarity badges |
 | **Events** | Titan Clash, Wild Rush, Meteor Feast, Blood Moon |
 
-**Controls:** hold E = tame (wild titan) / feed / steal / take back · G = challenge (at a base entrance) · hold F = sell ·
+**Controls:** club / tranq blowgun (tools) = knock out wild titans · hold E = feed to tame / feed / steal / take back ·
+R = ride · riding: Shift sprint, V fly, click attack, Q special, X get off · · G = challenge (at a base entrance) · hold F = sell ·
 in battle: **Click / F = Attack, Q = Special** (or the on-screen buttons on mobile).
 
 ## 🧱 For developers
@@ -49,4 +50,4 @@ in battle: **Click / F = Attack, Q = Special** (or the on-screen buttons on mobi
 - **[docs/MAP_GUIDE.md](docs/MAP_GUIDE.md)**: replacing the generated island with a hand-built map
 - **[docs/LAUNCH.md](docs/LAUNCH.md)**: publishing checklist
 
-`scripts/check.sh` runs formatting, build, type check and **59 unit tests**. CI runs it on every push.
+`scripts/check.sh` runs formatting, build, type check and **68 unit tests**. CI runs it on every push.
