@@ -49,6 +49,7 @@ local Remotes: { [string]: RemoteSpec } = {
 	-- Client -> server: Phase 2 (breeding, eggs)
 	Breed = { Direction = "ToServer", Args = { "string", "string" }, RateLimit = 1 }, -- two titan uids
 	BreedCancel = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	Fuse = { Direction = "ToServer", Args = { "string", "string", "string" }, RateLimit = 1 }, -- three titan uids
 
 	-- Client -> server: battles
 	Challenge = { Direction = "ToServer", Args = { "integer" }, RateLimit = 1 },

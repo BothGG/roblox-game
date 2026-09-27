@@ -608,6 +608,20 @@ local GameConfig = {
 		DroppedTime = 10, -- a dropped egg can be grabbed by anyone for this long
 		AnnounceTier = "Colossal", -- server message when an egg this big appears
 		BeamTier = "Titanic", -- sky beam on eggs this big
+		FuseCost = { Common = 500, Rare = 2500, Epic = 10000, Legendary = 50000, Mythic = 200000, Secret = 1000000 },
+	},
+
+	-- Wild nests (NestService): an egg guarded by angry titans of its kind.
+	Nests = {
+		Max = 2, -- nests on the island at once
+		FirstDelay = 20, -- seconds after the server starts
+		RespawnDelay = 180, -- after a nest is raided or expires
+		Lifetime = 600,
+		Guardians = { 1, 2 },
+		GuardianSize = { 1, 3 }, -- guardian size = egg size * this range
+		-- Egg size tier chances (1 = Tiny, 2 = Normal, ...)
+		SizeTiers = { { 1, 0.5 }, { 2, 0.3 }, { 3, 0.14 }, { 4, 0.05 }, { 5, 0.01 } },
+		BonusMax = 0.05, -- random stat bonus 0..this
 	},
 
 	-- Titans that follow you around (FollowerService)
@@ -868,6 +882,13 @@ return {
 			Event = "Hatched",
 			Goal = { 1, 3 },
 			Reward = { Boost = { Id = "Luck", Minutes = 10 } },
+		},
+		{
+			Id = "Breed",
+			Text = "Breed %d eggs",
+			Event = "Bred",
+			Goal = { 1, 2 },
+			Reward = { CashSeconds = 240 },
 		},
 		{
 			Id = "Level",
@@ -1881,6 +1902,35 @@ function Presets.TameFeed(p, P)
 	if P.IsMe(p.Owner) then
 		P.FloatText(p.Position, p.Text or "❤️", { Color = Color3.fromRGB(255, 130, 170), Size = 2 })
 	end
+end
+
+-- Two titans breeding: hearts float up between them.
+function Presets.Love(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	P.Burst(p.Position, {
+		Color = Color3.fromRGB(255, 110, 160),
+		Count = 6,
+		Speed = 5,
+		Size = 1.6,
+		Lifetime = 1.6,
+		Gravity = -5,
+		Texture = Textures.Sparkle,
+	})
+	P.FloatText(p.Position, "❤️", { Color = Color3.fromRGB(255, 120, 170), Size = 2.4, Duration = 1.4, Rise = 6 })
+end
+
+-- A new egg appears (breeding done / nest found).
+function Presets.EggLaid(p, P)
+	if P.Distance(p.Position) > FAR then
+		return
+	end
+	local color = p.Color or Color3.fromRGB(255, 220, 120)
+	P.Ring(p.Position, { Color = color, Radius = 8 * (p.Scale or 1), Duration = 0.6 })
+	P.Burst(p.Position + Vector3.new(0, 2, 0), { Color = color, Count = 20, Speed = 12, Texture = Textures.Sparkle })
+	P.FloatText(p.Position + Vector3.new(0, 4, 0), p.Text or "🥚 New egg!", { Color = color, Size = 2.2 })
+	P.Sound("Pop", p.Position, 0.7)
 end
 
 -- Mounting / dismounting a titan: dust puff at the feet.
@@ -3538,6 +3588,28 @@ function Breeding.IncubatorCount(level: number): number
 	return 1 + level
 end
 
+-- Nest egg size from a 0..1 roll (GameConfig.Nests.SizeTiers).
+function Breeding.RollNestSize(roll: number): number
+	local total = 0
+	for _, entry in GameConfig.Nests.SizeTiers do
+		total += entry[2]
+	end
+	local pick = roll * total
+	for _, entry in GameConfig.Nests.SizeTiers do
+		pick -= entry[2]
+		if pick < 0 then
+			return Breeding.TierSize(entry[1])
+		end
+	end
+	return Breeding.TierSize(1)
+end
+
+-- Cost to fuse 3 titans into one of the next size tier.
+function Breeding.FuseCost(species: string, size: number): number
+	local base = BREED.FuseCost[Creatures[species].Rarity] or 1000
+	return math.floor(base * (2 ^ (Breeding.TierIndex(size) - 1)))
+end
+
 -- Carrying ----------------------------------------------------------------
 
 function Breeding.CarrySpeed(size: number): number
@@ -3618,6 +3690,7 @@ ConfigValidator.Events = {
 	Rebirthed = true,
 	Equipped = true,
 	Tamed = true,
+	Bred = true,
 }
 
 local STYLES = { Biped = true, Quad = true, Blob = true, Winged = true }
@@ -5703,6 +5776,11 @@ local Remotes: { [string]: RemoteSpec } = {
 	RideAction = { Direction = "ToServer", Args = { "string", "boolean?" }, RateLimit = 0.05 },
 	FollowerCommand = { Direction = "ToServer", Args = { "string", "string?" }, RateLimit = 0.3 },
 
+	-- Client -> server: Phase 2 (breeding, eggs)
+	Breed = { Direction = "ToServer", Args = { "string", "string" }, RateLimit = 1 }, -- two titan uids
+	BreedCancel = { Direction = "ToServer", Args = {}, RateLimit = 1 },
+	Fuse = { Direction = "ToServer", Args = { "string", "string", "string" }, RateLimit = 1 }, -- three titan uids
+
 	-- Client -> server: battles
 	Challenge = { Direction = "ToServer", Args = { "integer" }, RateLimit = 1 },
 	DuelRespond = { Direction = "ToServer", Args = { "integer", "boolean" }, RateLimit = 0.3 },
@@ -5780,6 +5858,7 @@ export type PlayerStats = {
 	BattlesPlayed: number,
 	BattlesWon: number,
 	Tamed: number,
+	Bred: number,
 	CashEarned: number,
 }
 
@@ -5942,6 +6021,7 @@ function Schema.Template(): PlayerData
 			BattlesPlayed = 0,
 			BattlesWon = 0,
 			Tamed = 0,
+			Bred = 0,
 			CashEarned = 0,
 		},
 		LastOnline = 0,
@@ -6588,6 +6668,134 @@ return CreatureBuilder
         </Item>
         <Item class="ModuleScript" referent="57">
           <Properties>
+            <string name="Name">EggBuilder</string>
+            <string name="Source"><![CDATA[--[[
+	EggBuilder: the 3D egg for an egg in an incubator, a nest or a carrier's
+	hands. Bigger size tiers make a bigger, brighter egg; Titanic and
+	Mythical eggs shine a beam into the sky (Breeding.HasBeam).
+
+	  EggBuilder.Build({ Species, Mutation?, Size }) -> Model (pivot = bottom centre)
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Breeding = require(Shared.Game.Breeding)
+local Textures = require(Shared.Fx.Textures)
+
+local EggBuilder = {}
+
+local function ellipsoid(parent: Instance, name: string, size: Vector3, cf: CFrame, color: Color3): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Material = Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = p
+	p.Parent = parent
+	return p
+end
+
+-- How big the egg looks for a size (Tiny = 1, each tier +35%).
+function EggBuilder.Scale(size: number): number
+	return 1 + (Breeding.TierIndex(size) - 1) * 0.35
+end
+
+function EggBuilder.Build(egg: { Species: string, Mutation: string?, Size: number }): Model
+	local def = Creatures[egg.Species]
+	local rarity = Rarities[def.Rarity]
+	local mutation = egg.Mutation and Mutations[egg.Mutation]
+	local scale = EggBuilder.Scale(egg.Size)
+	local body = if mutation then mutation.Color else def.BodyColor
+	local spots = if mutation then mutation.AccentColor else def.AccentColor
+
+	local model = Instance.new("Model")
+	model.Name = "Egg"
+	local shell = ellipsoid(model, "Shell", Vector3.new(3, 4, 3) * scale, CFrame.new(0, 2 * scale, 0), body)
+	if mutation then
+		shell.Material = mutation.Material
+	end
+	shell.Reflectance = 0.05
+	model.PrimaryPart = shell
+	-- Spots
+	for i = 1, 6 do
+		local a = i / 6 * math.pi * 2
+		local y = (0.2 + (i % 3) * 0.25) * 4 * scale
+		local offset = Vector3.new(math.cos(a) * 1.35, 0, math.sin(a) * 1.35) * scale
+		ellipsoid(
+			model,
+			"Spot",
+			Vector3.new(0.9, 0.9, 0.35) * scale,
+			CFrame.lookAt(Vector3.new(0, y, 0) + offset, Vector3.new(0, y, 0) + offset * 2),
+			spots
+		)
+	end
+	-- Glow grows with the tier (and rarity)
+	local tier = Breeding.TierIndex(egg.Size)
+	if tier >= 2 or rarity.Order >= 3 then
+		local light = Instance.new("PointLight")
+		light.Color = rarity.Color
+		light.Brightness = 0.5 + tier * 0.35
+		light.Range = 6 + tier * 3
+		light.Parent = shell
+		local sparkle = Instance.new("ParticleEmitter")
+		sparkle.Texture = Textures.Sparkle
+		sparkle.Color = ColorSequence.new(rarity.Color)
+		sparkle.LightEmission = 1
+		sparkle.Rate = 2 + tier * 2
+		sparkle.Lifetime = NumberRange.new(0.8, 1.4)
+		sparkle.Speed = NumberRange.new(0.5, 2)
+		sparkle.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(0.5, 0.5 * scale),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		sparkle.Parent = shell
+	end
+	if Breeding.HasBeam(egg.Size) then
+		local bottom = Instance.new("Attachment")
+		bottom.Parent = shell
+		local top = Instance.new("Attachment")
+		top.Position = Vector3.new(0, 120, 0)
+		top.Parent = shell
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = bottom
+		beam.Attachment1 = top
+		beam.FaceCamera = true
+		beam.Texture = Textures.Glow
+		beam.TextureMode = Enum.TextureMode.Stretch
+		beam.LightEmission = 1
+		beam.LightInfluence = 0
+		beam.Color = ColorSequence.new(rarity.Color, Color3.new(1, 1, 1))
+		beam.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
+		beam.Width0 = 6 * scale
+		beam.Width1 = 2 * scale
+		beam.Parent = shell
+	end
+	model.WorldPivot = CFrame.new() -- pivot = bottom of the egg
+	model:SetAttribute("Species", egg.Species)
+	model:SetAttribute("EggSize", egg.Size)
+	return model
+end
+
+return EggBuilder
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="58">
+          <Properties>
             <string name="Name">FoodBuilder</string>
             <string name="Source"><![CDATA[--[[
 	FoodBuilder: makes the 3D model for a food lying on the ground.
@@ -6758,7 +6966,7 @@ return FoodBuilder
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="58">
+        <Item class="ModuleScript" referent="59">
           <Properties>
             <string name="Name">GameEvents</string>
             <string name="Source"><![CDATA[--[[
@@ -6776,7 +6984,7 @@ return FoodBuilder
 	  Hatched { Titan, Mutation }     Mutated { Mutation }
 	  BattleWon { Mode }              BattlePlayed { Mode }
 	  Earned { Amount }               Rebirthed { Rebirths }
-	  Equipped { Titan }
+	  Equipped { Titan }              Bred { Titan, Mutation, Size }
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -6807,11 +7015,11 @@ return GameEvents
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="59">
+        <Item class="Folder" referent="60">
           <Properties>
             <string name="Name">Map</string>
           </Properties>
-          <Item class="ModuleScript" referent="60">
+          <Item class="ModuleScript" referent="61">
             <Properties>
               <string name="Name">MapGenerator</string>
               <string name="Source"><![CDATA[--[[
@@ -7443,7 +7651,7 @@ return MapGenerator
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="61">
+          <Item class="ModuleScript" referent="62">
             <Properties>
               <string name="Name">Props</string>
               <string name="Source"><![CDATA[--[[
@@ -7837,7 +8045,7 @@ return Props
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="62">
+          <Item class="ModuleScript" referent="63">
             <Properties>
               <string name="Name">StudGround</string>
               <string name="Source"><![CDATA[--[[
@@ -8004,15 +8212,15 @@ return StudGround
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="63">
+      <Item class="Folder" referent="64">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="Folder" referent="64">
+        <Item class="Folder" referent="65">
           <Properties>
             <string name="Name">Base</string>
           </Properties>
-          <Item class="ModuleScript" referent="65">
+          <Item class="ModuleScript" referent="66">
             <Properties>
               <string name="Name">BaseService</string>
               <string name="Source"><![CDATA[--[[
@@ -8474,7 +8682,7 @@ return BaseService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="66">
+          <Item class="ModuleScript" referent="67">
             <Properties>
               <string name="Name">CreatureService</string>
               <string name="Source"><![CDATA[--[[
@@ -9042,6 +9250,10 @@ function CreatureService:Sell(player: Player, uid: string)
 	if not creature or not Net.Throttle(player, "Sell", 0.5) then
 		return
 	end
+	if data.Breeding.ReadyAt and (data.Breeding.A == uid or data.Breeding.B == uid) then
+		Net.Notify(player, "💞 This titan is breeding! Cancel breeding first.", Color3.fromRGB(255, 90, 90))
+		return
+	end
 	local price = CreatureMath.SellPrice(creature, data.Rebirths)
 	local model = self:GetModel(player, uid)
 	if model then
@@ -9059,6 +9271,26 @@ function CreatureService:Sell(player: Player, uid: string)
 		data.Active = nil
 	end
 	data.Cash += price
+	self:_layout(player)
+	King:Evaluate()
+	Data:Changed(player)
+end
+
+-- Removes a titan without paying for it (fusion).
+function CreatureService:Remove(player: Player, uid: string)
+	local data = Data:Get(player)
+	if not data or not data.Creatures[uid] then
+		return
+	end
+	local model = self:GetModel(player, uid)
+	if model then
+		model:Destroy()
+		self.Models[player][uid] = nil
+	end
+	data.Creatures[uid] = nil
+	if data.Active == uid then
+		data.Active = nil
+	end
 	self:_layout(player)
 	King:Evaluate()
 	Data:Changed(player)
@@ -9110,7 +9342,7 @@ return CreatureService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="67">
+          <Item class="ModuleScript" referent="68">
             <Properties>
               <string name="Name">UpgradeService</string>
               <string name="Source"><![CDATA[--[[
@@ -9142,7 +9374,7 @@ local UpgradeService = {
 	Boards = {} :: { [number]: { Prompts: { [string]: ProximityPrompt }, Labels: { [string]: TextLabel } } },
 }
 
-local Data, Base, Creature, Food, Fx
+local Data, Base, Creature, Food, Fx, Incubator
 
 local RED = Color3.fromRGB(255, 90, 90)
 local GOLD = Color3.fromRGB(255, 210, 60)
@@ -9153,6 +9385,7 @@ function UpgradeService:Init(registry)
 	Creature = registry.CreatureService
 	Food = registry.FoodService
 	Fx = registry.FxService
+	Incubator = registry.IncubatorService
 end
 
 local function label(parent: Instance, text: string, color: Color3?, size: UDim2, position: UDim2): TextLabel
@@ -9303,6 +9536,10 @@ function UpgradeService:Buy(player: Player, id: string)
 	Base:RefreshPens(player)
 	Food:RefreshStorage(player)
 	Creature:RefreshAllTags(player)
+	if Incubator then
+		Incubator:_fill(player)
+		Incubator:Refresh(player)
+	end
 	self:Refresh(player)
 	Data:Changed(player)
 end
@@ -9312,11 +9549,11 @@ return UpgradeService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="68">
+        <Item class="Folder" referent="69">
           <Properties>
             <string name="Name">Battle</string>
           </Properties>
-          <Item class="ModuleScript" referent="69">
+          <Item class="ModuleScript" referent="70">
             <Properties>
               <string name="Name">BattleService</string>
               <string name="Source"><![CDATA[--[[
@@ -9531,6 +9768,9 @@ function BattleService:_cannotFight(player: Player): string?
 	end
 	if player:GetAttribute("Carrying") then
 		return "is carrying stolen food"
+	end
+	if player:GetAttribute("CarryingEgg") then
+		return "is carrying an egg"
 	end
 	if self:IsFighting(player) then
 		return "is already fighting"
@@ -10412,11 +10652,11 @@ return BattleService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="70">
+        <Item class="Folder" referent="71">
           <Properties>
             <string name="Name">Core</string>
           </Properties>
-          <Item class="ModuleScript" referent="71">
+          <Item class="ModuleScript" referent="72">
             <Properties>
               <string name="Name">AdminService</string>
               <string name="Source"><![CDATA[--[[
@@ -10429,6 +10669,7 @@ return BattleService
 	  size <1-100000>  (all your titans)   res <Resource> <amount>   upgrade <Pens|Storage|Incubators>
 	  event <TitanClash|WildRush|MeteorFeast|BloodMoon>    practice
 	  wild [TitanId] [Mutation]  (spawns a wild titan in the fields)
+	  egg <TitanId> [Size] [Mutation]  (egg into an incubator)   hatchnow   nest
 	  tutorial                 daily                      quests
 ]]
 
@@ -10455,7 +10696,7 @@ local AdminService = {
 	Priority = 80,
 }
 
-local Data, Creature, Food, Event, Battle, Wild, Base
+local Data, Creature, Food, Event, Battle, Wild, Base, Incubator, Nest
 
 function AdminService:Init(registry)
 	Data = registry.DataService
@@ -10465,6 +10706,8 @@ function AdminService:Init(registry)
 	Battle = registry.BattleService
 	Wild = registry.WildService
 	Base = registry.BaseService
+	Incubator = registry.IncubatorService
+	Nest = registry.NestService
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.IsAdmin = player:GetAttribute("IsAdmin") == true
 	end)
@@ -10534,6 +10777,24 @@ function AdminService:Run(player: Player, text: string): string?
 		data.Upgrades[args[2]] = math.min(Upgrades[args[2]].Max, (data.Upgrades[args[2]] or 0) + 1)
 		Base:RefreshPens(player)
 		Food:RefreshStorage(player)
+		Incubator:_fill(player)
+		Incubator:Refresh(player)
+	elseif command == "egg" and Creatures[args[2] or ""] then
+		-- egg <Species> [Size] [Mutation]
+		local mutation = if Guard.IsConfigKey(Mutations, args[4]) then args[4] else nil
+		if not Incubator:AddEgg(player, { Species = args[2], Size = tonumber(args[3]) or 1, Mutation = mutation }) then
+			return "Egg storage full!"
+		end
+		return "Added a " .. args[2] .. " egg"
+	elseif command == "nest" then
+		return if Nest:Spawn() then "A nest appeared in the fields" else "No spot for a nest"
+	elseif command == "hatchnow" then
+		for _, egg in data.Eggs do
+			if egg.HatchAt then
+				egg.HatchAt = os.time()
+			end
+		end
+		return "All incubator eggs hatch now"
 	elseif command == "wild" then
 		local id = if Creatures[args[2] or ""] then args[2] else nil
 		local mutation = if Guard.IsConfigKey(Mutations, args[3]) then args[3] else nil
@@ -10583,7 +10844,7 @@ return AdminService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="72">
+          <Item class="ModuleScript" referent="73">
             <Properties>
               <string name="Name">DataService</string>
               <string name="Source"><![CDATA[--[[
@@ -10809,7 +11070,7 @@ return DataService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="73">
+          <Item class="ModuleScript" referent="74">
             <Properties>
               <string name="Name">FxService</string>
               <string name="Source"><![CDATA[--[[
@@ -10852,7 +11113,7 @@ return FxService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="74">
+          <Item class="ModuleScript" referent="75">
             <Properties>
               <string name="Name">SettingsService</string>
               <string name="Source"><![CDATA[--[[
@@ -10890,11 +11151,847 @@ return SettingsService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="75">
+        <Item class="Folder" referent="76">
           <Properties>
             <string name="Name">Economy</string>
           </Properties>
-          <Item class="ModuleScript" referent="76">
+          <Item class="ModuleScript" referent="77">
+            <Properties>
+              <string name="Name">BreedingService</string>
+              <string name="Source"><![CDATA[--[[
+	BreedingService: two titans of the same species make an egg.
+
+	- Pick two titans on the 💞 Breed page (Remote "Breed" uidA uidB).
+	- Breeding takes Breeding.Time(species) (longer for rarer titans). The
+	  parents stay in their pens and keep earning; hearts float over them.
+	- When it's done the egg goes to an incubator (IncubatorService:AddEgg)
+	  and both parents rest for Time * CooldownMult before breeding again.
+	- The egg's size tier is between the parents' tiers (rarely one higher),
+	  it can inherit a mutation and gets a stat Bonus (shared/Game/Breeding).
+	- One breeding at a time per player (data.Breeding). Parents can't be
+	  sold while breeding. Timers use os.time(), so it finishes offline too.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Breeding = require(Shared.Game.Breeding)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Format = require(Shared.Lib.Format)
+local Log = require(Shared.Lib.Log)
+local WeightedRandom = require(Shared.Lib.WeightedRandom)
+local Net = require(Shared.Net)
+
+local GameEvents = require(ServerScriptService:WaitForChild("Server").Modules.GameEvents)
+
+local log = Log.new("BreedingService")
+
+local PINK = Color3.fromRGB(255, 130, 180)
+local RED = Color3.fromRGB(255, 90, 90)
+local HEART_EVERY = 4
+
+local BreedingService = {
+	Priority = 32, -- after IncubatorService (30)
+}
+
+local Data, Creature, Incubator, Fx
+
+function BreedingService:Init(registry)
+	Data = registry.DataService
+	Creature = registry.CreatureService
+	Incubator = registry.IncubatorService
+	Fx = registry.FxService
+end
+
+function BreedingService:Start()
+	Net.On("Breed", function(player, a, b)
+		self:Begin(player, a, b)
+	end)
+	Net.On("BreedCancel", function(player)
+		self:Cancel(player, true)
+	end)
+	task.spawn(function()
+		local beat = 0
+		while true do
+			task.wait(1)
+			beat += 1
+			for _, player in Players:GetPlayers() do
+				local ok, err = pcall(self._tick, self, player, beat % HEART_EVERY == 0)
+				if not ok then
+					log:Warn("tick failed for", player.Name, err)
+				end
+			end
+		end
+	end)
+end
+
+function BreedingService:IsBreeding(player: Player, uid: string): boolean
+	local data = Data:Get(player)
+	return data ~= nil and data.Breeding.ReadyAt ~= nil and (data.Breeding.A == uid or data.Breeding.B == uid)
+end
+
+local function parent(creature): Breeding.Parent?
+	if not creature then
+		return nil
+	end
+	return {
+		Id = creature.Id,
+		Mutation = creature.Mutation,
+		Size = creature.Size,
+		Bonus = creature.Bonus,
+		BreedReadyAt = creature.BreedReadyAt,
+	}
+end
+
+function BreedingService:Begin(player: Player, a: string, b: string)
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	if data.Breeding.ReadyAt then
+		Net.Notify(player, "💞 Already breeding! Wait for the egg or cancel.", RED)
+		return
+	end
+	local now = os.time()
+	if a == b then
+		Net.Notify(player, "💞 Pick two different titans", RED)
+		return
+	end
+	local ca, cb = data.Creatures[a], data.Creatures[b]
+	local ok, reason = Breeding.CanBreed(parent(ca), parent(cb), now)
+	if not ok then
+		Net.Notify(player, "💞 " .. (reason or "Can't breed"), RED)
+		return
+	end
+	local time = Breeding.Time(ca.Id)
+	data.Breeding = { A = a, B = b, StartedAt = now, ReadyAt = now + time }
+	Net.Notify(
+		player,
+		string.format("💞 Your %s are breeding! Egg in %s", Creatures[ca.Id].Name, Format.Time(time)),
+		PINK
+	)
+	self:_hearts(player)
+	Data:Changed(player)
+end
+
+function BreedingService:Cancel(player: Player, byPlayer: boolean?)
+	local data = Data:Get(player)
+	if not data or not data.Breeding.ReadyAt then
+		return
+	end
+	data.Breeding = {}
+	if byPlayer then
+		Net.Notify(player, "💞 Breeding cancelled.", RED)
+	end
+	Data:Changed(player)
+end
+
+function BreedingService:_hearts(player: Player)
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	for _, uid in { data.Breeding.A, data.Breeding.B } do
+		local model = uid and Creature:GetModel(player, uid)
+		if model and not Creature:IsOut(player, uid) then
+			Fx:PlayAll("Love", { Position = Creature:TopOf(model) + Vector3.new(0, 2, 0) })
+		end
+	end
+end
+
+local function rollPoolMutation(): string?
+	local pick = WeightedRandom.Pick(Mutations.HatchPool, function(e)
+		return e.Weight
+	end)
+	return pick and pick.Id
+end
+
+function BreedingService:_tick(player: Player, hearts: boolean)
+	local data = Data:Get(player)
+	local pen = data and data.Breeding
+	if not data or not pen or not pen.ReadyAt then
+		return
+	end
+	local ca = pen.A and data.Creatures[pen.A]
+	local cb = pen.B and data.Creatures[pen.B]
+	if not ca or not cb then
+		self:Cancel(player)
+		Net.Notify(player, "💞 Breeding stopped: a parent is gone.", RED)
+		return
+	end
+	if os.time() < pen.ReadyAt then
+		if hearts then
+			self:_hearts(player)
+		end
+		return
+	end
+	self:_finish(player)
+end
+
+function BreedingService:_finish(player: Player)
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	local pen = data.Breeding
+	local ca, cb = data.Creatures[pen.A], data.Creatures[pen.B]
+	local egg = Breeding.MakeEgg(parent(ca) :: any, parent(cb) :: any, {
+		Mutation = math.random(),
+		PickParent = math.random(),
+		Bonus = math.random(),
+		Size = math.random(),
+		Jump = math.random(),
+		PoolMutation = rollPoolMutation(),
+	})
+	local uid = Incubator:AddEgg(player, {
+		Species = egg.Species,
+		Mutation = egg.Mutation,
+		Size = egg.Size,
+		Bonus = egg.Bonus,
+		Source = "Breed",
+	})
+	if not uid then
+		return -- egg storage full: try again next tick
+	end
+	local now = os.time()
+	local rest = Breeding.Cooldown(ca.Id)
+	ca.BreedReadyAt = now + rest
+	cb.BreedReadyAt = now + rest
+	data.Breeding = {}
+	data.Stats.Bred += 1
+
+	local def = Creatures[egg.Species]
+	local color = if egg.Mutation then Mutations[egg.Mutation].Color else Rarities[def.Rarity].Color
+	local model = Incubator:GetEggModel(player, uid) or Creature:GetModel(player, pen.A)
+	if model then
+		Fx:PlayAll("EggLaid", {
+			Position = model:GetPivot().Position,
+			Color = color,
+			Scale = 1 + (Breeding.TierIndex(egg.Size) - 1) * 0.3,
+		})
+	end
+	local sizeText = if Breeding.TierIndex(egg.Size) > 1 then CreatureMath.SizeLabel(egg.Size) .. " " else ""
+	local mutationText = if egg.Mutation then Mutations[egg.Mutation].Name .. " " else ""
+	Net.Notify(
+		player,
+		string.format(
+			"🥚 New %s%s%s egg! (+%d%% stats)",
+			sizeText,
+			mutationText,
+			def.Name,
+			math.floor(egg.Bonus * 100)
+		),
+		color
+	)
+	GameEvents.Fire(player, "Bred", { Titan = egg.Species, Mutation = egg.Mutation, Size = egg.Size })
+	log:Info(player.Name, "bred", egg.Species, egg.Size, egg.Mutation)
+	Data:Changed(player)
+end
+
+return BreedingService
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="78">
+            <Properties>
+              <string name="Name">EggCarryService</string>
+              <string name="Source"><![CDATA[--[[
+	EggCarryService: stealing eggs and carrying them home.
+
+	- Hold "Steal Egg" on someone else's incubator (only while they're in the
+	  server). Bigger eggs take longer to grab.
+	- The carrier walks slower (Breeding.CarrySpeed: bigger = slower), can't
+	  ride or battle, leaves a trail and has a marker everyone can see.
+	- The owner hears an alarm and gets a guide beam to the thief (client:
+	  EggAlarmController, player attribute "EggThief").
+	- Anyone can "Tackle" a carrier (the owner's prompt says "Take Back" and
+	  returns it straight home). A tackled or killed carrier drops the egg;
+	  a dropped egg can be grabbed by anyone for DroppedTime seconds, then it
+	  goes back to its owner.
+	- Reach your own base with it and it's yours (IncubatorService:AddEgg).
+
+	API (also used by nests, step 5):
+	  EggCarryService:StartCarry(player, egg, owner?, fromText?) -> boolean
+	  EggCarryService:Drop(player, reason)
+	  EggCarryService:IsCarrying(player) -> boolean
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Breeding = require(Shared.Game.Breeding)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+
+local Server = ServerScriptService:WaitForChild("Server")
+local EggBuilder = require(Server.Modules.EggBuilder)
+local GameEvents = require(Server.Modules.GameEvents)
+
+local log = Log.new("EggCarryService")
+
+local BREED = GameConfig.Breeding
+local RED = Color3.fromRGB(255, 80, 80)
+local GREEN = Color3.fromRGB(90, 220, 120)
+local GOLD = Color3.fromRGB(255, 210, 60)
+local CARRY_SCALE = 0.55 -- carried eggs are shrunk a bit so they fit over your head
+
+type Egg = {
+	Species: string,
+	Mutation: string?,
+	Size: number,
+	Bonus: number?,
+	Source: string?,
+}
+
+type Carry = {
+	Egg: Egg,
+	Owner: Player?, -- nil = a wild nest egg
+	Model: Model,
+	Marker: BillboardGui,
+	Trail: Trail,
+	Prompt: ProximityPrompt,
+	Humanoid: Humanoid,
+	Died: RBXScriptConnection,
+}
+
+type Dropped = {
+	Egg: Egg,
+	Owner: Player?,
+	Model: Model,
+	Prompt: ProximityPrompt,
+	Until: number,
+}
+
+local EggCarryService = {
+	Priority = 36, -- after IncubatorService (30) and StealService (35)
+	Carriers = {} :: { [Player]: Carry },
+	Dropped = {} :: { Dropped },
+}
+
+local Data, Base, Incubator, Ride, Fx
+
+function EggCarryService:Init(registry)
+	Data = registry.DataService
+	Base = registry.BaseService
+	Incubator = registry.IncubatorService
+	Ride = registry.RideService
+	Fx = registry.FxService
+end
+
+local function eggName(egg: Egg): string
+	return CreatureMath.DisplayName({ Id = egg.Species, Level = 1, Xp = 0, Mutation = egg.Mutation, Size = egg.Size })
+end
+
+local function eggColor(egg: Egg): Color3
+	return if egg.Mutation then Mutations[egg.Mutation].Color else Rarities[Creatures[egg.Species].Rarity].Color
+end
+
+local function grabTime(size: number): number
+	return 1.2 + (Breeding.TierIndex(size) - 1) * 0.5
+end
+
+function EggCarryService:Start()
+	-- A "Steal Egg" prompt on every incubator, hidden for its owner.
+	Incubator.OnEggPad(function(ownerPrompt: ProximityPrompt, plot, slot: number)
+		local base = ownerPrompt.Parent :: BasePart
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "StealEggPrompt"
+		prompt.ActionText = "Steal Egg"
+		prompt.ObjectText = "Incubator"
+		prompt.HoldDuration = 1.5
+		prompt.MaxActivationDistance = 12
+		prompt.RequiresLineOfSight = false
+		prompt.KeyboardKeyCode = Enum.KeyCode.F
+		prompt:SetAttribute("Off", true)
+		prompt.Parent = base
+		local function update()
+			local hasEgg = base:GetAttribute("HasEgg") == true
+			prompt:SetAttribute("Off", not hasEgg)
+			prompt:SetAttribute("HideForUserId", base:GetAttribute("OwnerUserId"))
+			local owner = plot.Owner
+			local data = owner and Data:Get(owner)
+			local uid = base:GetAttribute("EggUid")
+			local egg = data and uid and data.Eggs[uid]
+			if egg then
+				prompt.ObjectText = eggName(egg)
+				prompt.HoldDuration = grabTime(egg.Size)
+			end
+		end
+		base:GetAttributeChangedSignal("HasEgg"):Connect(update)
+		base:GetAttributeChangedSignal("EggUid"):Connect(update)
+		base:GetAttributeChangedSignal("OwnerUserId"):Connect(update)
+		prompt.Triggered:Connect(function(thief)
+			self:_stealFromPad(thief, plot, slot, base)
+		end)
+		update()
+	end)
+
+	local accumulator = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accumulator += dt
+		if accumulator < 0.2 then
+			return
+		end
+		accumulator = 0
+		self:_tick()
+	end)
+end
+
+function EggCarryService:OnPlayerRemoving(player: Player)
+	if self.Carriers[player] then
+		self:_returnHome(player, "left")
+	end
+	-- Their eggs out in the world: the owner is gone, so nobody gets them back.
+	for _, carry in self.Carriers do
+		if carry.Owner == player then
+			carry.Owner = nil
+		end
+	end
+	for _, dropped in self.Dropped do
+		if dropped.Owner == player then
+			dropped.Owner = nil
+		end
+	end
+	player:SetAttribute("EggThief", nil)
+end
+
+function EggCarryService:IsCarrying(player: Player): boolean
+	return self.Carriers[player] ~= nil
+end
+
+--------------------------------------------------------------------------
+-- Starting a carry
+--------------------------------------------------------------------------
+
+local function canCarry(player: Player): (boolean, string?)
+	if player:GetAttribute("Carrying") then
+		return false, "You're already carrying food!"
+	end
+	if player:GetAttribute("CarryingEgg") then
+		return false, "You're already carrying an egg!"
+	end
+	if player:GetAttribute("InBattle") then
+		return false, nil
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return false, nil
+	end
+	return true, nil
+end
+
+function EggCarryService:_stealFromPad(thief: Player, plot, _slot: number, base: BasePart)
+	local owner = plot.Owner
+	if not owner or owner == thief then
+		return
+	end
+	local ok, reason = canCarry(thief)
+	if not ok then
+		if reason then
+			Net.Notify(thief, "🥚 " .. reason, RED)
+		end
+		return
+	end
+	local uid = base:GetAttribute("EggUid")
+	if type(uid) ~= "string" then
+		return
+	end
+	local egg = Incubator:TakeEgg(owner, uid)
+	if not egg then
+		return
+	end
+	local carryEgg: Egg = {
+		Species = egg.Species,
+		Mutation = egg.Mutation,
+		Size = egg.Size,
+		Bonus = egg.Bonus,
+		Source = "Stolen",
+	}
+	if not self:StartCarry(thief, carryEgg, owner) then
+		-- Couldn't start (e.g. died this frame): give it back.
+		Incubator:AddEgg(owner, egg)
+		return
+	end
+	Fx:PlayAll("StealStart", { Position = base.Position })
+	Fx:PlayFor(owner, "StealAlert", {})
+	owner:SetAttribute("EggThief", thief.UserId)
+	Net.Fire(owner, "Announce", {
+		Title = "🚨 EGG STOLEN!",
+		Text = thief.DisplayName .. " stole your " .. eggName(carryEgg) .. " egg! Follow the beam and take it back!",
+		Color = RED,
+	})
+	Net.Notify(thief, "😈 Got a " .. eggName(carryEgg) .. " egg! Run back to your base!", eggColor(carryEgg))
+	if Breeding.ShouldAnnounce(carryEgg.Size) then
+		Net.NotifyAll(
+			string.format(
+				"🥚 %s is running with %s's %s egg!",
+				thief.DisplayName,
+				owner.DisplayName,
+				eggName(carryEgg)
+			),
+			GOLD
+		)
+	end
+	log:Info(thief.Name, "stole", carryEgg.Species, "from", owner.Name)
+end
+
+function EggCarryService:StartCarry(player: Player, egg: Egg, owner: Player?): boolean
+	local ok = canCarry(player)
+	if not ok then
+		return false
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character or not root or not humanoid then
+		return false
+	end
+	Ride:Dismount(player)
+
+	-- The egg over your head
+	local model = EggBuilder.Build(egg)
+	model.Name = "CarriedEgg"
+	model:ScaleTo(CARRY_SCALE)
+	local height = model:GetExtentsSize().Y
+	model:PivotTo(root.CFrame * CFrame.new(0, 3, 0))
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+			part.Massless = true
+			part.CanCollide = false
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = root
+			weld.Part1 = part
+			weld.Parent = part
+		end
+	end
+	model.Parent = character
+
+	-- Marker everyone can see from far away
+	local marker = Instance.new("BillboardGui")
+	marker.Name = "EggThiefMarker"
+	marker.Size = UDim2.fromOffset(200, 50)
+	marker.StudsOffsetWorldSpace = Vector3.new(0, 4 + height, 0)
+	marker.AlwaysOnTop = true
+	marker.MaxDistance = 800
+	marker.Parent = root
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = eggColor(egg)
+	label.Text = "🥚 " .. eggName(egg)
+	label.Parent = marker
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3
+	stroke.Parent = label
+
+	-- Trail
+	local a0 = Instance.new("Attachment")
+	a0.Name = "EggTrail0"
+	a0.Position = Vector3.new(0, 1, 0)
+	a0.Parent = root
+	local a1 = Instance.new("Attachment")
+	a1.Name = "EggTrail1"
+	a1.Position = Vector3.new(0, -2, 0)
+	a1.Parent = root
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Color = ColorSequence.new(eggColor(egg))
+	trail.LightEmission = 1
+	trail.Lifetime = 1.6
+	trail.Transparency = NumberSequence.new(0.2, 1)
+	trail.FaceCamera = true
+	trail.Parent = root
+
+	-- Tackle / Take Back prompt on the carrier
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "TackleEggPrompt"
+	prompt.ActionText = "Tackle!"
+	prompt.ObjectText = "Egg carrier"
+	prompt.HoldDuration = 0.25
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute("HideForUserId", player.UserId)
+	prompt.Parent = root
+	prompt.Triggered:Connect(function(who)
+		if who == player then
+			return
+		end
+		local carry = self.Carriers[player]
+		if carry and who == carry.Owner then
+			self:_returnHome(player, "takeback")
+		else
+			self:Drop(player, "tackled")
+		end
+	end)
+
+	humanoid.WalkSpeed = Breeding.CarrySpeed(egg.Size)
+	self.Carriers[player] = {
+		Egg = egg,
+		Owner = owner,
+		Model = model,
+		Marker = marker,
+		Trail = trail,
+		Prompt = prompt,
+		Humanoid = humanoid,
+		Died = humanoid.Died:Connect(function()
+			self:Drop(player, "died")
+		end),
+	}
+	player:SetAttribute("CarryingEgg", eggName(egg))
+	return true
+end
+
+--------------------------------------------------------------------------
+-- Ending a carry
+--------------------------------------------------------------------------
+
+function EggCarryService:_clear(player: Player): Carry?
+	local carry = self.Carriers[player]
+	if not carry then
+		return nil
+	end
+	self.Carriers[player] = nil
+	carry.Died:Disconnect()
+	carry.Model:Destroy()
+	carry.Marker:Destroy()
+	carry.Prompt:Destroy()
+	local root = carry.Trail.Parent
+	carry.Trail:Destroy()
+	if root then
+		for _, name in { "EggTrail0", "EggTrail1" } do
+			local a = root:FindFirstChild(name)
+			if a then
+				a:Destroy()
+			end
+		end
+	end
+	if carry.Humanoid.Parent and carry.Humanoid.Health > 0 then
+		carry.Humanoid.WalkSpeed = GameConfig.Steal.NormalWalkSpeed
+	end
+	if player.Parent then
+		player:SetAttribute("CarryingEgg", nil)
+	end
+	if carry.Owner and carry.Owner.Parent then
+		carry.Owner:SetAttribute("EggThief", nil)
+	end
+	return carry
+end
+
+local function position(player: Player): Vector3?
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	return root and root.Position
+end
+
+-- Gives the egg straight back to its owner (Take Back, or the carrier left).
+function EggCarryService:_returnHome(player: Player, reason: string)
+	local at = position(player)
+	local carry = self:_clear(player)
+	if not carry then
+		return
+	end
+	local owner = carry.Owner
+	if owner and owner.Parent then
+		Incubator:AddEgg(owner, carry.Egg)
+		if reason == "takeback" then
+			Net.Notify(owner, "✅ You got your egg back!", GREEN)
+		end
+	end
+	if at then
+		Fx:PlayAll("TakeBack", { Position = at })
+	end
+	if player.Parent and reason == "takeback" and owner then
+		Net.Notify(player, "❌ " .. owner.DisplayName .. " took their egg back!", RED)
+	end
+end
+
+-- The carrier drops the egg on the ground; anyone can grab it for a bit.
+function EggCarryService:Drop(player: Player, reason: string)
+	local at = position(player) or (self.Carriers[player] and self.Carriers[player].Model:GetPivot().Position)
+	local carry = self:_clear(player)
+	if not carry or not at then
+		return
+	end
+	if player.Parent then
+		Net.Notify(
+			player,
+			if reason == "tackled" then "💥 You got tackled and dropped the egg!" else "❌ You dropped the egg!",
+			RED
+		)
+	end
+	self:_spawnDropped(carry.Egg, carry.Owner, at)
+end
+
+function EggCarryService:_spawnDropped(egg: Egg, owner: Player?, at: Vector3)
+	local model = EggBuilder.Build(egg)
+	model.Name = "DroppedEgg"
+	model:ScaleTo(CARRY_SCALE)
+	model:PivotTo(CFrame.new(at.X, at.Y - 2.5, at.Z))
+	local shell = model:FindFirstChild("Shell") :: BasePart
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "GrabEggPrompt"
+	prompt.ActionText = "Grab Egg"
+	prompt.ObjectText = eggName(egg)
+	prompt.HoldDuration = 0.4
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = shell
+	model.Parent = workspace
+	local dropped: Dropped = {
+		Egg = egg,
+		Owner = owner,
+		Model = model,
+		Prompt = prompt,
+		Until = os.clock() + BREED.DroppedTime,
+	}
+	table.insert(self.Dropped, dropped)
+	prompt.Triggered:Connect(function(who)
+		self:_grabDropped(who, dropped)
+	end)
+	Fx:PlayAll("Poof", { Position = at })
+	if owner and owner.Parent then
+		Net.Notify(owner, string.format("🥚 Your egg was dropped! Grab it in %ds!", BREED.DroppedTime), GOLD)
+	end
+end
+
+function EggCarryService:_removeDropped(dropped: Dropped)
+	local index = table.find(self.Dropped, dropped)
+	if index then
+		table.remove(self.Dropped, index)
+	end
+	dropped.Model:Destroy()
+end
+
+function EggCarryService:_grabDropped(player: Player, dropped: Dropped)
+	if not table.find(self.Dropped, dropped) then
+		return
+	end
+	if player == dropped.Owner then
+		self:_removeDropped(dropped)
+		Incubator:AddEgg(player, dropped.Egg)
+		Net.Notify(player, "✅ You got your egg back!", GREEN)
+		Fx:PlayAll("TakeBack", { Position = dropped.Model:GetPivot().Position })
+		return
+	end
+	local ok, reason = canCarry(player)
+	if not ok then
+		if reason then
+			Net.Notify(player, "🥚 " .. reason, RED)
+		end
+		return
+	end
+	local egg, owner = dropped.Egg, dropped.Owner
+	self:_removeDropped(dropped)
+	if self:StartCarry(player, egg, owner) then
+		if owner and owner.Parent then
+			owner:SetAttribute("EggThief", player.UserId)
+			Net.Notify(owner, "🚨 " .. player.DisplayName .. " grabbed your egg!", RED)
+		end
+		Net.Notify(player, "😈 Got it! Run back to your base!", eggColor(egg))
+	else
+		self:_spawnDropped(egg, owner, dropped.Model:GetPivot().Position + Vector3.new(0, 2.5, 0))
+	end
+end
+
+-- Made it home with the egg.
+function EggCarryService:_deposit(player: Player)
+	local carry = self.Carriers[player]
+	if not carry then
+		return
+	end
+	local egg = carry.Egg
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	local count = 0
+	for _ in data.Eggs do
+		count += 1
+	end
+	if count >= GameConfig.Data.Limits.Eggs then
+		if Net.Throttle(player, "EggStorageFull", 5) then
+			Net.Notify(player, "🥚 Your egg storage is full! The egg can't fit.", RED)
+		end
+		return
+	end
+	self:_clear(player)
+	Incubator:AddEgg(player, egg)
+	local owner = carry.Owner
+	if owner then
+		data.Stats.Steals += 1
+		GameEvents.Fire(player, "Stole", { Egg = egg.Species })
+		local ownerData = owner.Parent and Data:Get(owner)
+		if ownerData then
+			ownerData.Stats.Stolen += 1
+			Net.Notify(owner, "😭 " .. player.DisplayName .. " stole your " .. eggName(egg) .. " egg!", RED)
+		end
+	end
+	local at = position(player)
+	if at then
+		Fx:PlayAll("Deposit", { Position = at, Color = eggColor(egg), Owner = player.UserId })
+	end
+	Net.Notify(player, "🥚 The " .. eggName(egg) .. " egg is yours!", GREEN)
+	Data:Changed(player)
+end
+
+--------------------------------------------------------------------------
+-- Tick
+--------------------------------------------------------------------------
+
+function EggCarryService:_tick()
+	for player in self.Carriers do
+		local at = position(player)
+		if not at then
+			self:Drop(player, "died")
+			continue
+		end
+		local home = Base:GetPlot(player)
+		if home and Base:IsInside(home, at) then
+			self:_deposit(player)
+		end
+	end
+	local now = os.clock()
+	for i = #self.Dropped, 1, -1 do
+		local dropped = self.Dropped[i]
+		if now >= dropped.Until then
+			local at = dropped.Model:GetPivot().Position
+			self:_removeDropped(dropped)
+			if dropped.Owner and dropped.Owner.Parent then
+				Incubator:AddEgg(dropped.Owner, dropped.Egg)
+				Net.Notify(dropped.Owner, "✅ Your dropped egg rolled back home!", GREEN)
+				Fx:PlayAll("TakeBack", { Position = at })
+			else
+				Fx:PlayAll("Poof", { Position = at })
+			end
+		else
+			local left = math.ceil(dropped.Until - now)
+			dropped.Prompt.ObjectText = string.format("%s  (%ds)", eggName(dropped.Egg), left)
+		end
+	end
+end
+
+return EggCarryService
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="79">
             <Properties>
               <string name="Name">EggService</string>
               <string name="Source"><![CDATA[--[[
@@ -11019,7 +12116,725 @@ return EggService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="77">
+          <Item class="ModuleScript" referent="80">
+            <Properties>
+              <string name="Name">FusionService</string>
+              <string name="Source"><![CDATA[--[[
+	FusionService: fuse 3 titans of the same species and size tier into one
+	titan of the next size tier (x1 -> x3 -> x10 ... -> x100,000).
+
+	The new titan keeps the best of the three: highest level, best stat
+	bonus, and a mutation if any of them had one. Costs cash
+	(Breeding.FuseCost: rarer and bigger = more).
+	Remote "Fuse" uidA uidB uidC (from the 💞 Breed page, Fuse tab).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Breeding = require(Shared.Game.Breeding)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Format = require(Shared.Lib.Format)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+
+local log = Log.new("FusionService")
+
+local RED = Color3.fromRGB(255, 90, 90)
+
+local FusionService = {
+	Priority = 34,
+}
+
+local Data, Creature, Breed, Ride, Follower, Fx
+
+function FusionService:Init(registry)
+	Data = registry.DataService
+	Creature = registry.CreatureService
+	Breed = registry.BreedingService
+	Ride = registry.RideService
+	Follower = registry.FollowerService
+	Fx = registry.FxService
+end
+
+function FusionService:Start()
+	Net.On("Fuse", function(player, a, b, c)
+		self:Fuse(player, { a, b, c })
+	end)
+end
+
+function FusionService:Fuse(player: Player, uids: { string })
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	if uids[1] == uids[2] or uids[1] == uids[3] or uids[2] == uids[3] then
+		Net.Notify(player, "🔮 Pick 3 different titans", RED)
+		return
+	end
+	local parts = {}
+	for _, uid in uids do
+		local creature = data.Creatures[uid]
+		if not creature then
+			return
+		end
+		if Breed:IsBreeding(player, uid) then
+			Net.Notify(player, "🔮 A titan you picked is breeding!", RED)
+			return
+		end
+		table.insert(parts, { Id = creature.Id, Size = creature.Size, Mutation = creature.Mutation })
+	end
+	local newSize, reason = Breeding.FuseResult(parts)
+	if not newSize then
+		Net.Notify(player, "🔮 " .. (reason or "Can't fuse"), RED)
+		return
+	end
+	local species = parts[1].Id
+	local cost = Breeding.FuseCost(species, parts[1].Size or 1)
+	if data.Cash < cost then
+		Net.Notify(player, "🔮 Fusing costs " .. Format.Money(cost) .. "!", RED)
+		return
+	end
+
+	-- The best of the three
+	local level, bonus, mutation = 1, 0, nil
+	for _, uid in uids do
+		local creature = data.Creatures[uid]
+		level = math.max(level, creature.Level)
+		bonus = math.max(bonus, creature.Bonus or 0)
+		mutation = mutation or creature.Mutation
+	end
+	local wasActive = table.find(uids, data.Active or "") ~= nil
+	local where = Creature:GetModel(player, uids[1])
+	local at = where and where:GetPivot().Position
+
+	-- Take them out of the world first (riding / following)
+	local ride = Ride:Get(player)
+	if ride and table.find(uids, ride.Uid) then
+		Ride:Dismount(player)
+	end
+	for _, uid in uids do
+		Follower:Release(player, uid, true)
+	end
+
+	data.Cash -= cost
+	for _, uid in uids do
+		Creature:Remove(player, uid)
+	end
+	local newUid = Creature:Add(player, species, mutation, newSize)
+	if not newUid then
+		-- Can't happen (we just freed 3 pens), but never lose the cash.
+		data.Cash += cost
+		log:Warn("fusion failed to add for", player.Name)
+		return
+	end
+	Creature:SetLevel(player, newUid, level)
+	data.Creatures[newUid].Bonus = bonus
+	if wasActive then
+		data.Active = newUid
+	end
+	Creature:RefreshAllTags(player)
+
+	local def = Creatures[species]
+	local color = if mutation then Mutations[mutation].Color else Rarities[def.Rarity].Color
+	local model = Creature:GetModel(player, newUid)
+	if model then
+		at = model:GetPivot().Position
+	end
+	if at then
+		Fx:PlayAll("Mutation", { Position = at, Color = color })
+		Fx:PlayAll("LevelUp", { Position = at + Vector3.new(0, 4, 0), Level = level, Owner = player.UserId })
+	end
+	local name = CreatureMath.DisplayName({ Id = species, Level = level, Xp = 0, Mutation = mutation, Size = newSize })
+	Net.Fire(player, "Hatched", { CreatureId = species, Mutation = mutation, Source = "Fuse", Size = newSize })
+	if Breeding.ShouldAnnounce(newSize) then
+		Net.Announce("🔮 MEGA FUSION!", player.DisplayName .. " fused a " .. name .. "!", color)
+	end
+	log:Info(player.Name, "fused", name)
+	Data:Changed(player)
+end
+
+return FusionService
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="81">
+            <Properties>
+              <string name="Name">IncubatorService</string>
+              <string name="Source"><![CDATA[--[[
+	IncubatorService: incubators at the back of every base, where eggs hatch.
+
+	- You start with 1 incubator; the "Incubator" upgrade adds more (max 6).
+	- New eggs (from breeding, nests, stealing) go into a free incubator,
+	  or wait in egg storage until one frees up.
+	- Hatch timers use os.time(), so eggs keep hatching while you're offline
+	  (they pop out the next time you join).
+	- "Faster Hatching" upgrade: eggs placed after buying it hatch faster.
+	- Bigger eggs get a bigger model, a longer hatch and a bigger reveal.
+
+	API:
+	  IncubatorService:AddEgg(player, { Species, Mutation?, Size, Bonus?, Source? }) -> uid?
+	  IncubatorService:Refresh(player)          (after upgrades)
+	  IncubatorService:GetEggModel(player, uid) -> Model?
+	  IncubatorService:TakeEgg(player, uid) -> EggData?   (removes it; used by stealing)
+	  IncubatorService.OnEggPad(fn(prompt, plot, slot))   (step 4 hooks steal prompts)
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Upgrades = require(Shared.Config.Upgrades)
+local Breeding = require(Shared.Game.Breeding)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Rules = require(Shared.Game.Rules)
+local Format = require(Shared.Lib.Format)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+
+local Server = ServerScriptService:WaitForChild("Server")
+local EggBuilder = require(Server.Modules.EggBuilder)
+local GameEvents = require(Server.Modules.GameEvents)
+local StudGround = require(Server.Modules.Map.StudGround)
+
+local log = Log.new("IncubatorService")
+
+local SLOT_X = { -50, -30, -10, 10, 30, 50 }
+local SLOT_Z = 70
+local MAX_SLOTS = 1 + Upgrades.Incubators.Max
+
+local GOLD = Color3.fromRGB(255, 210, 60)
+local RED = Color3.fromRGB(255, 90, 90)
+
+type Pad = {
+	Base: Part,
+	Label: TextLabel,
+	Bar: Frame,
+	Prompt: ProximityPrompt,
+	Egg: Model?,
+	EggUid: string?,
+}
+
+local IncubatorService = {
+	Priority = 30, -- after CreatureService (25) and UpgradeService (22)
+	Pads = {} :: { [number]: { Pad } }, -- [plot index][slot]
+}
+
+local Data, Base, Creature, Fx
+local padHooks: { (ProximityPrompt, any, number) -> () } = {}
+
+function IncubatorService:Init(registry)
+	Data = registry.DataService
+	Base = registry.BaseService
+	Creature = registry.CreatureService
+	Fx = registry.FxService
+end
+
+-- Lets another service add its own prompt logic to every incubator pad.
+function IncubatorService.OnEggPad(fn: (ProximityPrompt, any, number) -> ())
+	table.insert(padHooks, fn)
+	for plotIndex, pads in IncubatorService.Pads do
+		for slot, pad in pads do
+			fn(pad.Prompt, Base.Plots[plotIndex], slot)
+		end
+	end
+end
+
+--------------------------------------------------------------------------
+-- Building
+--------------------------------------------------------------------------
+
+local function part(
+	parent: Instance,
+	name: string,
+	shape: Enum.PartType,
+	size: Vector3,
+	cf: CFrame,
+	color: Color3
+): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Shape = shape
+	p.Anchored = true
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+function IncubatorService:_build(plot)
+	local folder = Instance.new("Model")
+	folder.Name = "Incubators"
+	local pads = {}
+	for slot = 1, MAX_SLOTS do
+		local cf = plot.CFrame * CFrame.new(SLOT_X[slot], 1.1, SLOT_Z)
+		local model = Instance.new("Model")
+		model.Name = "Incubator" .. slot
+		local base = part(
+			model,
+			"Base",
+			Enum.PartType.Cylinder,
+			Vector3.new(1.4, 12, 12),
+			cf * CFrame.new(0, 0.7, 0) * CFrame.Angles(0, 0, math.rad(90)),
+			Color3.fromRGB(70, 75, 95)
+		)
+		local ring = part(
+			model,
+			"Ring",
+			Enum.PartType.Cylinder,
+			Vector3.new(0.3, 12.6, 12.6),
+			cf * CFrame.new(0, 1.3, 0) * CFrame.Angles(0, 0, math.rad(90)),
+			GOLD
+		)
+		ring.Material = Enum.Material.Neon
+		ring.CanCollide = false
+
+		local gui = Instance.new("BillboardGui")
+		gui.Name = "Timer"
+		gui.Size = UDim2.fromOffset(170, 52)
+		gui.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
+		gui.MaxDistance = 140
+		gui.AlwaysOnTop = false
+		gui.Parent = base
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(1, 0, 0, 30)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.FredokaOne
+		label.TextScaled = true
+		label.TextColor3 = Color3.new(1, 1, 1)
+		label.Text = ""
+		label.Parent = gui
+		local stroke = Instance.new("UIStroke")
+		stroke.Thickness = 2
+		stroke.Parent = label
+		local barBack = Instance.new("Frame")
+		barBack.Position = UDim2.fromOffset(10, 34)
+		barBack.Size = UDim2.new(1, -20, 0, 12)
+		barBack.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+		barBack.Parent = gui
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = barBack
+		local bar = Instance.new("Frame")
+		bar.Size = UDim2.fromScale(0, 1)
+		bar.BackgroundColor3 = GOLD
+		bar.BorderSizePixel = 0
+		bar.Parent = barBack
+		corner:Clone().Parent = bar
+
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "IncubatorPrompt"
+		prompt.ActionText = "Place egg"
+		prompt.ObjectText = "Incubator"
+		prompt.HoldDuration = 0.3
+		prompt.MaxActivationDistance = 12
+		prompt.RequiresLineOfSight = false
+		prompt:SetAttribute("Off", true)
+		prompt:SetAttribute("OnlyUserId", -1)
+		prompt.Parent = base
+		prompt.Triggered:Connect(function(player)
+			if Base:GetPlot(player) == plot then
+				self:_ownerUse(player, slot)
+			end
+		end)
+
+		if GameConfig.Map.Style ~= "Terrain" then
+			StudGround.Style(model)
+		end
+		model.Parent = folder
+		pads[slot] = { Base = base, Label = label, Bar = bar, Prompt = prompt }
+		for _, hook in padHooks do
+			hook(prompt, plot, slot)
+		end
+	end
+	folder.Parent = plot.Model
+	self.Pads[plot.Index] = pads
+end
+
+function IncubatorService:Start()
+	for _, plot in Base.Plots do
+		self:_build(plot)
+	end
+	Data:AddSnapshotHook(function(player, snapshot)
+		local data = Data:Get(player)
+		if data then
+			snapshot.Incubators = Breeding.IncubatorCount(Rules.UpgradeLevel(data, "Incubators"))
+		end
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for _, player in Players:GetPlayers() do
+				local ok, err = pcall(self._tick, self, player)
+				if not ok then
+					log:Warn("tick failed for", player.Name, err)
+				end
+			end
+		end
+	end)
+	log:Info("incubators built:", #Base.Plots * MAX_SLOTS)
+end
+
+function IncubatorService:OnPlayerReady(player: Player)
+	self:_fill(player)
+	self:Refresh(player)
+end
+
+function IncubatorService:OnPlayerRemoving(player: Player)
+	local pads = self:_pads(player)
+	if not pads then
+		return
+	end
+	for _, pad in pads do
+		self:_clearModel(pad)
+		pad.Label.Text = ""
+		pad.Bar.Size = UDim2.fromScale(0, 1)
+		pad.Prompt:SetAttribute("Off", true)
+		pad.Prompt:SetAttribute("OnlyUserId", -1)
+		pad.Base:SetAttribute("HasEgg", false)
+		pad.Base:SetAttribute("OwnerUserId", nil)
+	end
+end
+
+--------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------
+
+function IncubatorService:_pads(player: Player): { Pad }?
+	local plot = Base:GetPlot(player)
+	return plot and self.Pads[plot.Index]
+end
+
+function IncubatorService:Count(player: Player): number
+	local data = Data:Get(player)
+	return if data then math.min(MAX_SLOTS, Breeding.IncubatorCount(Rules.UpgradeLevel(data, "Incubators"))) else 1
+end
+
+local function eggInSlot(data, slot: number): (string?, any)
+	for uid, egg in data.Eggs do
+		if egg.Slot == slot then
+			return uid, egg
+		end
+	end
+	return nil, nil
+end
+
+local function storedEggs(data): { string }
+	local list = {}
+	for uid, egg in data.Eggs do
+		if egg.Slot == nil then
+			table.insert(list, uid)
+		end
+	end
+	-- Biggest / rarest first so the best egg starts hatching first.
+	table.sort(list, function(a, b)
+		local ea, eb = data.Eggs[a], data.Eggs[b]
+		if ea.Size ~= eb.Size then
+			return ea.Size > eb.Size
+		end
+		return (tonumber(a) or 0) < (tonumber(b) or 0)
+	end)
+	return list
+end
+
+function IncubatorService:_clearModel(pad: Pad)
+	if pad.Egg then
+		pad.Egg:Destroy()
+		pad.Egg = nil
+		pad.EggUid = nil
+	end
+end
+
+function IncubatorService:GetEggModel(player: Player, uid: string): Model?
+	local pads = self:_pads(player)
+	if pads then
+		for _, pad in pads do
+			if pad.EggUid == uid then
+				return pad.Egg
+			end
+		end
+	end
+	return nil
+end
+
+-- Puts an egg into a slot and starts its timer.
+function IncubatorService:_place(player: Player, uid: string, slot: number)
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	local egg = data.Eggs[uid]
+	local now = os.time()
+	egg.Slot = slot
+	egg.StartedAt = now
+	egg.HatchAt = now + Breeding.HatchTime(egg.Species, egg.Size, Rules.UpgradeLevel(data, "IncubatorSpeed"))
+end
+
+-- Moves stored eggs into every free incubator.
+function IncubatorService:_fill(player: Player): boolean
+	local data = Data:Get(player)
+	if not data then
+		return false
+	end
+	local changed = false
+	local stored = storedEggs(data)
+	for slot = 1, self:Count(player) do
+		if #stored == 0 then
+			break
+		end
+		if not eggInSlot(data, slot) then
+			self:_place(player, table.remove(stored, 1) :: string, slot)
+			changed = true
+		end
+	end
+	-- Eggs in slots you no longer have (shouldn't happen) go back to storage.
+	for _, egg in data.Eggs do
+		if egg.Slot and egg.Slot > self:Count(player) then
+			egg.Slot, egg.StartedAt, egg.HatchAt = nil, nil, nil
+			changed = true
+		end
+	end
+	return changed
+end
+
+--------------------------------------------------------------------------
+-- Visuals
+--------------------------------------------------------------------------
+
+function IncubatorService:Refresh(player: Player)
+	local data = Data:Get(player)
+	local pads = self:_pads(player)
+	if not data or not pads then
+		return
+	end
+	local count = self:Count(player)
+	local stored = #storedEggs(data)
+	for slot, pad in pads do
+		local uid, egg = eggInSlot(data, slot)
+		pad.Prompt:SetAttribute("OnlyUserId", player.UserId)
+		pad.Base:SetAttribute("OwnerUserId", player.UserId)
+		pad.Base:SetAttribute("HasEgg", uid ~= nil and slot <= count)
+		pad.Base:SetAttribute("EggUid", if slot <= count then uid else nil)
+		if slot > count then
+			self:_clearModel(pad)
+			pad.Label.Text = "🔒 Buy at upgrade board"
+			pad.Label.TextColor3 = Color3.fromRGB(170, 170, 190)
+			pad.Bar.Parent.Visible = false
+			pad.Prompt:SetAttribute("Off", true)
+			pad.Base.Transparency = 0.5
+		elseif not uid then
+			self:_clearModel(pad)
+			pad.Base.Transparency = 0
+			pad.Label.Text = if stored > 0 then "🥚 Place an egg" else "Empty incubator"
+			pad.Label.TextColor3 = Color3.new(1, 1, 1)
+			pad.Bar.Parent.Visible = false
+			pad.Prompt.ActionText = "Place egg"
+			pad.Prompt:SetAttribute("Off", stored <= 0)
+		else
+			pad.Base.Transparency = 0
+			pad.Bar.Parent.Visible = true
+			pad.Prompt:SetAttribute("Off", true)
+			if pad.EggUid ~= uid then
+				self:_clearModel(pad)
+				local model = EggBuilder.Build(egg)
+				model:PivotTo(pad.Base.CFrame * CFrame.Angles(0, 0, math.rad(-90)) * CFrame.new(0, 0.7, 0))
+				model:SetAttribute("OwnerUserId", player.UserId)
+				model:SetAttribute("EggUid", uid)
+				model:SetAttribute("Slot", slot)
+				model.Parent = pad.Base.Parent
+				pad.Egg, pad.EggUid = model, uid
+			end
+			self:_updateTimer(pad, egg, os.time())
+		end
+	end
+end
+
+function IncubatorService:_updateTimer(pad: Pad, egg, now: number)
+	local def = Creatures[egg.Species]
+	local left = math.max(0, (egg.HatchAt or now) - now)
+	local tierText = if Breeding.TierIndex(egg.Size) > 1 then CreatureMath.SizeLabel(egg.Size) .. " " else ""
+	if left <= 0 then
+		pad.Label.Text = "🐣 " .. tierText .. def.Name .. " hatching!"
+	else
+		pad.Label.Text = string.format("🥚 %s%s  %s", tierText, def.Name, Format.Time(left))
+	end
+	pad.Label.TextColor3 = if egg.Mutation then Mutations[egg.Mutation].Color else Rarities[def.Rarity].Color
+	pad.Bar.Size = UDim2.fromScale(Breeding.HatchProgress(egg, now), 1)
+end
+
+--------------------------------------------------------------------------
+-- Tick & hatching
+--------------------------------------------------------------------------
+
+function IncubatorService:_tick(player: Player)
+	local data = Data:Get(player)
+	local pads = self:_pads(player)
+	if not data or not pads then
+		return
+	end
+	local now = os.time()
+	for slot = 1, self:Count(player) do
+		local uid, egg = eggInSlot(data, slot)
+		if uid and egg.HatchAt and now >= egg.HatchAt then
+			if Rules.HasFreeSlot(data) then
+				self:_hatch(player, uid)
+			elseif Net.Throttle(player, "IncubatorFull", 30) then
+				Net.Notify(player, "🥚 An egg is ready but your pens are full! Sell a titan or buy a pen.", RED)
+			end
+		end
+		local pad = pads[slot]
+		if uid and pad and pad.EggUid == uid then
+			self:_updateTimer(pad, egg, now)
+		end
+	end
+end
+
+function IncubatorService:_hatch(player: Player, uid: string)
+	local data = Data:Get(player)
+	if not data then
+		return
+	end
+	local egg = data.Eggs[uid]
+	local pads = self:_pads(player)
+	local position = nil
+	if pads and egg.Slot and pads[egg.Slot] then
+		position = pads[egg.Slot].Base.Position
+	end
+	local newUid = Creature:Add(player, egg.Species, egg.Mutation, egg.Size)
+	if not newUid then
+		return
+	end
+	local creature = data.Creatures[newUid]
+	creature.Bonus = egg.Bonus or 0
+	data.Eggs[uid] = nil
+	data.Stats.Hatched += 1
+	Creature:RefreshAllTags(player)
+
+	local def = Creatures[egg.Species]
+	local rarity = Rarities[def.Rarity]
+	local color = if egg.Mutation then Mutations[egg.Mutation].Color else rarity.Color
+	if position then
+		Fx:PlayAll("Spawn", { Position = position, Color = color, Rare = Breeding.TierIndex(egg.Size) >= 4 })
+		Fx:PlayAll("Poof", { Position = position })
+	end
+	GameEvents.Fire(player, "Hatched", { Titan = egg.Species, Mutation = egg.Mutation, Size = egg.Size })
+	Net.Fire(player, "Hatched", {
+		CreatureId = egg.Species,
+		Mutation = egg.Mutation,
+		Source = "Egg",
+		Size = egg.Size,
+	})
+	local name =
+		CreatureMath.DisplayName({ Id = egg.Species, Level = 1, Xp = 0, Mutation = egg.Mutation, Size = egg.Size })
+	if Breeding.ShouldAnnounce(egg.Size) then
+		Net.Announce("🐣 HUGE HATCH!", player.DisplayName .. " hatched a " .. name .. "!", color)
+	elseif rarity.Order >= Rarities.Legendary.Order or egg.Mutation then
+		Net.NotifyAll(string.format("🐣 %s hatched a %s!", player.DisplayName, name), color)
+	end
+	log:Info(player.Name, "hatched", name)
+
+	self:_fill(player)
+	self:Refresh(player)
+	Data:Changed(player)
+end
+
+--------------------------------------------------------------------------
+-- Actions
+--------------------------------------------------------------------------
+
+function IncubatorService:_ownerUse(player: Player, slot: number)
+	local data = Data:Get(player)
+	if not data or slot > self:Count(player) or eggInSlot(data, slot) then
+		return
+	end
+	local stored = storedEggs(data)
+	if #stored == 0 then
+		Net.Notify(player, "🥚 No eggs waiting. Breed titans or find nests!", RED)
+		return
+	end
+	self:_place(player, stored[1], slot)
+	self:Refresh(player)
+	Data:Changed(player)
+end
+
+-- Adds a new egg. It goes into a free incubator, or egg storage if none.
+function IncubatorService:AddEgg(
+	player: Player,
+	info: {
+		Species: string,
+		Mutation: string?,
+		Size: number?,
+		Bonus: number?,
+		Source: string?,
+	}
+): string?
+	local data = Data:Get(player)
+	if not data or not Creatures[info.Species] then
+		return nil
+	end
+	local count = 0
+	for _ in data.Eggs do
+		count += 1
+	end
+	if count >= GameConfig.Data.Limits.Eggs then
+		Net.Notify(player, "🥚 Your egg storage is full!", RED)
+		return nil
+	end
+	local uid = tostring(data.NextUid)
+	data.NextUid += 1
+	data.Eggs[uid] = {
+		Uid = uid,
+		Species = info.Species,
+		Mutation = if info.Mutation and Mutations[info.Mutation] then info.Mutation else nil,
+		Size = Breeding.TierSize(Breeding.TierIndex(info.Size or 1)),
+		Bonus = info.Bonus or 0,
+		Source = info.Source or "Breed",
+	}
+	local egg = data.Eggs[uid]
+	self:_fill(player)
+	self:Refresh(player)
+	if Breeding.ShouldAnnounce(egg.Size) then
+		local def = Creatures[egg.Species]
+		Net.Announce(
+			"🥚 GIANT EGG!",
+			player.DisplayName .. " has a " .. CreatureMath.SizeLabel(egg.Size) .. " " .. def.Name .. " egg!",
+			Rarities[def.Rarity].Color
+		)
+	end
+	Data:Changed(player)
+	return uid
+end
+
+-- Removes an egg (for stealing / carrying). Returns its data.
+function IncubatorService:TakeEgg(player: Player, uid: string)
+	local data = Data:Get(player)
+	local egg = data and data.Eggs[uid]
+	if not data or not egg then
+		return nil
+	end
+	data.Eggs[uid] = nil
+	self:_fill(player)
+	self:Refresh(player)
+	Data:Changed(player)
+	return egg
+end
+
+return IncubatorService
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="82">
             <Properties>
               <string name="Name">RebirthService</string>
               <string name="Source"><![CDATA[--[[
@@ -11102,11 +12917,11 @@ return RebirthService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="78">
+        <Item class="Folder" referent="83">
           <Properties>
             <string name="Name">Events</string>
           </Properties>
-          <Item class="ModuleScript" referent="79">
+          <Item class="ModuleScript" referent="84">
             <Properties>
               <string name="Name">EventService</string>
               <string name="Source"><![CDATA[--[[
@@ -11257,11 +13072,11 @@ return EventService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="80">
+        <Item class="Folder" referent="85">
           <Properties>
             <string name="Name">Food</string>
           </Properties>
-          <Item class="ModuleScript" referent="81">
+          <Item class="ModuleScript" referent="86">
             <Properties>
               <string name="Name">FoodService</string>
               <string name="Source"><![CDATA[--[[
@@ -11616,7 +13431,7 @@ return FoodService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="82">
+          <Item class="ModuleScript" referent="87">
             <Properties>
               <string name="Name">StealService</string>
               <string name="Source"><![CDATA[--[[
@@ -11708,7 +13523,13 @@ end
 
 function StealService:TryStart(thief: Player, plot)
 	local victim = plot.Owner
-	if not victim or victim == thief or self.Carriers[thief] or thief:GetAttribute("InBattle") then
+	if
+		not victim
+		or victim == thief
+		or self.Carriers[thief]
+		or thief:GetAttribute("InBattle")
+		or thief:GetAttribute("CarryingEgg")
+	then
 		return
 	end
 	local victimData = Data:Get(victim)
@@ -11926,11 +13747,11 @@ return StealService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="83">
+        <Item class="Folder" referent="88">
           <Properties>
             <string name="Name">Progress</string>
           </Properties>
-          <Item class="ModuleScript" referent="84">
+          <Item class="ModuleScript" referent="89">
             <Properties>
               <string name="Name">CodeService</string>
               <string name="Source"><![CDATA[--[[
@@ -11979,7 +13800,7 @@ return CodeService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="85">
+          <Item class="ModuleScript" referent="90">
             <Properties>
               <string name="Name">DailyRewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -12028,7 +13849,7 @@ return DailyRewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="86">
+          <Item class="ModuleScript" referent="91">
             <Properties>
               <string name="Name">IndexService</string>
               <string name="Source"><![CDATA[--[[
@@ -12078,7 +13899,7 @@ return IndexService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="87">
+          <Item class="ModuleScript" referent="92">
             <Properties>
               <string name="Name">OfflineService</string>
               <string name="Source"><![CDATA[--[[
@@ -12129,7 +13950,7 @@ return OfflineService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="88">
+          <Item class="ModuleScript" referent="93">
             <Properties>
               <string name="Name">QuestService</string>
               <string name="Source"><![CDATA[--[[
@@ -12233,7 +14054,7 @@ return QuestService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="89">
+          <Item class="ModuleScript" referent="94">
             <Properties>
               <string name="Name">RewardService</string>
               <string name="Source"><![CDATA[--[[
@@ -12303,7 +14124,7 @@ return RewardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="90">
+          <Item class="ModuleScript" referent="95">
             <Properties>
               <string name="Name">TutorialService</string>
               <string name="Source"><![CDATA[--[[
@@ -12378,11 +14199,11 @@ return TutorialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="91">
+        <Item class="Folder" referent="96">
           <Properties>
             <string name="Name">Ride</string>
           </Properties>
-          <Item class="ModuleScript" referent="92">
+          <Item class="ModuleScript" referent="97">
             <Properties>
               <string name="Name">FollowerService</string>
               <string name="Source"><![CDATA[--[[
@@ -12793,7 +14614,7 @@ return FollowerService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="93">
+          <Item class="ModuleScript" referent="98">
             <Properties>
               <string name="Name">RideService</string>
               <string name="Source"><![CDATA[--[[
@@ -12970,8 +14791,8 @@ function RideService:Mount(player: Player, uid: string)
 		)
 		return
 	end
-	if player:GetAttribute("Carrying") then
-		Net.Notify(player, "You can't ride while carrying stolen food!", RED)
+	if player:GetAttribute("Carrying") or player:GetAttribute("CarryingEgg") then
+		Net.Notify(player, "You can't ride while carrying something!", RED)
 		return
 	end
 	if self.Rides[player] then
@@ -13268,11 +15089,11 @@ return RideService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="94">
+        <Item class="Folder" referent="99">
           <Properties>
             <string name="Name">Social</string>
           </Properties>
-          <Item class="ModuleScript" referent="95">
+          <Item class="ModuleScript" referent="100">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -13460,7 +15281,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="96">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -13659,7 +15480,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="97">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -13835,11 +15656,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="98">
+        <Item class="Folder" referent="103">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="99">
+          <Item class="ModuleScript" referent="104">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -13977,11 +15798,283 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="100">
+        <Item class="Folder" referent="105">
           <Properties>
             <string name="Name">Wild</string>
           </Properties>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="106">
+            <Properties>
+              <string name="Name">NestService</string>
+              <string name="Source"><![CDATA[--[[
+	NestService: wild nests out in the fields, each with one egg and 1-2
+	angry guardian titans of the same kind.
+
+	- Grab the egg (hold) and carry it home (EggCarryService). The guardians
+	  chase you, so knock them out first, sneak, or outrun them.
+	- Nests expire after Nests.Lifetime and new ones appear elsewhere.
+	- Bigger eggs are rarer (Nests.SizeTiers) and have bigger guardians.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Creatures = require(Shared.Config.Creatures)
+local Rarities = require(Shared.Config.Rarities)
+local Breeding = require(Shared.Game.Breeding)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+
+local Server = ServerScriptService:WaitForChild("Server")
+local EggBuilder = require(Server.Modules.EggBuilder)
+
+local log = Log.new("NestService")
+
+local NEST = GameConfig.Nests
+local RED = Color3.fromRGB(255, 90, 90)
+
+type Nest = {
+	Egg: { Species: string, Mutation: string?, Size: number, Bonus: number, Source: string },
+	Model: Model,
+	Guardians: { any },
+	ExpiresAt: number,
+}
+
+local NestService = {
+	Priority = 45, -- after WildService (40)
+	Nests = {} :: { Nest },
+}
+
+local Wild, Carry, Fx, Map
+local folder: Folder
+
+function NestService:Init(registry)
+	Wild = registry.WildService
+	Carry = registry.EggCarryService
+	Fx = registry.FxService
+	Map = registry.MapService
+end
+
+function NestService:Start()
+	folder = Instance.new("Folder")
+	folder.Name = "Nests"
+	folder.Parent = workspace
+	task.spawn(function()
+		task.wait(NEST.FirstDelay)
+		while true do
+			local ok, err = pcall(self._tick, self)
+			if not ok then
+				log:Warn("tick failed", err)
+			end
+			task.wait(5)
+		end
+	end)
+end
+
+local nextSpawnAt = 0
+
+function NestService:_tick()
+	local now = os.clock()
+	for i = #self.Nests, 1, -1 do
+		local nest = self.Nests[i]
+		if now >= nest.ExpiresAt then
+			self:_remove(nest, true)
+		end
+	end
+	if #self.Nests < NEST.Max and now >= nextSpawnAt then
+		if self:Spawn() then
+			nextSpawnAt = now + NEST.RespawnDelay * 0.25
+		end
+	end
+end
+
+local function twig(parent: Instance, cf: CFrame, length: number)
+	local p = Instance.new("Part")
+	p.Name = "Twig"
+	p.Anchored = true
+	p.CanCollide = false
+	p.Size = Vector3.new(length, 0.6, 0.6)
+	p.CFrame = cf
+	p.Color = Color3.fromRGB(120 + math.random(-15, 15), 85, 45)
+	p.Material = Enum.Material.Wood
+	p.Parent = parent
+end
+
+function NestService:_buildNest(egg, at: Vector3, scale: number): Model
+	local model = Instance.new("Model")
+	model.Name = "Nest"
+	local radius = 4.5 * scale
+	for ring = 0, 2 do
+		local r = radius - ring * 0.8 * scale
+		local count = 14
+		for i = 1, count do
+			local a = i / count * math.pi * 2 + ring * 0.3
+			local pos = at + Vector3.new(math.cos(a) * r, 0.3 + ring * 0.45 * scale, math.sin(a) * r)
+			twig(
+				model,
+				CFrame.lookAt(pos, pos + Vector3.new(-math.sin(a), 0, math.cos(a)))
+					* CFrame.Angles(0, math.rad(90), math.rad(math.random(-15, 15))),
+				2.6 * scale
+			)
+		end
+	end
+	local bed = Instance.new("Part")
+	bed.Name = "Bed"
+	bed.Shape = Enum.PartType.Cylinder
+	bed.Anchored = true
+	bed.CanCollide = false
+	bed.Size = Vector3.new(0.5, radius * 1.8, radius * 1.8)
+	bed.CFrame = CFrame.new(at + Vector3.new(0, 0.25, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	bed.Color = Color3.fromRGB(190, 160, 90)
+	bed.Material = Enum.Material.Grass
+	bed.Parent = model
+
+	local eggModel = EggBuilder.Build(egg)
+	eggModel:PivotTo(CFrame.new(at + Vector3.new(0, 0.5, 0)))
+	eggModel.Parent = model
+	local shell = eggModel:FindFirstChild("Shell") :: BasePart
+
+	local def = Creatures[egg.Species]
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "NestMarker"
+	gui.Size = UDim2.fromOffset(220, 50)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, 8 * scale + 6, 0)
+	gui.MaxDistance = 450
+	gui.Parent = shell
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = Rarities[def.Rarity].Color
+	label.Text = "🪺 "
+		.. CreatureMath.DisplayName({ Id = egg.Species, Level = 1, Xp = 0, Size = egg.Size })
+		.. " nest"
+	label.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 3
+	stroke.Parent = label
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "NestEggPrompt"
+	prompt.ActionText = "Grab Egg"
+	prompt.ObjectText = def.Name .. " egg"
+	prompt.HoldDuration = 1 + (Breeding.TierIndex(egg.Size) - 1) * 0.5
+	prompt.MaxActivationDistance = 10 + radius
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = shell
+	model.Parent = folder
+	return model
+end
+
+function NestService:Spawn(): boolean
+	local spot = Wild:_randomSpot(nil)
+	if not spot then
+		return false
+	end
+	local species = Wild:_pickSpecies()
+	if not species then
+		return false
+	end
+	local size = Breeding.RollNestSize(math.random())
+	local egg = {
+		Species = species,
+		Mutation = nil,
+		Size = size,
+		Bonus = math.floor(math.random() * NEST.BonusMax * 1000) / 1000,
+		Source = "Nest",
+	}
+	local scale = EggBuilder.Scale(size)
+	local model = self:_buildNest(egg, spot, scale)
+	local nest: Nest = {
+		Egg = egg,
+		Model = model,
+		Guardians = {},
+		ExpiresAt = os.clock() + NEST.Lifetime,
+	}
+	local count = math.random(NEST.Guardians[1], NEST.Guardians[2])
+	for i = 1, count do
+		local a = i / count * math.pi * 2
+		local at = spot + Vector3.new(math.cos(a), 0, math.sin(a)) * (8 + scale * 4)
+		local guardSize = size * (NEST.GuardianSize[1] + math.random() * (NEST.GuardianSize[2] - NEST.GuardianSize[1]))
+		local guardian = Wild:SpawnGuardian(species, Map:GroundAt(at) or at, guardSize)
+		if guardian then
+			table.insert(nest.Guardians, guardian)
+		end
+	end
+	local prompt = model:FindFirstChild("NestEggPrompt", true) :: ProximityPrompt
+	prompt.Triggered:Connect(function(player)
+		self:_grab(player, nest)
+	end)
+	table.insert(self.Nests, nest)
+	local def = Creatures[species]
+	if Breeding.TierIndex(size) >= 4 or Rarities[def.Rarity].Announce then
+		Net.NotifyAll(
+			"🪺 A "
+				.. CreatureMath.DisplayName({ Id = species, Level = 1, Xp = 0, Size = size })
+				.. " nest appeared in the wild! Watch out for its guardians!",
+			Rarities[def.Rarity].Color
+		)
+	end
+	log:Info("nest", species, size, "guardians", #nest.Guardians)
+	return true
+end
+
+function NestService:_grab(player: Player, nest: Nest)
+	if not table.find(self.Nests, nest) then
+		return
+	end
+	if player:GetAttribute("CarryingEgg") or player:GetAttribute("Carrying") then
+		Net.Notify(player, "🥚 Your hands are full!", RED)
+		return
+	end
+	if not Carry:StartCarry(player, nest.Egg, nil) then
+		return
+	end
+	local at = nest.Model:GetPivot().Position
+	-- Guardians get angry at the thief.
+	for _, guardian in nest.Guardians do
+		if not guardian.Removed and not guardian.Asleep then
+			guardian.LastAttacker = player
+			guardian.LastHitAt = workspace:GetServerTimeNow()
+		end
+	end
+	Fx:PlayAll("StealStart", { Position = at })
+	Net.Notify(player, "🥚 Got the egg! Run home before the guardians catch you!", Color3.fromRGB(255, 210, 60))
+	self:_remove(nest, false)
+end
+
+-- Removes a nest. Guardians leave with it when it expires; after a raid
+-- they stay angry for a while and then wander off on their own.
+function NestService:_remove(nest: Nest, expired: boolean)
+	local index = table.find(self.Nests, nest)
+	if index then
+		table.remove(self.Nests, index)
+	end
+	local at = nest.Model:GetPivot().Position
+	nest.Model:Destroy()
+	for _, guardian in nest.Guardians do
+		if not guardian.Removed then
+			if expired then
+				Wild:Remove(guardian, "Poof")
+			else
+				guardian.Guard = false -- normal wild titan again (despawns later)
+			end
+		end
+	end
+	if expired then
+		Fx:PlayAll("Poof", { Position = at })
+	end
+	nextSpawnAt = os.clock() + NEST.RespawnDelay
+end
+
+return NestService
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="107">
             <Properties>
               <string name="Name">TameService</string>
               <string name="Source"><![CDATA[--[[
@@ -14194,7 +16287,7 @@ return TameService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="108">
             <Properties>
               <string name="Name">ToolService</string>
               <string name="Source"><![CDATA[--[[
@@ -14371,7 +16464,7 @@ return ToolService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="103">
+          <Item class="ModuleScript" referent="109">
             <Properties>
               <string name="Name">WildService</string>
               <string name="Source"><![CDATA[--[[
@@ -14465,6 +16558,7 @@ export type Wild = {
 	LastSnap: number,
 	Bars: { [string]: any },
 	Removed: boolean,
+	Guard: boolean, -- nest guardian: always aggressive, never despawns on its own
 }
 
 local WildService = {
@@ -14839,12 +16933,29 @@ function WildService:_spawnOne(
 		LastSnap = now,
 		Bars = {},
 		Removed = false,
+		Guard = false,
 	}
 	self:_buildBars(wild)
 	self:RefreshBars(wild)
 	table.insert(self.Wilds, wild)
 	model:SetAttribute("Temper", wild.Temper)
 	log:Debug("spawned", creatureId, "size", size, if leader then "(pack)" else "")
+	return wild
+end
+
+-- A nest guardian: always aggressive, stays near `at` and never despawns
+-- by itself (NestService removes it).
+function WildService:SpawnGuardian(creatureId: string, at: Vector3, size: number?): Wild?
+	if not Creatures[creatureId] then
+		return nil
+	end
+	local wild = self:_spawnOne(creatureId, nil, at, size, nil, Vector3.zero)
+	if wild then
+		wild.Temper = "Aggressive"
+		wild.Guard = true
+		wild.Model:SetAttribute("Temper", "Aggressive")
+		wild.Model:SetAttribute("Guardian", true)
+	end
 	return wild
 end
 
@@ -15162,9 +17273,11 @@ function WildService:_tick()
 			self:RefreshBars(wild)
 		end
 
-		-- Despawn when alone for a while or too old
+		-- Despawn when alone for a while or too old (not nest guardians)
 		local target, targetDistance = nearestPlayer(wild.Pos)
-		if targetDistance > WILD.DespawnDistance then
+		if wild.Guard then
+			wild.LonelySince = nil
+		elseif targetDistance > WILD.DespawnDistance then
 			wild.LonelySince = wild.LonelySince or now
 			if now - wild.LonelySince > WILD.DespawnAfter then
 				self:Remove(wild, nil)
@@ -15173,7 +17286,7 @@ function WildService:_tick()
 		else
 			wild.LonelySince = nil
 		end
-		if now > wild.ExpiresAt and targetDistance > 120 then
+		if not wild.Guard and now > wild.ExpiresAt and targetDistance > 120 then
 			self:Remove(wild, "Poof")
 			continue
 		end
@@ -15240,11 +17353,11 @@ return WildService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="104">
+        <Item class="Folder" referent="110">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="105">
+          <Item class="ModuleScript" referent="111">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -15456,7 +17569,7 @@ return MapService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="106">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">PortalService</string>
               <string name="Source"><![CDATA[--[[
@@ -15535,23 +17648,23 @@ return PortalService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="107">
+  <Item class="StarterPlayer" referent="113">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="108">
+    <Item class="StarterPlayerScripts" referent="114">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="109">
+      <Item class="Folder" referent="115">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="110">
+        <Item class="Folder" referent="116">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="111">
+          <Item class="ModuleScript" referent="117">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -15664,7 +17777,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="112">
+          <Item class="ModuleScript" referent="118">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -15767,7 +17880,95 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="113">
+          <Item class="ModuleScript" referent="119">
+            <Properties>
+              <string name="Name">EggAlarmController</string>
+              <string name="Source"><![CDATA[--[[
+	EggAlarmController: when someone steals your egg, a red guide beam runs
+	from you to the thief (only you see it) until the egg is back, dropped
+	or gone. The server sets your "EggThief" attribute to the thief's UserId.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Textures = require(Shared.Fx.Textures)
+
+local player = Players.LocalPlayer
+
+local EggAlarmController = {
+	Priority = 40,
+}
+
+local beam: Beam? = nil
+local from: Attachment? = nil
+local highlight: Highlight? = nil
+
+local function clear()
+	for _, thing in { beam, from, highlight } :: { Instance? } do
+		if thing then
+			thing:Destroy()
+		end
+	end
+	beam, from, highlight = nil, nil, nil
+end
+
+local function update()
+	clear()
+	local thiefId = player:GetAttribute("EggThief")
+	local thief = type(thiefId) == "number" and Players:GetPlayerByUserId(thiefId)
+	local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local theirRoot = thief and thief.Character and thief.Character:FindFirstChild("HumanoidRootPart")
+	if not thief or not myRoot or not theirRoot then
+		return
+	end
+	local a0 = Instance.new("Attachment")
+	a0.Name = "EggAlarmFrom"
+	a0.Parent = myRoot
+	local a1 = theirRoot:FindFirstChild("EggAlarmTo") or Instance.new("Attachment")
+	a1.Name = "EggAlarmTo"
+	a1.Parent = theirRoot
+	local b = Instance.new("Beam")
+	b.Attachment0 = a0
+	b.Attachment1 = a1 :: Attachment
+	b.Color = ColorSequence.new(Color3.fromRGB(255, 60, 60))
+	b.LightEmission = 1
+	b.LightInfluence = 0
+	b.FaceCamera = true
+	b.Width0 = 1.2
+	b.Width1 = 1.2
+	b.Texture = Textures.Glow
+	b.TextureMode = Enum.TextureMode.Wrap
+	b.TextureLength = 6
+	b.TextureSpeed = 3
+	b.Transparency = NumberSequence.new(0.3)
+	b.Parent = Workspace.Terrain
+	local h = Instance.new("Highlight")
+	h.FillColor = Color3.fromRGB(255, 60, 60)
+	h.FillTransparency = 0.6
+	h.OutlineColor = Color3.new(1, 1, 1)
+	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	h.Adornee = thief.Character
+	h.Parent = Workspace.Terrain
+	beam, from, highlight = b, a0, h
+end
+
+function EggAlarmController:Start()
+	player:GetAttributeChangedSignal("EggThief"):Connect(update)
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		update()
+	end)
+	update()
+end
+
+return EggAlarmController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="120">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -15818,7 +18019,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="114">
+          <Item class="ModuleScript" referent="121">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -15872,7 +18073,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="115">
+          <Item class="ModuleScript" referent="122">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -15958,7 +18159,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="116">
+          <Item class="ModuleScript" referent="123">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -15967,6 +18168,8 @@ return MusicController
 	Prompt attributes (set by the server):
 	  OnlyUserId    = only this player sees it (feed/sell your own titan)
 	  HideForUserId = everyone except this player (steal from others)
+	  Off           = true hides it for everyone (use this, not Enabled:
+	                  this controller sets Enabled on the client)
 ]]
 
 local Players = game:GetService("Players")
@@ -15988,6 +18191,9 @@ local function evaluate(prompt: ProximityPrompt)
 		visible = false
 	end
 	if hide ~= nil and hide == player.UserId then
+		visible = false
+	end
+	if prompt:GetAttribute("Off") == true then
 		visible = false
 	end
 	prompt.Enabled = visible
@@ -16021,7 +18227,7 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="117">
+          <Item class="ModuleScript" referent="124">
             <Properties>
               <string name="Name">RideController</string>
               <string name="Source"><![CDATA[--[[
@@ -16196,7 +18402,7 @@ return RideController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="118">
+          <Item class="ModuleScript" referent="125">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -16223,7 +18429,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="119">
+          <Item class="ModuleScript" referent="126">
             <Properties>
               <string name="Name">ToolController</string>
               <string name="Source"><![CDATA[--[[
@@ -16291,7 +18497,7 @@ return ToolController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="120">
+          <Item class="ModuleScript" referent="127">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -16462,7 +18668,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="121">
+          <Item class="ModuleScript" referent="128">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -16499,7 +18705,7 @@ local ctx = {
 }
 
 local PAGES =
-	{ "Eggs", "Food", "Titans", "Battle", "Quests", "Daily", "Index", "Store", "Rebirth", "Settings", "Admin" }
+	{ "Eggs", "Food", "Titans", "Breed", "Battle", "Quests", "Daily", "Index", "Store", "Rebirth", "Settings", "Admin" }
 
 local function updateBadges(state)
 	local canClaimDaily = Progress.DailyStatus(state.Daily, Progress.Day(state.ServerTime or os.time()))
@@ -16580,7 +18786,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="122">
+          <Item class="ModuleScript" referent="129">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -16664,7 +18870,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="123">
+        <Item class="LocalScript" referent="130">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -16681,11 +18887,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="124">
+        <Item class="Folder" referent="131">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="125">
+          <Item class="ModuleScript" referent="132">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -16720,11 +18926,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="126">
+        <Item class="Folder" referent="133">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="127">
+          <Item class="ModuleScript" referent="134">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -16943,13 +19149,15 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="128">
+          <Item class="ModuleScript" referent="135">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
 	HatchReveal: the egg-opening / catch reveal.
 	Egg: shakes (more for rarer titan) -> flash -> card with the result.
 	Tame (info.Source == "Tame"): straight to the card, titled "TAMED!".
+	Incubator eggs (info.Source == "Egg") carry info.Size: bigger size tiers
+	get a bigger egg, more shakes and a bigger flash.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16960,6 +19168,7 @@ local Creatures = require(Shared.Config.Creatures)
 local Eggs = require(Shared.Config.Eggs)
 local Mutations = require(Shared.Config.Mutations)
 local Rarities = require(Shared.Config.Rarities)
+local Sizes = require(Shared.Config.Sizes)
 local CreatureMath = require(Shared.Game.CreatureMath)
 local Fx = require(Shared.Fx)
 local Theme = require(script.Parent.Theme)
@@ -16981,6 +19190,14 @@ local function play(info)
 	local egg = Eggs[info.EggId]
 	local mutation = info.Mutation and Mutations[info.Mutation]
 	local color = if mutation then mutation.Color else rarity.Color
+	local size = CreatureMath.ClampSize(info.Size)
+	local tier = 1
+	for i, t in Sizes.Tiers do
+		if size >= t.Min then
+			tier = i
+		end
+	end
+	local eggScale = 1 + (tier - 1) * 0.12
 
 	local dim = Theme.New("Frame", {
 		Size = UDim2.fromScale(1, 1),
@@ -16999,17 +19216,17 @@ local function play(info)
 	})
 	Theme.AutoScale(holder)
 
-	local isCatch = info.Source == "Tame"
+	local isCatch = info.Source == "Tame" or info.Source == "Fuse"
 	local eggFrame = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
-		Size = UDim2.fromOffset(150, 190),
-		BackgroundColor3 = egg and egg.Color or Color3.new(1, 1, 1),
+		Size = UDim2.fromOffset(150 * eggScale, 190 * eggScale),
+		BackgroundColor3 = if egg then egg.Color elseif info.Source == "Egg" then def.BodyColor else Color3.new(1, 1, 1),
 		Parent = holder,
 	}, { Theme.Corner(75), Theme.Stroke(Color3.new(0, 0, 0), 4) })
 
 	-- Shake: more shakes for rarer results builds suspense.
-	local shakes = if isCatch then 0 else 2 + rarity.Order
+	local shakes = if isCatch then 0 else 2 + rarity.Order + (tier - 1)
 	for i = 1, shakes do
 		local speed = math.max(0.05, 0.16 - i * 0.012)
 		local angle = if i % 2 == 0 then 15 else -15
@@ -17019,7 +19236,10 @@ local function play(info)
 	end
 	eggFrame:Destroy()
 
-	Fx.Play("HatchReveal", { Color = color, RarityOrder = rarity.Order + (if mutation then 2 else 0) })
+	Fx.Play(
+		"HatchReveal",
+		{ Color = color, RarityOrder = rarity.Order + (if mutation then 2 else 0) + math.floor((tier - 1) / 2) }
+	)
 
 	local card = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -17031,14 +19251,22 @@ local function play(info)
 	Theme.Label({
 		Position = UDim2.fromOffset(10, 16),
 		Size = UDim2.new(1, -20, 0, 34),
-		Text = (if isCatch then "🎯 TAMED!  " else "") .. string.upper(def.Rarity),
+		Text = (if info.Source == "Fuse" then "🔮 FUSED!  " elseif isCatch then "🎯 TAMED!  " else "")
+			.. string.upper(def.Rarity)
+			.. (if tier > 1 then "  •  " .. string.upper(CreatureMath.SizeLabel(size)) else ""),
 		TextColor3 = rarity.Color,
 		Parent = card,
 	})
 	local nameLabel = Theme.Label({
 		Position = UDim2.fromOffset(10, 58),
 		Size = UDim2.new(1, -20, 0, 70),
-		Text = CreatureMath.DisplayName({ Id = info.CreatureId, Level = 1, Xp = 0, Mutation = info.Mutation }),
+		Text = CreatureMath.DisplayName({
+			Id = info.CreatureId,
+			Level = 1,
+			Xp = 0,
+			Mutation = info.Mutation,
+			Size = size,
+		}),
 		TextColor3 = color,
 		Parent = card,
 	})
@@ -17096,7 +19324,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="129">
+          <Item class="ModuleScript" referent="136">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -17146,6 +19374,7 @@ local MENU = {
 	{ "📅", "Daily", "Daily", Color3.fromRGB(190, 110, 255), "Left" },
 	{ "🥚", "Eggs", "Eggs", Color3.fromRGB(235, 60, 60), "Right" },
 	{ "🐾", "Titans", "Titans", Color3.fromRGB(255, 140, 40), "Right" },
+	{ "💞", "Breed", "Breed", Color3.fromRGB(255, 110, 170), "Right" },
 	{ "🍖", "Food", "Food", Color3.fromRGB(110, 200, 70), "Right" },
 	{ "⚔️", "Battle", "Battle", Color3.fromRGB(200, 50, 70), "Right" },
 	{ "🌟", "Rebirth", "Rebirth", Color3.fromRGB(170, 110, 255), "Right" },
@@ -17428,13 +19657,18 @@ local function buildCarrying(gui: ScreenGui)
 	Theme.AutoScale(refs.Carrying)
 	local function update()
 		local foodId = player:GetAttribute("Carrying")
-		refs.Carrying.Visible = foodId ~= nil
+		local egg = player:GetAttribute("CarryingEgg")
+		refs.Carrying.Visible = foodId ~= nil or egg ~= nil
 		if foodId and Foods[foodId] then
 			refs.Carrying.Text = "😈 Carrying " .. Foods[foodId].Name .. "! Run to your base!"
+			Fx.Primitives.Pop(refs.Carrying, 0.3)
+		elseif egg then
+			refs.Carrying.Text = "🥚 Carrying a " .. tostring(egg) .. " egg! Run to your base!"
 			Fx.Primitives.Pop(refs.Carrying, 0.3)
 		end
 	end
 	player:GetAttributeChangedSignal("Carrying"):Connect(update)
+	player:GetAttributeChangedSignal("CarryingEgg"):Connect(update)
 	update()
 end
 
@@ -17564,11 +19798,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="130">
+          <Item class="Folder" referent="137">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="131">
+            <Item class="ModuleScript" referent="138">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -17650,7 +19884,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="132">
+            <Item class="ModuleScript" referent="139">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -17877,7 +20111,448 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="133">
+            <Item class="ModuleScript" referent="140">
+              <Properties>
+                <string name="Name">Breed</string>
+                <string name="Source"><![CDATA[--[[
+	Breed page, two tabs:
+	  💞 Breed: pick two titans of the same species to make an egg, watch the
+	            timer, and see your eggs (in incubators or waiting for one).
+	  🔮 Fuse:  pick three titans of the same species AND size tier to make
+	            one titan of the next size tier (costs cash).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Creatures = require(Shared.Config.Creatures)
+local Mutations = require(Shared.Config.Mutations)
+local Rarities = require(Shared.Config.Rarities)
+local Breeding = require(Shared.Game.Breeding)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Format = require(Shared.Lib.Format)
+local Theme = require(script.Parent.Parent.Theme)
+
+local Page = { Name = "Breed", Title = "💞 Breeding" }
+
+local PINK = Color3.fromRGB(255, 120, 175)
+local PURPLE = Color3.fromRGB(170, 100, 255)
+
+local container: ScrollingFrame
+local context
+local lastSignature = ""
+local lastState
+local picked: { string } = {}
+local mode = "Breed" -- or "Fuse"
+local clockOffset = 0
+local live: { () -> () } = {} -- timer labels updated every frame
+
+local function now(): number
+	return os.time() + clockOffset
+end
+
+local function colorOf(creature): Color3
+	local def = Creatures[creature.Id]
+	return if creature.Mutation then Mutations[creature.Mutation].Color else Rarities[def.Rarity].Color
+end
+
+local function section(order: number, text: string)
+	local r = Theme.Row(container, order, 30)
+	r.BackgroundTransparency = 1
+	Theme.Label({
+		Size = UDim2.fromScale(1, 1),
+		Text = text,
+		TextColor3 = Theme.Gold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = r,
+	})
+end
+
+local function rebuild(state)
+	for _, child in container:GetChildren() do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+	table.clear(live)
+	local order = 0
+	local function nextOrder(): number
+		order += 1
+		return order
+	end
+
+	-- Tabs -------------------------------------------------------------------
+	local tabs = Theme.Row(container, nextOrder(), 46)
+	tabs.BackgroundTransparency = 1
+	for i, info in { { "Breed", "💞 Breed", PINK }, { "Fuse", "🔮 Fuse", PURPLE } } do
+		local tab = Theme.Button({
+			Position = UDim2.new((i - 1) * 0.5, 4, 0, 0),
+			Size = UDim2.new(0.5, -8, 1, 0),
+			Text = info[2],
+			BackgroundColor3 = if mode == info[1] then info[3] else Color3.fromRGB(80, 80, 95),
+			Parent = tabs,
+		})
+		tab.Activated:Connect(function()
+			if mode ~= info[1] then
+				mode = info[1]
+				table.clear(picked)
+				lastSignature = ""
+				rebuild(lastState)
+			end
+		end)
+	end
+
+	local pen = state.Breeding or {}
+	local need = if mode == "Breed" then 2 else 3
+	if mode == "Fuse" then
+		-- Fuse picker -----------------------------------------------------------
+		local first = picked[1] and state.Creatures[picked[1]]
+		local r = Theme.Row(container, nextOrder(), 70)
+		Theme.Stroke(PURPLE, 2).Parent = r
+		local text
+		local cost = if first then Breeding.FuseCost(first.Id, first.Size or 1) else 0
+		local ready = #picked == 3
+		if ready and first then
+			local nextSize = Breeding.TierSize(Breeding.TierIndex(first.Size) + 1)
+			text = string.format(
+				"3x %s → %s %s  •  %s",
+				CreatureMath.DisplayName(first),
+				CreatureMath.SizeLabel(nextSize),
+				Creatures[first.Id].Name,
+				Format.Money(cost)
+			)
+		elseif first then
+			text = string.format(
+				"Pick %d more %s %s",
+				3 - #picked,
+				CreatureMath.SizeLabel(first.Size),
+				Creatures[first.Id].Name
+			)
+		else
+			text = "Pick 3 titans of the same kind and size to fuse them into a bigger one"
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(14, 0),
+			Size = UDim2.new(1, -170, 1, 0),
+			Text = text,
+			TextColor3 = Theme.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local canPay = (state.Cash or 0) >= cost
+		local go = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Size = UDim2.fromOffset(140, 50),
+			Text = if ready and not canPay then "Need cash" else "🔮 Fuse!",
+			BackgroundColor3 = if ready and canPay then PURPLE else Color3.fromRGB(90, 90, 100),
+			Parent = r,
+		})
+		go.Activated:Connect(function()
+			if ready and canPay then
+				context.Net.Send("Fuse", picked[1], picked[2], picked[3])
+				table.clear(picked)
+			end
+		end)
+	elseif pen.ReadyAt and state.Creatures[pen.A] and state.Creatures[pen.B] then
+		local a = state.Creatures[pen.A]
+		local r = Theme.Row(container, nextOrder(), 96)
+		Theme.Stroke(PINK, 3).Parent = r
+		Theme.Label({
+			Position = UDim2.fromOffset(14, 6),
+			Size = UDim2.new(1, -150, 0, 30),
+			Text = "💞 " .. CreatureMath.DisplayName(a) .. " + " .. CreatureMath.DisplayName(state.Creatures[pen.B]),
+			TextColor3 = PINK,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local timer = Theme.Label({
+			Position = UDim2.fromOffset(14, 38),
+			Size = UDim2.new(1, -150, 0, 22),
+			Text = "",
+			TextColor3 = Theme.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local _, fill = Theme.ProgressBar(r, {
+			Position = UDim2.fromOffset(14, 66),
+			Size = UDim2.new(1, -150, 0, 16),
+		})
+		fill.BackgroundColor3 = PINK
+		table.insert(live, function()
+			local left = math.max(0, pen.ReadyAt - now())
+			timer.Text = if left > 0 then "🥚 Egg in " .. Format.Time(left) else "🥚 Egg coming!"
+			local total = math.max(1, pen.ReadyAt - (pen.StartedAt or pen.ReadyAt))
+			fill.Size = UDim2.fromScale(math.clamp(1 - left / total, 0, 1), 1)
+		end)
+		local cancel = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Size = UDim2.fromOffset(120, 50),
+			Text = "Cancel",
+			BackgroundColor3 = Theme.Red,
+			Parent = r,
+		})
+		cancel.Activated:Connect(function()
+			context.Net.Send("BreedCancel")
+		end)
+	else
+		-- Picker ------------------------------------------------------------
+		local first = picked[1] and state.Creatures[picked[1]]
+		local second = picked[2] and state.Creatures[picked[2]]
+		local r = Theme.Row(container, nextOrder(), 70)
+		Theme.Stroke(PINK, 2).Parent = r
+		local text
+		if first and second then
+			text = string.format(
+				"%s + %s  •  %s",
+				CreatureMath.DisplayName(first),
+				CreatureMath.DisplayName(second),
+				Format.Time(Breeding.Time(first.Id))
+			)
+			text ..= "  •  size " .. CreatureMath.SizeLabel(math.min(first.Size or 1, second.Size or 1)) .. "+"
+		elseif first then
+			text = "Now pick another " .. Creatures[first.Id].Name
+		else
+			text = "Pick two titans of the same kind"
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(14, 0),
+			Size = UDim2.new(1, -170, 1, 0),
+			Text = text,
+			TextColor3 = Theme.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local go = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Size = UDim2.fromOffset(140, 50),
+			Text = "💞 Breed!",
+			BackgroundColor3 = if first and second then PINK else Color3.fromRGB(90, 90, 100),
+			Parent = r,
+		})
+		go.Activated:Connect(function()
+			if first and second then
+				context.Net.Send("Breed", picked[1], picked[2])
+				table.clear(picked)
+			end
+		end)
+	end
+
+	-- Eggs -------------------------------------------------------------------
+	local eggUids = {}
+	if mode == "Breed" then
+		for uid in state.Eggs or {} do
+			table.insert(eggUids, uid)
+		end
+		table.sort(eggUids, function(x, y)
+			local ex, ey = state.Eggs[x], state.Eggs[y]
+			if (ex.Slot ~= nil) ~= (ey.Slot ~= nil) then
+				return ex.Slot ~= nil
+			end
+			return (tonumber(x) or 0) < (tonumber(y) or 0)
+		end)
+		section(nextOrder(), string.format("🥚 Eggs (%d)  •  %d incubators", #eggUids, state.Incubators or 1))
+		for _, uid in eggUids do
+			local egg = state.Eggs[uid]
+			local def = Creatures[egg.Species]
+			local r = Theme.Row(container, nextOrder(), 44)
+			local label = Theme.Label({
+				Position = UDim2.fromOffset(14, 0),
+				Size = UDim2.new(1, -28, 1, 0),
+				Text = "",
+				TextColor3 = if egg.Mutation then Mutations[egg.Mutation].Color else Rarities[def.Rarity].Color,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = r,
+			})
+			local name = CreatureMath.DisplayName({
+				Id = egg.Species,
+				Level = 1,
+				Xp = 0,
+				Mutation = egg.Mutation,
+				Size = egg.Size,
+			})
+			local bonus = if (egg.Bonus or 0) > 0 then string.format("  +%d%%", math.floor(egg.Bonus * 100)) else ""
+			table.insert(live, function()
+				local status
+				if egg.HatchAt then
+					local left = egg.HatchAt - now()
+					status = if left > 0 then "hatching in " .. Format.Time(left) else "hatching!"
+				else
+					status = "waiting for a free incubator"
+				end
+				label.Text = "🥚 " .. name .. bonus .. "  •  " .. status
+			end)
+		end
+		if #eggUids == 0 then
+			local r = Theme.Row(container, nextOrder(), 36)
+			r.BackgroundTransparency = 1
+			Theme.Label({
+				Size = UDim2.fromScale(1, 1),
+				Text = "No eggs yet. Breed titans, raid nests or steal one!",
+				TextColor3 = Theme.Muted,
+				Parent = r,
+			})
+		end
+	end -- Breed tab eggs
+
+	-- Titans to pick ----------------------------------------------------------
+	if mode == "Breed" and pen.ReadyAt then
+		return
+	end
+	section(
+		nextOrder(),
+		if mode == "Breed" then "🐾 Your titans" else "🐾 Your titans (same kind + same size fuse together)"
+	)
+	-- Titans that can go together: same species (and same size tier to fuse).
+	local function groupOf(creature): string
+		return if mode == "Breed" then creature.Id else creature.Id .. ":" .. Breeding.TierIndex(creature.Size)
+	end
+	local counts: { [string]: number } = {}
+	for _, creature in state.Creatures do
+		counts[groupOf(creature)] = (counts[groupOf(creature)] or 0) + 1
+	end
+	local uids = {}
+	for uid in state.Creatures do
+		table.insert(uids, uid)
+	end
+	table.sort(uids, function(x, y)
+		local cx, cy = state.Creatures[x], state.Creatures[y]
+		if cx.Id ~= cy.Id then
+			return cx.Id < cy.Id
+		end
+		return (cx.Size or 1) > (cy.Size or 1)
+	end)
+	local firstPick = picked[1] and state.Creatures[picked[1]]
+	for _, uid in uids do
+		local creature = state.Creatures[uid]
+		local isPicked = table.find(picked, uid) ~= nil
+		local wrongKind = firstPick ~= nil and groupOf(firstPick) ~= groupOf(creature) and not isPicked
+		local alone = counts[groupOf(creature)] < need
+		local busy = mode == "Fuse" and pen.ReadyAt ~= nil and (pen.A == uid or pen.B == uid)
+		local r = Theme.Row(container, nextOrder(), 48)
+		if isPicked then
+			Theme.Stroke(if mode == "Breed" then PINK else PURPLE, 3).Parent = r
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(14, 0),
+			Size = UDim2.new(1, -150, 1, 0),
+			Text = CreatureMath.DisplayName(creature) .. "  Lv." .. creature.Level,
+			TextColor3 = if wrongKind or alone or busy then Theme.Muted else colorOf(creature),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local button = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -8, 0.5, 0),
+			Size = UDim2.fromOffset(130, 38),
+			Text = if isPicked then "✓ Picked" else "Pick",
+			BackgroundColor3 = if isPicked
+				then (if mode == "Breed" then PINK else PURPLE)
+				elseif wrongKind or alone or busy then Color3.fromRGB(80, 80, 90)
+				else Theme.Green,
+			Parent = r,
+		})
+		local readyAt = if mode == "Breed" then creature.BreedReadyAt or 0 else 0
+		table.insert(live, function()
+			local left = readyAt - now()
+			if busy then
+				button.Text = "💞 Breeding"
+			elseif left > 0 and not isPicked then
+				button.Text = "😴 " .. Format.Time(left)
+			elseif alone and not isPicked then
+				button.Text = if mode == "Breed" then "Needs a pair" else "Needs 3"
+			end
+		end)
+		button.Activated:Connect(function()
+			if isPicked then
+				table.remove(picked, table.find(picked, uid) :: number)
+			elseif readyAt > now() or alone or busy then
+				return
+			elseif wrongKind then
+				table.clear(picked)
+				table.insert(picked, uid)
+			elseif #picked < need then
+				table.insert(picked, uid)
+			end
+			lastSignature = ""
+			rebuild(lastState)
+		end)
+	end
+end
+
+function Page.Build(page: ScrollingFrame, ctx)
+	container = page
+	context = ctx
+	RunService.Heartbeat:Connect(function()
+		if container.Visible and container.Parent and (container.Parent :: any).Visible then
+			for _, update in live do
+				update()
+			end
+		end
+	end)
+end
+
+function Page.Update(state)
+	lastState = state
+	if state.ServerTime then
+		clockOffset = state.ServerTime - os.time()
+	end
+	-- Forget picks for titans you no longer have.
+	for i = #picked, 1, -1 do
+		if not state.Creatures[picked[i]] then
+			table.remove(picked, i)
+		end
+	end
+	local parts = {
+		mode,
+		tostring(state.Incubators),
+		tostring((state.Breeding or {}).ReadyAt),
+		table.concat(picked, ","),
+		tostring(
+			#picked == 3
+				and (state.Cash or 0)
+					>= Breeding.FuseCost(state.Creatures[picked[1]].Id, state.Creatures[picked[1]].Size or 1)
+		),
+	}
+	for uid, creature in state.Creatures do
+		table.insert(
+			parts,
+			uid
+				.. ":"
+				.. creature.Id
+				.. ":"
+				.. creature.Level
+				.. ":"
+				.. tostring(creature.Size)
+				.. ":"
+				.. tostring(creature.BreedReadyAt)
+				.. ":"
+				.. tostring(creature.Mutation)
+		)
+	end
+	for uid, egg in state.Eggs or {} do
+		table.insert(parts, "e" .. uid .. ":" .. tostring(egg.HatchAt))
+	end
+	table.sort(parts)
+	local signature = table.concat(parts, "|")
+	if signature ~= lastSignature then
+		lastSignature = signature
+		rebuild(state)
+	end
+end
+
+function Page.Opened()
+	lastSignature = ""
+end
+
+return Page
+]]></string>
+              </Properties>
+            </Item>
+            <Item class="ModuleScript" referent="141">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17964,7 +20639,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="134">
+            <Item class="ModuleScript" referent="142">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18057,7 +20732,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="135">
+            <Item class="ModuleScript" referent="143">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18144,7 +20819,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="136">
+            <Item class="ModuleScript" referent="144">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18273,7 +20948,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="137">
+            <Item class="ModuleScript" referent="145">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18351,7 +21026,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="138">
+            <Item class="ModuleScript" referent="146">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18417,7 +21092,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="139">
+            <Item class="ModuleScript" referent="147">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -18528,7 +21203,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="140">
+            <Item class="ModuleScript" referent="148">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -18652,7 +21327,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="141">
+            <Item class="ModuleScript" referent="149">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -18836,7 +21511,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="142">
+          <Item class="ModuleScript" referent="150">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -19070,7 +21745,7 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="143">
+          <Item class="ModuleScript" referent="151">
             <Properties>
               <string name="Name">RideHud</string>
               <string name="Source"><![CDATA[--[[
@@ -19311,7 +21986,7 @@ return RideHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="144">
+          <Item class="ModuleScript" referent="152">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -19526,7 +22201,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="145">
+          <Item class="ModuleScript" referent="153">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -19662,7 +22337,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="146">
+          <Item class="ModuleScript" referent="154">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -19793,7 +22468,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="147">
+  <Item class="Workspace" referent="155">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

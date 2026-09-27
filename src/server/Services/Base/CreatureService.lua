@@ -589,6 +589,26 @@ function CreatureService:Sell(player: Player, uid: string)
 	Data:Changed(player)
 end
 
+-- Removes a titan without paying for it (fusion).
+function CreatureService:Remove(player: Player, uid: string)
+	local data = Data:Get(player)
+	if not data or not data.Creatures[uid] then
+		return
+	end
+	local model = self:GetModel(player, uid)
+	if model then
+		model:Destroy()
+		self.Models[player][uid] = nil
+	end
+	data.Creatures[uid] = nil
+	if data.Active == uid then
+		data.Active = nil
+	end
+	self:_layout(player)
+	King:Evaluate()
+	Data:Changed(player)
+end
+
 -- Sets a titan's level directly (admin/testing).
 function CreatureService:SetLevel(player: Player, uid: string, level: number)
 	local data = Data:Get(player)

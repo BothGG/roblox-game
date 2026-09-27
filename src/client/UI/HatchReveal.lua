@@ -62,7 +62,7 @@ local function play(info)
 	})
 	Theme.AutoScale(holder)
 
-	local isCatch = info.Source == "Tame"
+	local isCatch = info.Source == "Tame" or info.Source == "Fuse"
 	local eggFrame = Theme.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.45),
@@ -97,9 +97,9 @@ local function play(info)
 	Theme.Label({
 		Position = UDim2.fromOffset(10, 16),
 		Size = UDim2.new(1, -20, 0, 34),
-		Text = (if isCatch then "🎯 TAMED!  " else "") .. string.upper(def.Rarity) .. (if tier > 1
-			then "  •  " .. string.upper(CreatureMath.SizeLabel(size))
-			else ""),
+		Text = (if info.Source == "Fuse" then "🔮 FUSED!  " elseif isCatch then "🎯 TAMED!  " else "")
+			.. string.upper(def.Rarity)
+			.. (if tier > 1 then "  •  " .. string.upper(CreatureMath.SizeLabel(size)) else ""),
 		TextColor3 = rarity.Color,
 		Parent = card,
 	})

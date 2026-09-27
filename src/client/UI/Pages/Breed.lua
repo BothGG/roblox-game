@@ -1,6 +1,9 @@
 --[[
-	Breed page: pick two titans of the same species to make an egg, watch the
-	breeding timer, and see your eggs (in incubators or waiting for one).
+	Breed page, two tabs:
+	  💞 Breed: pick two titans of the same species to make an egg, watch the
+	            timer, and see your eggs (in incubators or waiting for one).
+	  🔮 Fuse:  pick three titans of the same species AND size tier to make
+	            one titan of the next size tier (costs cash).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,12 +21,14 @@ local Theme = require(script.Parent.Parent.Theme)
 local Page = { Name = "Breed", Title = "💞 Breeding" }
 
 local PINK = Color3.fromRGB(255, 120, 175)
+local PURPLE = Color3.fromRGB(170, 100, 255)
 
 local container: ScrollingFrame
 local context
 local lastSignature = ""
 local lastState
 local picked: { string } = {}
+local mode = "Breed" -- or "Fuse"
 local clockOffset = 0
 local live: { () -> () } = {} -- timer labels updated every frame
 
@@ -61,9 +66,80 @@ local function rebuild(state)
 		return order
 	end
 
-	-- Current breeding -------------------------------------------------------
+	-- Tabs -------------------------------------------------------------------
+	local tabs = Theme.Row(container, nextOrder(), 46)
+	tabs.BackgroundTransparency = 1
+	for i, info in { { "Breed", "💞 Breed", PINK }, { "Fuse", "🔮 Fuse", PURPLE } } do
+		local tab = Theme.Button({
+			Position = UDim2.new((i - 1) * 0.5, 4, 0, 0),
+			Size = UDim2.new(0.5, -8, 1, 0),
+			Text = info[2],
+			BackgroundColor3 = if mode == info[1] then info[3] else Color3.fromRGB(80, 80, 95),
+			Parent = tabs,
+		})
+		tab.Activated:Connect(function()
+			if mode ~= info[1] then
+				mode = info[1]
+				table.clear(picked)
+				lastSignature = ""
+				rebuild(lastState)
+			end
+		end)
+	end
+
 	local pen = state.Breeding or {}
-	if pen.ReadyAt and state.Creatures[pen.A] and state.Creatures[pen.B] then
+	local need = if mode == "Breed" then 2 else 3
+	if mode == "Fuse" then
+		-- Fuse picker -----------------------------------------------------------
+		local first = picked[1] and state.Creatures[picked[1]]
+		local r = Theme.Row(container, nextOrder(), 70)
+		Theme.Stroke(PURPLE, 2).Parent = r
+		local text
+		local cost = if first then Breeding.FuseCost(first.Id, first.Size or 1) else 0
+		local ready = #picked == 3
+		if ready and first then
+			local nextSize = Breeding.TierSize(Breeding.TierIndex(first.Size) + 1)
+			text = string.format(
+				"3x %s → %s %s  •  %s",
+				CreatureMath.DisplayName(first),
+				CreatureMath.SizeLabel(nextSize),
+				Creatures[first.Id].Name,
+				Format.Money(cost)
+			)
+		elseif first then
+			text = string.format(
+				"Pick %d more %s %s",
+				3 - #picked,
+				CreatureMath.SizeLabel(first.Size),
+				Creatures[first.Id].Name
+			)
+		else
+			text = "Pick 3 titans of the same kind and size to fuse them into a bigger one"
+		end
+		Theme.Label({
+			Position = UDim2.fromOffset(14, 0),
+			Size = UDim2.new(1, -170, 1, 0),
+			Text = text,
+			TextColor3 = Theme.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = r,
+		})
+		local canPay = (state.Cash or 0) >= cost
+		local go = Theme.Button({
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Size = UDim2.fromOffset(140, 50),
+			Text = if ready and not canPay then "Need cash" else "🔮 Fuse!",
+			BackgroundColor3 = if ready and canPay then PURPLE else Color3.fromRGB(90, 90, 100),
+			Parent = r,
+		})
+		go.Activated:Connect(function()
+			if ready and canPay then
+				context.Net.Send("Fuse", picked[1], picked[2], picked[3])
+				table.clear(picked)
+			end
+		end)
+	elseif pen.ReadyAt and state.Creatures[pen.A] and state.Creatures[pen.B] then
 		local a = state.Creatures[pen.A]
 		local r = Theme.Row(container, nextOrder(), 96)
 		Theme.Stroke(PINK, 3).Parent = r
@@ -151,62 +227,76 @@ local function rebuild(state)
 
 	-- Eggs -------------------------------------------------------------------
 	local eggUids = {}
-	for uid in state.Eggs or {} do
-		table.insert(eggUids, uid)
-	end
-	table.sort(eggUids, function(x, y)
-		local ex, ey = state.Eggs[x], state.Eggs[y]
-		if (ex.Slot ~= nil) ~= (ey.Slot ~= nil) then
-			return ex.Slot ~= nil
+	if mode == "Breed" then
+		for uid in state.Eggs or {} do
+			table.insert(eggUids, uid)
 		end
-		return (tonumber(x) or 0) < (tonumber(y) or 0)
-	end)
-	section(nextOrder(), string.format("🥚 Eggs (%d)  •  %d incubators", #eggUids, state.Incubators or 1))
-	for _, uid in eggUids do
-		local egg = state.Eggs[uid]
-		local def = Creatures[egg.Species]
-		local r = Theme.Row(container, nextOrder(), 44)
-		local label = Theme.Label({
-			Position = UDim2.fromOffset(14, 0),
-			Size = UDim2.new(1, -28, 1, 0),
-			Text = "",
-			TextColor3 = if egg.Mutation then Mutations[egg.Mutation].Color else Rarities[def.Rarity].Color,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Parent = r,
-		})
-		local name =
-			CreatureMath.DisplayName({ Id = egg.Species, Level = 1, Xp = 0, Mutation = egg.Mutation, Size = egg.Size })
-		local bonus = if (egg.Bonus or 0) > 0 then string.format("  +%d%%", math.floor(egg.Bonus * 100)) else ""
-		table.insert(live, function()
-			local status
-			if egg.HatchAt then
-				local left = egg.HatchAt - now()
-				status = if left > 0 then "hatching in " .. Format.Time(left) else "hatching!"
-			else
-				status = "waiting for a free incubator"
+		table.sort(eggUids, function(x, y)
+			local ex, ey = state.Eggs[x], state.Eggs[y]
+			if (ex.Slot ~= nil) ~= (ey.Slot ~= nil) then
+				return ex.Slot ~= nil
 			end
-			label.Text = "🥚 " .. name .. bonus .. "  •  " .. status
+			return (tonumber(x) or 0) < (tonumber(y) or 0)
 		end)
-	end
-	if #eggUids == 0 then
-		local r = Theme.Row(container, nextOrder(), 36)
-		r.BackgroundTransparency = 1
-		Theme.Label({
-			Size = UDim2.fromScale(1, 1),
-			Text = "No eggs yet. Breed titans, raid nests or steal one!",
-			TextColor3 = Theme.Muted,
-			Parent = r,
-		})
-	end
+		section(nextOrder(), string.format("🥚 Eggs (%d)  •  %d incubators", #eggUids, state.Incubators or 1))
+		for _, uid in eggUids do
+			local egg = state.Eggs[uid]
+			local def = Creatures[egg.Species]
+			local r = Theme.Row(container, nextOrder(), 44)
+			local label = Theme.Label({
+				Position = UDim2.fromOffset(14, 0),
+				Size = UDim2.new(1, -28, 1, 0),
+				Text = "",
+				TextColor3 = if egg.Mutation then Mutations[egg.Mutation].Color else Rarities[def.Rarity].Color,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = r,
+			})
+			local name = CreatureMath.DisplayName({
+				Id = egg.Species,
+				Level = 1,
+				Xp = 0,
+				Mutation = egg.Mutation,
+				Size = egg.Size,
+			})
+			local bonus = if (egg.Bonus or 0) > 0 then string.format("  +%d%%", math.floor(egg.Bonus * 100)) else ""
+			table.insert(live, function()
+				local status
+				if egg.HatchAt then
+					local left = egg.HatchAt - now()
+					status = if left > 0 then "hatching in " .. Format.Time(left) else "hatching!"
+				else
+					status = "waiting for a free incubator"
+				end
+				label.Text = "🥚 " .. name .. bonus .. "  •  " .. status
+			end)
+		end
+		if #eggUids == 0 then
+			local r = Theme.Row(container, nextOrder(), 36)
+			r.BackgroundTransparency = 1
+			Theme.Label({
+				Size = UDim2.fromScale(1, 1),
+				Text = "No eggs yet. Breed titans, raid nests or steal one!",
+				TextColor3 = Theme.Muted,
+				Parent = r,
+			})
+		end
+	end -- Breed tab eggs
 
 	-- Titans to pick ----------------------------------------------------------
-	if pen.ReadyAt then
+	if mode == "Breed" and pen.ReadyAt then
 		return
 	end
-	section(nextOrder(), "🐾 Your titans")
+	section(
+		nextOrder(),
+		if mode == "Breed" then "🐾 Your titans" else "🐾 Your titans (same kind + same size fuse together)"
+	)
+	-- Titans that can go together: same species (and same size tier to fuse).
+	local function groupOf(creature): string
+		return if mode == "Breed" then creature.Id else creature.Id .. ":" .. Breeding.TierIndex(creature.Size)
+	end
 	local counts: { [string]: number } = {}
 	for _, creature in state.Creatures do
-		counts[creature.Id] = (counts[creature.Id] or 0) + 1
+		counts[groupOf(creature)] = (counts[groupOf(creature)] or 0) + 1
 	end
 	local uids = {}
 	for uid in state.Creatures do
@@ -223,17 +313,18 @@ local function rebuild(state)
 	for _, uid in uids do
 		local creature = state.Creatures[uid]
 		local isPicked = table.find(picked, uid) ~= nil
-		local wrongKind = firstPick ~= nil and firstPick.Id ~= creature.Id and not isPicked
-		local alone = counts[creature.Id] < 2
+		local wrongKind = firstPick ~= nil and groupOf(firstPick) ~= groupOf(creature) and not isPicked
+		local alone = counts[groupOf(creature)] < need
+		local busy = mode == "Fuse" and pen.ReadyAt ~= nil and (pen.A == uid or pen.B == uid)
 		local r = Theme.Row(container, nextOrder(), 48)
 		if isPicked then
-			Theme.Stroke(PINK, 3).Parent = r
+			Theme.Stroke(if mode == "Breed" then PINK else PURPLE, 3).Parent = r
 		end
 		Theme.Label({
 			Position = UDim2.fromOffset(14, 0),
 			Size = UDim2.new(1, -150, 1, 0),
 			Text = CreatureMath.DisplayName(creature) .. "  Lv." .. creature.Level,
-			TextColor3 = if wrongKind or alone then Theme.Muted else colorOf(creature),
+			TextColor3 = if wrongKind or alone or busy then Theme.Muted else colorOf(creature),
 			TextXAlignment = Enum.TextXAlignment.Left,
 			Parent = r,
 		})
@@ -243,29 +334,31 @@ local function rebuild(state)
 			Size = UDim2.fromOffset(130, 38),
 			Text = if isPicked then "✓ Picked" else "Pick",
 			BackgroundColor3 = if isPicked
-				then PINK
-				elseif wrongKind or alone then Color3.fromRGB(80, 80, 90)
+				then (if mode == "Breed" then PINK else PURPLE)
+				elseif wrongKind or alone or busy then Color3.fromRGB(80, 80, 90)
 				else Theme.Green,
 			Parent = r,
 		})
-		local readyAt = creature.BreedReadyAt or 0
+		local readyAt = if mode == "Breed" then creature.BreedReadyAt or 0 else 0
 		table.insert(live, function()
 			local left = readyAt - now()
-			if left > 0 and not isPicked then
+			if busy then
+				button.Text = "💞 Breeding"
+			elseif left > 0 and not isPicked then
 				button.Text = "😴 " .. Format.Time(left)
 			elseif alone and not isPicked then
-				button.Text = "Needs a pair"
+				button.Text = if mode == "Breed" then "Needs a pair" else "Needs 3"
 			end
 		end)
 		button.Activated:Connect(function()
 			if isPicked then
 				table.remove(picked, table.find(picked, uid) :: number)
-			elseif readyAt > now() or alone then
+			elseif readyAt > now() or alone or busy then
 				return
 			elseif wrongKind then
 				table.clear(picked)
 				table.insert(picked, uid)
-			elseif #picked < 2 then
+			elseif #picked < need then
 				table.insert(picked, uid)
 			end
 			lastSignature = ""
@@ -297,7 +390,17 @@ function Page.Update(state)
 			table.remove(picked, i)
 		end
 	end
-	local parts = { tostring(state.Incubators), tostring((state.Breeding or {}).ReadyAt), table.concat(picked, ",") }
+	local parts = {
+		mode,
+		tostring(state.Incubators),
+		tostring((state.Breeding or {}).ReadyAt),
+		table.concat(picked, ","),
+		tostring(
+			#picked == 3
+				and (state.Cash or 0)
+					>= Breeding.FuseCost(state.Creatures[picked[1]].Id, state.Creatures[picked[1]].Size or 1)
+		),
+	}
 	for uid, creature in state.Creatures do
 		table.insert(
 			parts,

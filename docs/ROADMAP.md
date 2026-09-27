@@ -46,7 +46,7 @@ Each phase ships a playable game. Status: ✅ done · 🟡 partly · ⬜ not sta
 ### Logging and admin
 - ✅ Every service logs with its own tag (`Log.new("UpgradeService")` → `[UpgradeService]`)
 - ✅ Admin commands: `give <Titan> [Mutation] [Size]`, `size <n>`, `res <Resource> <n>`, `upgrade <Id>`
-  (eggs as items arrive in Phase 2)
+  (egg commands: see Phase 2)
 
 ---
 
@@ -78,7 +78,7 @@ Each phase ships a playable game. Status: ✅ done · 🟡 partly · ⬜ not sta
 - ✅ Stamina for sprinting and flying
 - ✅ Attack (click) and style special (Q) hit wild titans
 - ✅ Phone controls: big buttons on the ride panel
-- ⬜ Carry an egg on the saddle (eggs as items arrive in Phase 2)
+- ⬜ Carry an egg on the saddle (eggs can be carried on foot now; saddle carrying with Phase 3 saddles)
 - ✅ Wild titans hit your mount; at 0 HP you're knocked off (30 s rest)
 
 ### Followers (`FollowerService`)
@@ -90,15 +90,45 @@ Each phase ships a playable game. Status: ✅ done · 🟡 partly · ⬜ not sta
 - ✅ `WildService`, `ToolService`, `TameService`, `RideService`, `FollowerService` log with their tags
 - ✅ Unit tests for the wild brain, torpor, taming math, stamina and ride stats (`tests/specs/Phase1.spec.lua`)
 
-## Phase 2: Eggs and breeding ⬜
-Breeding pen (2 of a species) · timer by rarity (2 min … 2 h) · stat inheritance + small bonus ·
-5 % mutation chance (more with mutated parents) · egg size from parents with rare tier jumps ·
-cooldowns. Wild nests per biome with a guardian, refill timers, rarer biomes = bigger eggs.
-Egg size tiers x1 … x100K (slower hatch/carry, bigger glow, sky beam for Titanic+, server
-announcement for Colossal+). Incubators (upgradeable; board slot already exists). Hatch
-cinematic scales with tier; hatched titan keeps the size. Egg stealing: grab from incubators,
-knock carriers to drop, dropped eggs last 10 s, carrier trail + map marker, owner alarm +
-Take Back (reuse). Fusion: 3 of a titan → next size tier.
+## Phase 2: Eggs and breeding ✅ (17 done · 3 partly)
+
+### Breeding (`BreedingService`, 💞 Breed page, `shared/Game/Breeding.lua`)
+- ✅ Pick 2 titans of a species on the Breed page; they stay in their pens with hearts over them
+- ✅ Timer by rarity: 2 min (Common) … 2 h (Secret); finishes offline too (os.time)
+- ✅ Stat inheritance: parents' average bonus + a small random bonus (up to +100 %)
+- ✅ Mutations: 5 % new, 12 % from one mutated parent, 30 % from two
+- ✅ Egg size tier between the parents' tiers, 4 % chance of jumping a tier higher
+- ✅ Parents rest 2× the breeding time; can't sell a breeding parent; cancel any time
+- 🟡 A separate breeding pen building: parents breed in their own pens for now (pen building with Phase 4)
+
+### Eggs and incubators (`IncubatorService`, `EggBuilder`)
+- ✅ 1 incubator at the back of every base, up to 6 with the Incubator upgrade
+- ✅ Eggs wait in egg storage (max 60) until an incubator frees up; best egg goes in first
+- ✅ Hatch time by rarity × size tier; Faster Hatching upgrade (+15 % per level)
+- ✅ Bigger egg tiers: bigger model, stronger glow, sky beam for Titanic+, server announcement for Colossal+
+- ✅ Hatch cinematic scales with tier (more shakes, bigger flash, size on the card); titan keeps size and bonus
+- ✅ Timer + progress bar over every incubator; "pens full" warning instead of losing the egg
+
+### Wild nests (`NestService`)
+- ✅ Up to 2 nests in the fields, each with an egg and 1–2 guardians of that species (always aggressive)
+- ✅ Bigger eggs are rarer (50 % Tiny … 1 % Giant) and have bigger guardians
+- ✅ Nests expire after 10 min and new ones appear elsewhere after a refill timer
+- 🟡 Per-biome nests ("rarer biomes = bigger eggs") come with the 8 biomes
+
+### Egg stealing (`EggCarryService`, `EggAlarmController`)
+- ✅ Steal Egg on other players' incubators (longer hold for bigger eggs)
+- ✅ Carrier: egg over the head, slower by size, trail, marker seen from 800 studs, can't ride or battle
+- ✅ Owner alarm: banner, alarm sound, guide beam and red highlight on the thief
+- ✅ Tackle a carrier to drop the egg; dropped eggs can be grabbed for 10 s, then roll home; owner's Take Back
+- 🟡 Map marker: billboard marker only (the minimap arrives with the map phase)
+
+### Fusion (`FusionService`, 🔮 Fuse tab)
+- ✅ 3 titans of the same species and size tier → 1 of the next tier (keeps best level, bonus, mutation)
+- ✅ Cash cost grows with rarity and tier; big fusions are announced
+
+### Admin and tests
+- ✅ `egg <Titan> [Size] [Mutation]`, `hatchnow`, `nest`
+- ✅ Unit tests for breeding, eggs, hatch time, carry speed, fusion, nest sizes (`tests/specs/Phase2.spec.lua`)
 
 ## Phase 3: Survival and crafting ⬜
 Player health + slow hunger · food refills · respawn at base (carried eggs/resources drop) ·
