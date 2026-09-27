@@ -90,7 +90,7 @@ Each phase ships a playable game. Status: ✅ done · 🟡 partly · ⬜ not sta
 - ✅ `WildService`, `ToolService`, `TameService`, `RideService`, `FollowerService` log with their tags
 - ✅ Unit tests for the wild brain, torpor, taming math, stamina and ride stats (`tests/specs/Phase1.spec.lua`)
 
-## Phase 2: Eggs and breeding ✅ (17 done · 3 partly)
+## Phase 2: Eggs and breeding ✅ (23 done · 3 partly)
 
 ### Breeding (`BreedingService`, 💞 Breed page, `shared/Game/Breeding.lua`)
 - ✅ Pick 2 titans of a species on the Breed page; they stay in their pens with hearts over them
