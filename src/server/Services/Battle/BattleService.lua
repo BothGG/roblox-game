@@ -88,7 +88,7 @@ local BattleService = {
 	_nextBotId = -1,
 }
 
-local Data, Map, Base, Fx, Food, Steal, Reward
+local Data, Map, Base, Fx, Food, Steal, Reward, Ride, Follower
 
 function BattleService:Init(registry)
 	Data = registry.DataService
@@ -98,6 +98,8 @@ function BattleService:Init(registry)
 	Food = registry.FoodService
 	Steal = registry.StealService
 	Reward = registry.RewardService
+	Ride = registry.RideService
+	Follower = registry.FollowerService
 end
 
 function BattleService:Start()
@@ -446,6 +448,9 @@ function BattleService:_makeHuman(player: Player, spawnCf: CFrame): Fighter?
 		return nil
 	end
 	Steal:ReturnFood(player, "left")
+	-- Off your mount and followers go home before you pilot your fighter.
+	Ride:Dismount(player, "battle")
+	Follower:Release(player, uid, true)
 
 	local stats = Battle.Stats(creature)
 	character:PivotTo(spawnCf)

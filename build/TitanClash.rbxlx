@@ -8240,9 +8240,10 @@ local GameEvents = require(ServerModules.GameEvents)
 local CreatureService = {
 	Priority = 25,
 	Models = {} :: { [Player]: { [string]: Model } },
+	Out = {} :: { [Player]: { [string]: boolean } }, -- titans out of their pen (riding / following)
 }
 
-local Data, Base, Fx, Food, King
+local Data, Base, Fx, Food, King, Ride
 
 function CreatureService:Init(registry)
 	Data = registry.DataService
@@ -8250,6 +8251,7 @@ function CreatureService:Init(registry)
 	Fx = registry.FxService
 	Food = registry.FoodService
 	King = registry.KingService
+	Ride = registry.RideService
 
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.Income = player:GetAttribute("Income") or 0
@@ -8316,6 +8318,7 @@ function CreatureService:OnPlayerRemoving(player: Player)
 		end
 	end
 	self.Models[player] = nil
+	self.Out[player] = nil
 end
 
 function CreatureService:_updateLeaderstats(player: Player)
@@ -8464,7 +8467,45 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 		end
 	end)
 
+	local ride = Instance.new("ProximityPrompt")
+	ride.Name = "RidePrompt"
+	ride.ActionText = "Ride"
+	ride.KeyboardKeyCode = Enum.KeyCode.R
+	ride.GamepadKeyCode = Enum.KeyCode.ButtonX
+	ride.HoldDuration = 0.3
+	ride.RequiresLineOfSight = false
+	ride.UIOffset = Vector2.new(0, 60)
+	ride:SetAttribute("OnlyUserId", player.UserId)
+	ride.Parent = root
+	ride.Triggered:Connect(function(who)
+		if who == player and Ride then
+			Ride:Mount(player, uid)
+		end
+	end)
+
+	if self.Out[player] and self.Out[player][uid] then
+		model.Parent = nil -- it's out riding / following
+	end
 	self:_rescale(player, uid)
+end
+
+-- A titan leaves its pen (ridden or following you) or comes back.
+-- It keeps earning income while it's out.
+function CreatureService:SetOut(player: Player, uid: string, out: boolean)
+	self.Out[player] = self.Out[player] or {}
+	self.Out[player][uid] = if out then true else nil
+	local model = self:GetModel(player, uid)
+	local plot = Base:GetPlot(player)
+	if model then
+		model.Parent = if out then nil else (plot and plot.CreatureFolder)
+		if not out then
+			self:_layout(player)
+		end
+	end
+end
+
+function CreatureService:IsOut(player: Player, uid: string): boolean
+	return self.Out[player] ~= nil and self.Out[player][uid] == true
 end
 
 function CreatureService:_rescale(player: Player, uid: string)
@@ -8481,7 +8522,7 @@ function CreatureService:_rescale(player: Player, uid: string)
 	local height = model:GetExtentsSize().Y
 	local tag = root:FindFirstChild("Tag") :: BillboardGui
 	tag.StudsOffsetWorldSpace = Vector3.new(0, height + 1.5, 0)
-	for _, name in { "FeedPrompt", "SellPrompt" } do
+	for _, name in { "FeedPrompt", "SellPrompt", "RidePrompt" } do
 		local prompt = root:FindFirstChild(name) :: ProximityPrompt
 		prompt.MaxActivationDistance = 10 + scale * 2
 	end
@@ -9091,7 +9132,7 @@ local BattleService = {
 	_nextBotId = -1,
 }
 
-local Data, Map, Base, Fx, Food, Steal, Reward
+local Data, Map, Base, Fx, Food, Steal, Reward, Ride, Follower
 
 function BattleService:Init(registry)
 	Data = registry.DataService
@@ -9101,6 +9142,8 @@ function BattleService:Init(registry)
 	Food = registry.FoodService
 	Steal = registry.StealService
 	Reward = registry.RewardService
+	Ride = registry.RideService
+	Follower = registry.FollowerService
 end
 
 function BattleService:Start()
@@ -9449,6 +9492,9 @@ function BattleService:_makeHuman(player: Player, spawnCf: CFrame): Fighter?
 		return nil
 	end
 	Steal:ReturnFood(player, "left")
+	-- Off your mount and followers go home before you pilot your fighter.
+	Ride:Dismount(player, "battle")
+	Follower:Release(player, uid, true)
 
 	local stats = Battle.Stats(creature)
 	character:PivotTo(spawnCf)
@@ -12055,9 +12101,899 @@ return TutorialService
         </Item>
         <Item class="Folder" referent="90">
           <Properties>
-            <string name="Name">Social</string>
+            <string name="Name">Ride</string>
           </Properties>
           <Item class="ModuleScript" referent="91">
+            <Properties>
+              <string name="Name">FollowerService</string>
+              <string name="Source"><![CDATA[--[[
+	FollowerService: up to GameConfig.Followers.Max of your titans walk
+	with you around the island and defend you (Phase 1).
+
+	Commands (FollowerCommand remote, Titans menu, follower bar):
+	  Follow <uid>  take a titan out of its pen to follow you
+	  Home <uid>    send one titan back to its pen
+	  FollowAll     everyone follows again      Stay     everyone waits here
+	  Attack        attack the wild titan you're facing (or the nearest one)
+	  Guard         everyone goes home to guard your base
+	Followers also attack wild titans that attack you or that you hit.
+	If one gets stuck far away, it teleports next to you.
+
+	Movement is like wild titans: logical position here, clients animate the
+	model from MoveFrom/MoveTo attributes (client WildController).
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Battle = require(Shared.Game.Battle)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Riding = require(Shared.Game.Riding)
+local Tags = require(Shared.Game.Tags)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+
+local CreatureBuilder = require(ServerScriptService:WaitForChild("Server").Modules.CreatureBuilder)
+
+local log = Log.new("FollowerService")
+
+local FOLLOW = GameConfig.Followers
+local TICK = 0.25
+local RED = Color3.fromRGB(255, 90, 90)
+
+type Follower = {
+	Uid: string,
+	Model: Model,
+	Pos: Vector3,
+	Look: Vector3,
+	Mode: string, -- "Follow" | "Stay" | "Attack"
+	Target: any?, -- a Wild from WildService
+	Stats: Battle.Stats,
+	Speed: number,
+	Size: number, -- model footprint for spacing
+	LastAttack: number,
+	LastSnap: number,
+	Index: number,
+}
+
+local FollowerService = {
+	Priority = 47,
+	Followers = {} :: { [Player]: { [string]: Follower } },
+	_folder = nil :: Folder?,
+}
+
+local Data, Creature, Wild, Fx, Map, Ride
+
+function FollowerService:Init(registry)
+	Data = registry.DataService
+	Creature = registry.CreatureService
+	Wild = registry.WildService
+	Fx = registry.FxService
+	Map = registry.MapService
+	Ride = registry.RideService
+end
+
+function FollowerService:Start()
+	local folder = Instance.new("Folder")
+	folder.Name = "Followers"
+	folder.Parent = Workspace
+	self._folder = folder
+
+	Net.On("FollowerCommand", function(player, command, uid)
+		self:Command(player, command, uid)
+	end)
+	Data:AddSnapshotHook(function(player, snapshot)
+		local following = {}
+		for uid in self.Followers[player] or {} do
+			following[uid] = true
+		end
+		snapshot.Following = following
+	end)
+	Wild:On("AttackedPlayer", function(wild, player)
+		self:OwnerTarget(player, wild)
+		return false -- the player still takes the hit
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		for uid in table.clone(self.Followers[player] or {}) do
+			self:Release(player, uid, true)
+		end
+		self.Followers[player] = nil
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(TICK)
+			for player, list in self.Followers do
+				local ok, err = pcall(self._tick, self, player, list)
+				if not ok then
+					log:Error("tick failed for", player.Name, err)
+				end
+			end
+		end
+	end)
+end
+
+local function rootOf(player: Player): BasePart?
+	local character = player.Character
+	return character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+local function flat(v: Vector3): Vector3
+	return Vector3.new(v.X, 0, v.Z)
+end
+
+function FollowerService:Count(player: Player): number
+	local n = 0
+	for _ in self.Followers[player] or {} do
+		n += 1
+	end
+	return n
+end
+
+function FollowerService:IsFollowing(player: Player, uid: string): boolean
+	return self.Followers[player] ~= nil and self.Followers[player][uid] ~= nil
+end
+
+-- Follows if a slot is free (used after taming). Returns true if it follows.
+function FollowerService:TryFollow(player: Player, uid: string): boolean
+	if self:Count(player) >= FOLLOW.Max then
+		return false
+	end
+	return self:Follow(player, uid)
+end
+
+function FollowerService:Follow(player: Player, uid: string): boolean
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	local root = rootOf(player)
+	if not creature or not root or self:IsFollowing(player, uid) then
+		return false
+	end
+	if Ride:Get(player) and Ride:Get(player).Uid == uid then
+		return false -- you're riding it
+	end
+	if self:Count(player) >= FOLLOW.Max then
+		Net.Notify(player, string.format("🐾 Only %d titans can follow you at once.", FOLLOW.Max), RED)
+		return false
+	end
+	self.Followers[player] = self.Followers[player] or {}
+	local stats = Battle.Stats(creature)
+	local model = CreatureBuilder.Build(creature)
+	model.Name = "Follower_" .. uid
+	if math.abs(stats.Scale - 1) > 1e-3 then
+		model:ScaleTo(stats.Scale)
+	end
+	local start = Map:GroundAt(root.Position - root.CFrame.LookVector * 8) or root.Position
+	local look = flat(root.CFrame.LookVector)
+	look = if look.Magnitude > 0.01 then look.Unit else Vector3.new(0, 0, -1)
+	model:PivotTo(CFrame.lookAt(start, start + look))
+	model:SetAttribute("OwnerUserId", player.UserId)
+	model:SetAttribute("State", "Idle")
+	model.Parent = self._folder
+	CollectionService:AddTag(model, Tags.Mover)
+
+	-- Name tag + ride prompt
+	local primary = model.PrimaryPart :: BasePart
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(200, 30)
+	gui.StudsOffsetWorldSpace = Vector3.new(0, model:GetExtentsSize().Y + 1.5, 0)
+	gui.MaxDistance = 150
+	gui.LightInfluence = 0
+	gui.Parent = primary
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(180, 255, 180)
+	label.Text = "🐾 " .. CreatureMath.DisplayName(creature) .. " (" .. player.DisplayName .. ")"
+	label.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Parent = label
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "RidePrompt"
+	prompt.ActionText = "Ride"
+	prompt.KeyboardKeyCode = Enum.KeyCode.R
+	prompt.HoldDuration = 0.3
+	prompt.MaxActivationDistance = 10 + stats.Scale * 3
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute("OnlyUserId", player.UserId)
+	prompt.Parent = primary
+	prompt.Triggered:Connect(function(who)
+		if who == player then
+			Ride:Mount(player, uid)
+		end
+	end)
+
+	local follower: Follower = {
+		Uid = uid,
+		Model = model,
+		Pos = start,
+		Look = look,
+		Mode = "Follow",
+		Target = nil,
+		Stats = stats,
+		Speed = math.max(20, stats.Speed * 1.3),
+		Size = 5 * stats.Scale,
+		LastAttack = 0,
+		LastSnap = 0,
+		Index = self:Count(player) + 1,
+	}
+	self.Followers[player][uid] = follower
+	Creature:SetOut(player, uid, true)
+	Fx:PlayAll("Spawn", { Position = start, Color = Color3.fromRGB(150, 255, 150) })
+	player:SetAttribute("Followers", self:Count(player))
+	Data:Changed(player)
+	log:Info(player.Name, "is followed by", creature.Id)
+	return true
+end
+
+-- Sends a follower back to its pen.
+function FollowerService:Release(player: Player, uid: string, silent: boolean?)
+	local list = self.Followers[player]
+	local follower = list and list[uid]
+	if not follower then
+		return
+	end
+	list[uid] = nil
+	if not silent then
+		Fx:PlayAll("Poof", { Position = follower.Pos })
+	end
+	follower.Model:Destroy()
+	if Data:Get(player) then
+		Creature:SetOut(player, uid, false)
+		Data:Changed(player)
+	end
+	-- Re-number the formation
+	local i = 0
+	for _, other in list do
+		i += 1
+		other.Index = i
+	end
+	player:SetAttribute("Followers", self:Count(player))
+end
+
+-- A wild titan attacked the owner (or the owner hit one): followers join in.
+function FollowerService:OwnerTarget(player: Player, wild)
+	for _, follower in self.Followers[player] or {} do
+		if follower.Mode ~= "Stay" and not wild.Asleep then
+			follower.Mode = "Attack"
+			follower.Target = wild
+		end
+	end
+end
+
+function FollowerService:Command(player: Player, command: string, uid: string?)
+	if command == "Follow" and uid then
+		if self:IsFollowing(player, uid) then
+			self:Release(player, uid)
+		else
+			self:Follow(player, uid)
+		end
+	elseif command == "Home" and uid then
+		self:Release(player, uid)
+	elseif command == "Guard" then
+		for id in table.clone(self.Followers[player] or {}) do
+			self:Release(player, id)
+		end
+		Net.Notify(player, "🏠 Your titans went home to guard your base.")
+	elseif command == "Stay" or command == "FollowAll" then
+		for _, follower in self.Followers[player] or {} do
+			follower.Mode = if command == "Stay" then "Stay" else "Follow"
+			follower.Target = nil
+		end
+	elseif command == "Attack" then
+		local root = rootOf(player)
+		if not root then
+			return
+		end
+		local wild = Wild:FindNear(root.Position, root.CFrame.LookVector, 60, 0.3)
+			or Wild:FindNear(root.Position, nil, FOLLOW.GuardRange)
+		if wild then
+			for _, follower in self.Followers[player] or {} do
+				follower.Mode = "Attack"
+				follower.Target = wild
+			end
+		else
+			Net.Notify(player, "No wild titan nearby to attack.", RED)
+		end
+	end
+end
+
+--------------------------------------------------------------------------
+-- Movement / fighting
+--------------------------------------------------------------------------
+
+function FollowerService:_move(follower: Follower, target: Vector3, now: number)
+	local offset = flat(target - follower.Pos)
+	local distance = offset.Magnitude
+	local from = CFrame.lookAt(follower.Pos, follower.Pos + follower.Look)
+	if distance < 1 then
+		follower.Model:SetAttribute("State", "Idle")
+		follower.Model:SetAttribute("MoveFrom", from)
+		follower.Model:SetAttribute("MoveTo", from)
+		follower.Model:SetAttribute("MoveStart", now)
+		follower.Model:SetAttribute("MoveDuration", 0.01)
+		return
+	end
+	local step = math.min(distance, follower.Speed * TICK)
+	local nextPos = follower.Pos + offset.Unit * step
+	local ground = Map:GroundAt(nextPos) or nextPos
+	follower.Look = offset.Unit
+	follower.Pos = ground
+	local to = CFrame.lookAt(ground, ground + follower.Look)
+	local model = follower.Model
+	model:SetAttribute("State", if distance > 12 then "Chase" else "Wander")
+	model:SetAttribute("MoveFrom", from)
+	model:SetAttribute("MoveTo", to)
+	model:SetAttribute("MoveStart", now)
+	model:SetAttribute("MoveDuration", TICK)
+	if now - follower.LastSnap > 2 then
+		follower.LastSnap = now
+		model:PivotTo(to)
+	end
+end
+
+function FollowerService:_teleport(follower: Follower, position: Vector3)
+	Fx:PlayAll("Poof", { Position = follower.Pos })
+	follower.Pos = Map:GroundAt(position) or position
+	local cf = CFrame.lookAt(follower.Pos, follower.Pos + follower.Look)
+	follower.Model:PivotTo(cf)
+	follower.Model:SetAttribute("MoveFrom", cf)
+	follower.Model:SetAttribute("MoveTo", cf)
+	Fx:PlayAll("Spawn", { Position = follower.Pos, Color = Color3.fromRGB(150, 255, 150) })
+end
+
+function FollowerService:_tick(player: Player, list: { [string]: Follower })
+	local root = rootOf(player)
+	if not root then
+		return
+	end
+	local now = Workspace:GetServerTimeNow()
+	local look = flat(root.CFrame.LookVector)
+	look = if look.Magnitude > 0.01 then look.Unit else Vector3.new(0, 0, -1)
+	local right = look:Cross(Vector3.yAxis)
+	for _, follower in list do
+		local ownerDistance = (flat(root.Position) - flat(follower.Pos)).Magnitude
+		local mode: string = follower.Mode
+		local stuck = ownerDistance > FOLLOW.TeleportDistance
+		if stuck and follower.Mode ~= "Stay" then
+			self:_teleport(follower, root.Position - look * 10)
+			continue
+		end
+		local target = follower.Target
+		if mode == "Attack" then
+			if not target or target.Removed or target.Asleep or ownerDistance > FOLLOW.TeleportDistance * 0.8 then
+				follower.Mode = "Follow"
+				follower.Target = nil
+			else
+				local reach = follower.Stats.Range + target.Radius
+				local toTarget = flat(target.Pos - follower.Pos)
+				if toTarget.Magnitude > reach then
+					self:_move(follower, target.Pos, now)
+				else
+					follower.Look = if toTarget.Magnitude > 0.1 then toTarget.Unit else follower.Look
+					follower.Model:SetAttribute("State", "Attack")
+					if now - follower.LastAttack > GameConfig.Battle.AttackCooldown * 1.3 then
+						follower.LastAttack = now
+						local damage = Battle.Damage(follower.Stats.Attack, 0.6, math.random())
+						Fx:PlayAll("TitanAttack", {
+							Kind = "Attack",
+							Position = follower.Pos + Vector3.new(0, follower.Model:GetExtentsSize().Y * 0.5, 0),
+							Look = follower.Look,
+							Range = follower.Stats.Range,
+							Color = Color3.fromRGB(150, 255, 150),
+						})
+						Wild:Hit(target, player, damage, damage * 0.15)
+					end
+				end
+				continue
+			end
+		end
+		mode = follower.Mode
+		if mode == "Follow" then
+			local slot = Riding.FollowerOffset(follower.Index, 8 + follower.Size)
+			local goal = root.Position - look * slot.Z + right * slot.X
+			if (flat(goal) - flat(follower.Pos)).Magnitude > 4 then
+				self:_move(follower, goal, now)
+			else
+				self:_move(follower, follower.Pos, now)
+			end
+		else
+			self:_move(follower, follower.Pos, now) -- Stay
+		end
+	end
+end
+
+return FollowerService
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="92">
+            <Properties>
+              <string name="Name">RideService</string>
+              <string name="Source"><![CDATA[--[[
+	RideService: ride any of your titans around the whole island (Phase 1).
+
+	Mount: hold R next to a titan in your base, R on a follower, or the
+	"Ride" button in the Titans menu. The titan model is welded to your
+	character (same piloting trick as battles) and your body is hidden.
+
+	Movement per style (shared/Game/Riding.lua):
+	  runners sprint (Shift) with stamina, flyers fly (hold Space in the air),
+	  blobs bounce (big jumps). Click = attack, Q = special, X = dismount.
+	The client only asks (RideAction); stamina, cooldowns and hits are here.
+
+	Wild titans that attack a rider hit the titan instead; at 0 HP you get
+	knocked off and that titan needs a rest before you can ride it again.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Battle = require(Shared.Game.Battle)
+local CreatureMath = require(Shared.Game.CreatureMath)
+local Riding = require(Shared.Game.Riding)
+local Log = require(Shared.Lib.Log)
+local Net = require(Shared.Net)
+local Types = require(Shared.Types)
+
+local CreatureBuilder = require(ServerScriptService:WaitForChild("Server").Modules.CreatureBuilder)
+
+local log = Log.new("RideService")
+
+local RIDE = GameConfig.Riding
+local BATTLE = GameConfig.Battle
+local RED = Color3.fromRGB(255, 90, 90)
+local TICK = 0.1
+local TIRED_TIME = 30
+
+type Ride = {
+	Uid: string,
+	Creature: Types.CreatureData,
+	Stats: Riding.RideStats,
+	Battle: Battle.Stats,
+	Special: Battle.Special,
+	Model: Model,
+	Stamina: number,
+	Mode: Riding.Mode,
+	Hp: number,
+	LastAttack: number,
+	LastSpecial: number,
+	LastCombat: number,
+	Saved: { [Instance]: number },
+	SavedMove: { WalkSpeed: number, JumpPower: number, UseJumpPower: boolean },
+	Connections: { RBXScriptConnection },
+}
+
+local RideService = {
+	Priority = 48,
+	Rides = {} :: { [Player]: Ride },
+	Tired = {} :: { [Player]: { [string]: number } },
+}
+
+local Data, Creature, Wild, Fx, Battles, Follower
+
+local ATTRIBUTES = {
+	"Riding",
+	"RideName",
+	"RideHp",
+	"RideHpMax",
+	"RideStamina",
+	"RideStaminaMax",
+	"RideCanFly",
+	"RideCanSprint",
+	"RideMode",
+	"RideScale",
+	"RideSpecial",
+	"RideSpecialCd",
+	"RideFlySpeed",
+}
+
+function RideService:Init(registry)
+	Data = registry.DataService
+	Creature = registry.CreatureService
+	Wild = registry.WildService
+	Fx = registry.FxService
+	Battles = registry.BattleService
+	Follower = registry.FollowerService
+end
+
+function RideService:Start()
+	Net.On("Ride", function(player, uid)
+		self:Mount(player, uid)
+	end)
+	Net.On("RideAction", function(player, action, on)
+		self:Action(player, action, on)
+	end)
+	Wild:On("AttackedPlayer", function(wild, player, damage)
+		return self:_onAttacked(wild, player, damage)
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		self:Dismount(player, "left")
+		self.Tired[player] = nil
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(TICK)
+			for player, ride in self.Rides do
+				local ok, err = pcall(self._tick, self, player, ride)
+				if not ok then
+					log:Error("tick failed for", player.Name, err)
+				end
+			end
+		end
+	end)
+end
+
+function RideService:IsRiding(player: Player): boolean
+	return self.Rides[player] ~= nil
+end
+
+function RideService:Get(player: Player): Ride?
+	return self.Rides[player]
+end
+
+--------------------------------------------------------------------------
+-- Mount / dismount
+--------------------------------------------------------------------------
+
+local function setAttributes(player: Player, ride: Ride?)
+	if not ride then
+		for _, name in ATTRIBUTES do
+			player:SetAttribute(name, nil)
+		end
+		return
+	end
+	player:SetAttribute("Riding", ride.Uid)
+	player:SetAttribute("RideName", CreatureMath.DisplayName(ride.Creature))
+	player:SetAttribute("RideHpMax", ride.Stats.MaxHP)
+	player:SetAttribute("RideStaminaMax", ride.Stats.StaminaMax)
+	player:SetAttribute("RideCanFly", ride.Stats.CanFly)
+	player:SetAttribute("RideCanSprint", ride.Stats.CanSprint)
+	player:SetAttribute("RideScale", ride.Battle.Scale)
+	player:SetAttribute("RideSpecial", ride.Special.Name)
+	player:SetAttribute("RideSpecialCd", ride.Special.Cooldown)
+	player:SetAttribute("RideFlySpeed", ride.Stats.FlySpeed)
+end
+
+function RideService:Mount(player: Player, uid: string)
+	local data = Data:Get(player)
+	local creature = data and data.Creatures[uid]
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not creature or not character or not root or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	if Battles:IsFighting(player) then
+		return
+	end
+	if RIDE.RequireSaddle and not creature.Saddle then
+		Net.Notify(player, "🐎 This titan needs a saddle to ride.", RED)
+		return
+	end
+	local tiredUntil = self.Tired[player] and self.Tired[player][uid]
+	if tiredUntil and os.clock() < tiredUntil then
+		Net.Notify(
+			player,
+			string.format("😴 It's tired! Ride again in %ds.", math.ceil(tiredUntil - os.clock())),
+			RED
+		)
+		return
+	end
+	if player:GetAttribute("Carrying") then
+		Net.Notify(player, "You can't ride while carrying stolen food!", RED)
+		return
+	end
+	if self.Rides[player] then
+		local same = self.Rides[player].Uid == uid
+		self:Dismount(player, "switch")
+		if same then
+			return
+		end
+	end
+	if Follower then
+		Follower:Release(player, uid, true)
+	end
+	humanoid:UnequipTools()
+
+	local stats = Riding.Stats(creature)
+	local battle = Battle.Stats(creature)
+	local model = CreatureBuilder.Build(creature)
+	model.Name = "Mount"
+	if math.abs(battle.Scale - 1) > 1e-3 then
+		model:ScaleTo(battle.Scale)
+	end
+	local hip = root.Size.Y / 2 + humanoid.HipHeight
+	model:PivotTo(root.CFrame * CFrame.new(0, -hip, 0))
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = false
+			d.CanCollide = false
+			d.CanTouch = false
+			d.CanQuery = false
+			d.Massless = true
+		end
+	end
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = root
+	weld.Part1 = model.PrimaryPart
+	weld.Parent = model.PrimaryPart
+
+	-- Hide the rider's own body (the titan is what everyone sees)
+	local saved = {}
+	for _, d in character:GetDescendants() do
+		if (d:IsA("BasePart") and d ~= root) or d:IsA("Decal") then
+			local visible: any = d
+			saved[d] = visible.Transparency
+			visible.Transparency = 1
+		end
+	end
+	model.Parent = character
+
+	local ride: Ride = {
+		Uid = uid,
+		Creature = table.clone(creature),
+		Stats = stats,
+		Battle = battle,
+		Special = Battle.SpecialFor(creature.Id),
+		Model = model,
+		Stamina = stats.StaminaMax,
+		Mode = "Walk",
+		Hp = stats.MaxHP,
+		LastAttack = 0,
+		LastSpecial = 0,
+		LastCombat = 0,
+		Saved = saved,
+		SavedMove = {
+			WalkSpeed = humanoid.WalkSpeed,
+			JumpPower = humanoid.JumpPower,
+			UseJumpPower = humanoid.UseJumpPower,
+		},
+		Connections = {},
+	}
+	humanoid.UseJumpPower = true
+	humanoid.JumpPower = stats.JumpPower
+	humanoid.WalkSpeed = stats.WalkSpeed
+	table.insert(
+		ride.Connections,
+		humanoid.Died:Connect(function()
+			self:Dismount(player, "died")
+		end)
+	)
+	table.insert(
+		ride.Connections,
+		player.CharacterRemoving:Connect(function()
+			self:Dismount(player, "respawn")
+		end)
+	)
+	self.Rides[player] = ride
+	Creature:SetOut(player, uid, true)
+	setAttributes(player, ride)
+	self:_sync(player, ride)
+	Fx:PlayAll("MountDust", { Position = root.Position - Vector3.new(0, hip, 0), Size = math.sqrt(battle.Scale) })
+	log:Info(player.Name, "mounted", creature.Id)
+end
+
+function RideService:Dismount(player: Player, reason: string?)
+	local ride = self.Rides[player]
+	if not ride then
+		return
+	end
+	self.Rides[player] = nil
+	for _, connection in ride.Connections do
+		connection:Disconnect()
+	end
+	local position = ride.Model.PrimaryPart and ride.Model.PrimaryPart.Position
+	ride.Model:Destroy()
+	for instance, transparency in ride.Saved do
+		if instance.Parent then
+			(instance :: any).Transparency = transparency
+		end
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = ride.SavedMove.WalkSpeed
+		humanoid.JumpPower = ride.SavedMove.JumpPower
+		humanoid.UseJumpPower = ride.SavedMove.UseJumpPower
+	end
+	setAttributes(player, nil)
+	if Data:Get(player) then
+		Creature:SetOut(player, ride.Uid, false)
+	end
+	if position and reason ~= "left" then
+		Fx:PlayAll("MountDust", { Position = position, Size = math.sqrt(ride.Battle.Scale) })
+	end
+	if reason == "knocked" then
+		self.Tired[player] = self.Tired[player] or {}
+		self.Tired[player][ride.Uid] = os.clock() + TIRED_TIME
+		Net.Notify(player, "💥 You got knocked off! Your titan needs " .. TIRED_TIME .. "s to rest.", RED)
+	end
+	log:Info(player.Name, "dismounted", ride.Creature.Id, reason or "")
+end
+
+--------------------------------------------------------------------------
+-- Actions
+--------------------------------------------------------------------------
+
+function RideService:Action(player: Player, action: string, on: boolean?)
+	local ride = self.Rides[player]
+	if not ride then
+		return
+	end
+	if action == "Dismount" then
+		self:Dismount(player, "button")
+	elseif action == "Sprint" then
+		ride.Mode = if on
+				and ride.Stats.CanSprint
+				and Riding.CanUse(ride.Stamina, "Sprint", ride.Mode == "Sprint")
+			then "Sprint"
+			else "Walk"
+		self:_sync(player, ride)
+	elseif action == "Fly" then
+		ride.Mode = if on
+				and ride.Stats.CanFly
+				and Riding.CanUse(ride.Stamina, "Fly", ride.Mode == "Fly")
+			then "Fly"
+			else "Walk"
+		self:_sync(player, ride)
+	elseif action == "Attack" then
+		self:_attack(player, ride, "Attack")
+	elseif action == "Special" then
+		self:_attack(player, ride, "Special")
+	end
+end
+
+function RideService:_attack(player: Player, ride: Ride, kind: "Attack" | "Special")
+	local now = os.clock()
+	if kind == "Attack" then
+		if now - ride.LastAttack < BATTLE.AttackCooldown then
+			return
+		end
+		ride.LastAttack = now
+	else
+		if now - ride.LastSpecial < ride.Special.Cooldown then
+			return
+		end
+		ride.LastSpecial = now
+	end
+	ride.LastCombat = now
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return
+	end
+	local look = root.CFrame.LookVector * Vector3.new(1, 0, 1)
+	look = if look.Magnitude > 0.01 then look.Unit else Vector3.new(0, 0, -1)
+	local center = root.Position + Vector3.new(0, ride.Model:GetExtentsSize().Y * 0.3, 0)
+	Fx:PlayAll("TitanAttack", {
+		Kind = kind,
+		Special = ride.Special.Id,
+		Position = center,
+		Look = look,
+		Range = ride.Battle.Range,
+		Color = Color3.fromRGB(255, 220, 150),
+	})
+	if kind == "Special" and ride.Special.Id == "Charge" then
+		Fx:PlayFor(player, "Launch", { Velocity = look * 90 + Vector3.new(0, 10, 0) })
+	elseif kind == "Special" and ride.Special.Id == "Bounce" then
+		Fx:PlayFor(player, "Launch", { Velocity = Vector3.new(0, 70, 0) })
+	end
+	local delay = if kind == "Special" then ride.Special.Delay else 0.12
+	task.delay(delay, function()
+		if self.Rides[player] ~= ride then
+			return
+		end
+		local from = root.Position
+		local mult = if kind == "Special" then ride.Special.Mult else 1
+		for _, wild in table.clone(Wild.Wilds) do
+			if
+				Battle.Hits(
+					kind,
+					if kind == "Special" then ride.Special else nil,
+					{ X = from.X, Z = from.Z },
+					{ X = look.X, Z = look.Z },
+					{ X = wild.Pos.X, Z = wild.Pos.Z },
+					ride.Battle.Range,
+					wild.Radius
+				)
+			then
+				local damage = Battle.Damage(ride.Battle.Attack, mult, math.random())
+				-- Titan hits are strong but only lightly knock out (use tools to tame).
+				Wild:Hit(wild, player, damage, damage * 0.3)
+				if Follower then
+					Follower:OwnerTarget(player, wild)
+				end
+			end
+		end
+	end)
+end
+
+function RideService:_onAttacked(wild, player: Player, damage: number): boolean
+	local ride = self.Rides[player]
+	if not ride then
+		return false
+	end
+	ride.Hp -= damage
+	ride.LastCombat = os.clock()
+	local root = ride.Model.PrimaryPart
+	if root then
+		Fx:PlayAll("Hit", {
+			Position = root.Position + Vector3.new(0, ride.Model:GetExtentsSize().Y * 0.5, 0),
+			Amount = math.floor(damage),
+			Model = ride.Model,
+			Target = player.UserId,
+		})
+	end
+	if Follower then
+		Follower:OwnerTarget(player, wild)
+	end
+	if ride.Hp <= 0 and RIDE.KnockOffDamage then
+		self:Dismount(player, "knocked")
+	else
+		self:_sync(player, ride)
+	end
+	return true
+end
+
+--------------------------------------------------------------------------
+-- Tick: stamina, speed, HP regen
+--------------------------------------------------------------------------
+
+function RideService:_sync(player: Player, ride: Ride)
+	player:SetAttribute("RideHp", math.max(0, math.floor(ride.Hp)))
+	player:SetAttribute("RideStamina", math.floor(ride.Stamina))
+	player:SetAttribute("RideMode", ride.Mode)
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = if ride.Mode == "Sprint" then ride.Stats.SprintSpeed else ride.Stats.WalkSpeed
+	end
+end
+
+function RideService:_tick(player: Player, ride: Ride)
+	local before = ride.Mode
+	ride.Stamina = Riding.UpdateStamina(ride.Stamina, ride.Stats.StaminaMax, TICK, ride.Mode)
+	if ride.Mode ~= "Walk" and ride.Stamina <= 0 then
+		ride.Mode = "Walk"
+	end
+	if os.clock() - ride.LastCombat > 5 and ride.Hp < ride.Stats.MaxHP then
+		ride.Hp = math.min(ride.Stats.MaxHP, ride.Hp + ride.Stats.MaxHP * RIDE.HpRegen * TICK)
+	end
+	-- Attributes replicate to everyone: only send them when they change.
+	if
+		before ~= ride.Mode
+		or math.floor(ride.Stamina) ~= player:GetAttribute("RideStamina")
+		or math.floor(ride.Hp) ~= player:GetAttribute("RideHp")
+	then
+		self:_sync(player, ride)
+	end
+	-- Fell off the world: get off
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root and root.Position.Y < Workspace.FallenPartsDestroyHeight + 50 then
+		self:Dismount(player, "fell")
+	end
+end
+
+return RideService
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="Folder" referent="93">
+          <Properties>
+            <string name="Name">Social</string>
+          </Properties>
+          <Item class="ModuleScript" referent="94">
             <Properties>
               <string name="Name">KingService</string>
               <string name="Source"><![CDATA[--[[
@@ -12245,7 +13181,7 @@ return KingService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="92">
+          <Item class="ModuleScript" referent="95">
             <Properties>
               <string name="Name">LeaderboardService</string>
               <string name="Source"><![CDATA[--[[
@@ -12444,7 +13380,7 @@ return LeaderboardService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="93">
+          <Item class="ModuleScript" referent="96">
             <Properties>
               <string name="Name">SocialService</string>
               <string name="Source"><![CDATA[--[[
@@ -12620,11 +13556,11 @@ return SocialService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="94">
+        <Item class="Folder" referent="97">
           <Properties>
             <string name="Name">Store</string>
           </Properties>
-          <Item class="ModuleScript" referent="95">
+          <Item class="ModuleScript" referent="98">
             <Properties>
               <string name="Name">StoreService</string>
               <string name="Source"><![CDATA[--[[
@@ -12762,11 +13698,11 @@ return StoreService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="96">
+        <Item class="Folder" referent="99">
           <Properties>
             <string name="Name">Wild</string>
           </Properties>
-          <Item class="ModuleScript" referent="97">
+          <Item class="ModuleScript" referent="100">
             <Properties>
               <string name="Name">TameService</string>
               <string name="Source"><![CDATA[--[[
@@ -12979,7 +13915,7 @@ return TameService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="98">
+          <Item class="ModuleScript" referent="101">
             <Properties>
               <string name="Name">ToolService</string>
               <string name="Source"><![CDATA[--[[
@@ -13156,7 +14092,7 @@ return ToolService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="99">
+          <Item class="ModuleScript" referent="102">
             <Properties>
               <string name="Name">WildService</string>
               <string name="Source"><![CDATA[--[[
@@ -14025,11 +14961,11 @@ return WildService
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="100">
+        <Item class="Folder" referent="103">
           <Properties>
             <string name="Name">World</string>
           </Properties>
-          <Item class="ModuleScript" referent="101">
+          <Item class="ModuleScript" referent="104">
             <Properties>
               <string name="Name">MapService</string>
               <string name="Source"><![CDATA[--[[
@@ -14241,7 +15177,7 @@ return MapService
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="102">
+          <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">PortalService</string>
               <string name="Source"><![CDATA[--[[
@@ -14320,23 +15256,23 @@ return PortalService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="103">
+  <Item class="StarterPlayer" referent="106">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="104">
+    <Item class="StarterPlayerScripts" referent="107">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="105">
+      <Item class="Folder" referent="108">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="106">
+        <Item class="Folder" referent="109">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="107">
+          <Item class="ModuleScript" referent="110">
             <Properties>
               <string name="Name">BaseAnimController</string>
               <string name="Source"><![CDATA[--[[
@@ -14449,7 +15385,7 @@ return BaseAnimController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="108">
+          <Item class="ModuleScript" referent="111">
             <Properties>
               <string name="Name">BattleController</string>
               <string name="Source"><![CDATA[--[[
@@ -14552,7 +15488,7 @@ return BattleController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="109">
+          <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">FoodController</string>
               <string name="Source"><![CDATA[--[[
@@ -14603,7 +15539,7 @@ return FoodController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="110">
+          <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">FxController</string>
               <string name="Source"><![CDATA[--[[
@@ -14657,7 +15593,7 @@ return FxController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="111">
+          <Item class="ModuleScript" referent="114">
             <Properties>
               <string name="Name">MusicController</string>
               <string name="Source"><![CDATA[--[[
@@ -14743,7 +15679,7 @@ return MusicController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="112">
+          <Item class="ModuleScript" referent="115">
             <Properties>
               <string name="Name">PromptController</string>
               <string name="Source"><![CDATA[--[[
@@ -14806,7 +15742,182 @@ return PromptController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="113">
+          <Item class="ModuleScript" referent="116">
+            <Properties>
+              <string name="Name">RideController</string>
+              <string name="Source"><![CDATA[--[[
+	RideController: the local player's side of riding titans and followers.
+
+	Keys while riding:
+	  Shift = sprint (runners)      V = fly / land (flyers)
+	  Space = jump (flying: up)     Ctrl = down while flying
+	  Click = attack   Q = special  X = get off
+	Phones use the big buttons on the ride panel (RideHud).
+
+	Flying is done here with a LinearVelocity on your character (your
+	client moves your character); the server only allows it while you
+	have stamina (RideMode attribute = "Fly").
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
+local Net = require(Shared.Net)
+
+local UI = script.Parent.Parent:WaitForChild("UI")
+local RideHud = require(UI.RideHud)
+local Hud = require(UI.Hud)
+
+local player = Players.LocalPlayer
+
+local RideController = {
+	Priority = 22,
+}
+
+local savedZoom: { Min: number, Max: number }? = nil
+local flight: LinearVelocity? = nil
+local flightAttachment: Attachment? = nil
+
+local function riding(): boolean
+	return player:GetAttribute("Riding") ~= nil
+end
+
+local function send(action: string, on: boolean?)
+	if not riding() then
+		return
+	end
+	if action == "Attack" then
+		if RideHud.CooldownLeft("Attack") > 0 then
+			return
+		end
+		RideHud.StartCooldown("Attack", GameConfig.Battle.AttackCooldown)
+	elseif action == "Special" then
+		if RideHud.CooldownLeft("Special") > 0 then
+			return
+		end
+		RideHud.StartCooldown("Special", player:GetAttribute("RideSpecialCd") or 6)
+	elseif action == "Fly" and on then
+		on = player:GetAttribute("RideMode") ~= "Fly" -- the button toggles
+	end
+	Net.Send("RideAction", action, on)
+end
+
+local function setCamera(on: boolean)
+	if on then
+		local scale = player:GetAttribute("RideScale") or 1
+		if not savedZoom then
+			savedZoom = { Min = player.CameraMinZoomDistance, Max = player.CameraMaxZoomDistance }
+		end
+		player.CameraMaxZoomDistance = math.max(90, scale * 40)
+		player.CameraMinZoomDistance = math.max(12, scale * 8)
+	elseif savedZoom then
+		player.CameraMinZoomDistance = savedZoom.Min
+		player.CameraMaxZoomDistance = savedZoom.Max
+		savedZoom = nil
+	end
+end
+
+local function stopFlying()
+	if flight then
+		flight:Destroy()
+		flight = nil
+	end
+	if flightAttachment then
+		flightAttachment:Destroy()
+		flightAttachment = nil
+	end
+end
+
+local function updateFlight()
+	local flying = riding() and player:GetAttribute("RideMode") == "Fly"
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not flying or not root or not humanoid then
+		stopFlying()
+		return
+	end
+	if not flight then
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "FlyAttachment"
+		attachment.Parent = root
+		local velocity = Instance.new("LinearVelocity")
+		velocity.Attachment0 = attachment
+		velocity.MaxForce = math.huge
+		velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+		velocity.Parent = root
+		flight, flightAttachment = velocity, attachment
+	end
+	local speed = player:GetAttribute("RideFlySpeed") or 30
+	local up = 0
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+		up = speed * 0.7
+	elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then
+		up = -speed * 0.7
+	end
+	local velocity = flight :: LinearVelocity
+	velocity.VectorVelocity = humanoid.MoveDirection * speed + Vector3.new(0, up, 0)
+end
+
+function RideController:Start()
+	RideHud.Start(send, function(command)
+		Net.Send("FollowerCommand", command)
+	end)
+
+	local function onRidingChanged()
+		local on = riding()
+		RideHud.SetRiding(on)
+		Hud.SetBattleMode(on)
+		setCamera(on)
+		if not on then
+			stopFlying()
+		end
+	end
+	player:GetAttributeChangedSignal("Riding"):Connect(onRidingChanged)
+	player:GetAttributeChangedSignal("Followers"):Connect(function()
+		RideHud.SetFollowers(player:GetAttribute("Followers") or 0)
+	end)
+	onRidingChanged()
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed or not riding() then
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			send("Attack")
+		elseif input.KeyCode == Enum.KeyCode.Q then
+			send("Special")
+		elseif input.KeyCode == Enum.KeyCode.X then
+			send("Dismount")
+		elseif input.KeyCode == Enum.KeyCode.LeftShift then
+			send("Sprint", true)
+		elseif input.KeyCode == Enum.KeyCode.V then
+			send("Fly", true)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if riding() and input.KeyCode == Enum.KeyCode.LeftShift then
+			send("Sprint", false)
+		end
+	end)
+
+	RunService.RenderStepped:Connect(function()
+		if riding() then
+			RideHud.Refresh()
+		end
+		updateFlight()
+	end)
+end
+
+return RideController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="117">
             <Properties>
               <string name="Name">StateController</string>
               <string name="Source"><![CDATA[--[[
@@ -14833,7 +15944,7 @@ return StateController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="114">
+          <Item class="ModuleScript" referent="118">
             <Properties>
               <string name="Name">ToolController</string>
               <string name="Source"><![CDATA[--[[
@@ -14901,7 +16012,7 @@ return ToolController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="115">
+          <Item class="ModuleScript" referent="119">
             <Properties>
               <string name="Name">TutorialController</string>
               <string name="Source"><![CDATA[--[[
@@ -15072,7 +16183,7 @@ return TutorialController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="116">
+          <Item class="ModuleScript" referent="120">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[--[[
@@ -15190,7 +16301,7 @@ return UIController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="117">
+          <Item class="ModuleScript" referent="121">
             <Properties>
               <string name="Name">WildController</string>
               <string name="Source"><![CDATA[--[[
@@ -15274,7 +16385,7 @@ return WildController
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="118">
+        <Item class="LocalScript" referent="122">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[--[[
@@ -15291,11 +16402,11 @@ Loader.Boot(script.Parent:WaitForChild("Controllers"), "Controller")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="119">
+        <Item class="Folder" referent="123">
           <Properties>
             <string name="Name">State</string>
           </Properties>
-          <Item class="ModuleScript" referent="120">
+          <Item class="ModuleScript" referent="124">
             <Properties>
               <string name="Name">ClientState</string>
               <string name="Source"><![CDATA[--[[
@@ -15330,11 +16441,11 @@ return ClientState
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="121">
+        <Item class="Folder" referent="125">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="122">
+          <Item class="ModuleScript" referent="126">
             <Properties>
               <string name="Name">BattleHud</string>
               <string name="Source"><![CDATA[--[[
@@ -15553,7 +16664,7 @@ return BattleHud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="123">
+          <Item class="ModuleScript" referent="127">
             <Properties>
               <string name="Name">HatchReveal</string>
               <string name="Source"><![CDATA[--[[
@@ -15706,7 +16817,7 @@ return HatchReveal
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="124">
+          <Item class="ModuleScript" referent="128">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--[[
@@ -16174,11 +17285,11 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="125">
+          <Item class="Folder" referent="129">
             <Properties>
               <string name="Name">Pages</string>
             </Properties>
-            <Item class="ModuleScript" referent="126">
+            <Item class="ModuleScript" referent="130">
               <Properties>
                 <string name="Name">Admin</string>
                 <string name="Source"><![CDATA[--[[ Admin page: test commands (only shown to admins / in Studio). ]]
@@ -16260,7 +17371,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="127">
+            <Item class="ModuleScript" referent="131">
               <Properties>
                 <string name="Name">Battle</string>
                 <string name="Source"><![CDATA[--[[ Battle page: challenge players, practice vs a bot, join the Titan Clash, watch. ]]
@@ -16487,7 +17598,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="128">
+            <Item class="ModuleScript" referent="132">
               <Properties>
                 <string name="Name">Daily</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16574,7 +17685,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="129">
+            <Item class="ModuleScript" referent="133">
               <Properties>
                 <string name="Name">Eggs</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16667,7 +17778,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="130">
+            <Item class="ModuleScript" referent="134">
               <Properties>
                 <string name="Name">Food</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16754,7 +17865,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="131">
+            <Item class="ModuleScript" referent="135">
               <Properties>
                 <string name="Name">Index</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16883,7 +17994,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="132">
+            <Item class="ModuleScript" referent="136">
               <Properties>
                 <string name="Name">Quests</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16961,7 +18072,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="133">
+            <Item class="ModuleScript" referent="137">
               <Properties>
                 <string name="Name">Rebirth</string>
                 <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17027,7 +18138,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="134">
+            <Item class="ModuleScript" referent="138">
               <Properties>
                 <string name="Name">Settings</string>
                 <string name="Source"><![CDATA[local Theme = require(script.Parent.Parent.Theme)
@@ -17138,7 +18249,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="135">
+            <Item class="ModuleScript" referent="139">
               <Properties>
                 <string name="Name">Store</string>
                 <string name="Source"><![CDATA[local MarketplaceService = game:GetService("MarketplaceService")
@@ -17262,7 +18373,7 @@ return Page
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="136">
+            <Item class="ModuleScript" referent="140">
               <Properties>
                 <string name="Name">Titans</string>
                 <string name="Source"><![CDATA[--[[ Titans page: your titans, their battle stats, choose your fighter, sell. ]]
@@ -17420,7 +18531,7 @@ return Page
               </Properties>
             </Item>
           </Item>
-          <Item class="ModuleScript" referent="137">
+          <Item class="ModuleScript" referent="141">
             <Properties>
               <string name="Name">Popups</string>
               <string name="Source"><![CDATA[--[[
@@ -17654,7 +18765,248 @@ return Popups
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="138">
+          <Item class="ModuleScript" referent="142">
+            <Properties>
+              <string name="Name">RideHud</string>
+              <string name="Source"><![CDATA[--[[
+	RideHud: shown while you ride a titan (HP, stamina, special cooldown and
+	big buttons that also work as the phone controls), plus the follower
+	command bar when titans follow you.
+
+	RideHud.Start(onAction, onFollowerCommand)
+	RideHud.SetRiding(riding)            RideHud.Refresh()
+	RideHud.SetFollowers(count)          RideHud.StartCooldown(name, seconds)
+]]
+
+local Players = game:GetService("Players")
+
+local Theme = require(script.Parent.Theme)
+
+local player = Players.LocalPlayer
+
+local RideHud = {}
+
+local panel: Frame
+local followerBar: Frame
+local refs: { [string]: any } = {}
+local cooldowns: { [string]: { Until: number, Length: number } } = {}
+
+local function barRow(parent: Instance, y: number, color: Color3, label: string): (Frame, TextLabel)
+	local back = Theme.New("Frame", {
+		Position = UDim2.fromOffset(10, y),
+		Size = UDim2.new(1, -20, 0, 18),
+		BackgroundColor3 = Color3.fromRGB(25, 25, 35),
+		Parent = parent,
+	}, { Theme.Corner(9) })
+	local fill = Theme.New("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = color,
+		Parent = back,
+	}, { Theme.Corner(9) })
+	local text = Theme.Label({
+		Size = UDim2.fromScale(1, 1),
+		Text = label,
+		ZIndex = 3,
+		Parent = back,
+	})
+	return fill, text
+end
+
+local function actionButton(
+	parent: Instance,
+	name: string,
+	text: string,
+	color: Color3,
+	order: number,
+	onPress,
+	onRelease
+)
+	local button = Theme.Button({
+		Size = UDim2.fromOffset(78, 58),
+		Text = text,
+		BackgroundColor3 = color,
+		LayoutOrder = order,
+		Parent = parent,
+	})
+	local shade = Theme.New("Frame", {
+		Name = "Cooldown",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1),
+		Size = UDim2.fromScale(1, 0),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.45,
+		ZIndex = 4,
+		Parent = button,
+	}, { Theme.Corner(10) })
+	button.InputBegan:Connect(function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			onPress(name)
+		end
+	end)
+	button.InputEnded:Connect(function(input)
+		if
+			onRelease
+			and (
+				input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch
+			)
+		then
+			onRelease(name)
+		end
+	end)
+	refs[name] = { Button = button, Shade = shade }
+	return button
+end
+
+function RideHud.Start(onAction: (string, boolean?) -> (), onFollowerCommand: (string) -> ())
+	local gui = Theme.ScreenGui("RideHud", 6)
+
+	panel = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -12),
+		Size = UDim2.fromOffset(440, 150),
+		BackgroundColor3 = Theme.Background,
+		BackgroundTransparency = 0.2,
+		Visible = false,
+		Parent = gui,
+	}, { Theme.Corner(16), Theme.Stroke(Theme.Gold, 3) })
+	Theme.AutoScale(panel)
+	refs.Name = Theme.BigLabel({
+		Position = UDim2.fromOffset(10, 4),
+		Size = UDim2.new(1, -20, 0, 26),
+		Text = "",
+		TextColor3 = Theme.Gold,
+		Parent = panel,
+	})
+	refs.HpFill, refs.HpText = barRow(panel, 32, Color3.fromRGB(90, 220, 110), "")
+	refs.StaminaFill, refs.StaminaText = barRow(panel, 54, Color3.fromRGB(80, 170, 255), "")
+	local buttons = Theme.New("Frame", {
+		Position = UDim2.fromOffset(10, 80),
+		Size = UDim2.new(1, -20, 0, 62),
+		BackgroundTransparency = 1,
+		Parent = panel,
+	}, {
+		Theme.New("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+	local function press(name: string)
+		if name == "Sprint" or name == "Fly" then
+			onAction(name, true)
+		else
+			onAction(name)
+		end
+	end
+	local function release(name: string)
+		if name == "Sprint" then
+			onAction(name, false)
+		end
+	end
+	actionButton(buttons, "Attack", "👊\nAttack", Color3.fromRGB(220, 70, 70), 1, press)
+	actionButton(buttons, "Special", "✨\nSpecial", Color3.fromRGB(160, 90, 230), 2, press)
+	actionButton(buttons, "Sprint", "💨\nSprint", Color3.fromRGB(70, 150, 240), 3, press, release)
+	actionButton(buttons, "Fly", "🪽\nFly", Color3.fromRGB(80, 200, 220), 4, press)
+	actionButton(buttons, "Dismount", "⬇️\nGet off", Color3.fromRGB(120, 120, 140), 5, press)
+
+	followerBar = Theme.New("Frame", {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -12, 1, -275),
+		Size = UDim2.fromOffset(140, 190),
+		BackgroundTransparency = 1,
+		Visible = false,
+		Parent = gui,
+	}, {
+		Theme.New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+	Theme.AutoScale(followerBar)
+	refs.FollowerTitle = Theme.BigLabel({
+		Size = UDim2.fromOffset(140, 24),
+		Text = "🐾 Followers",
+		TextColor3 = Color3.fromRGB(180, 255, 180),
+		LayoutOrder = 0,
+		Parent = followerBar,
+	})
+	for i, info in
+		{
+			{ "FollowAll", "🐾 Follow", Color3.fromRGB(80, 190, 90) },
+			{ "Stay", "✋ Stay", Color3.fromRGB(230, 170, 60) },
+			{ "Attack", "⚔️ Attack", Color3.fromRGB(220, 70, 70) },
+			{ "Guard", "🏠 Guard base", Color3.fromRGB(110, 110, 140) },
+		}
+	do
+		local button = Theme.Button({
+			Size = UDim2.fromOffset(140, 34),
+			Text = info[2],
+			BackgroundColor3 = info[3],
+			LayoutOrder = i,
+			Parent = followerBar,
+		})
+		button.Activated:Connect(function()
+			onFollowerCommand(info[1])
+		end)
+	end
+end
+
+function RideHud.SetRiding(riding: boolean)
+	panel.Visible = riding
+	if riding then
+		RideHud.Refresh()
+	end
+end
+
+function RideHud.SetFollowers(count: number)
+	followerBar.Visible = count > 0
+	refs.FollowerTitle.Text = "🐾 Followers (" .. count .. ")"
+end
+
+function RideHud.StartCooldown(name: string, seconds: number)
+	cooldowns[name] = { Until = os.clock() + seconds, Length = seconds }
+end
+
+function RideHud.CooldownLeft(name: string): number
+	local cd = cooldowns[name]
+	return if cd then math.max(0, cd.Until - os.clock()) else 0
+end
+
+-- Called every frame while riding (cheap: a few property sets).
+function RideHud.Refresh()
+	if not panel.Visible then
+		return
+	end
+	local hp = player:GetAttribute("RideHp") or 0
+	local hpMax = math.max(1, player:GetAttribute("RideHpMax") or 1)
+	local stamina = player:GetAttribute("RideStamina") or 0
+	local staminaMax = math.max(1, player:GetAttribute("RideStaminaMax") or 1)
+	local mode = player:GetAttribute("RideMode") or "Walk"
+	refs.Name.Text = "🐎 " .. tostring(player:GetAttribute("RideName") or "")
+	refs.HpFill.Size = UDim2.fromScale(math.clamp(hp / hpMax, 0, 1), 1)
+	refs.HpText.Text = string.format("❤️ %d / %d", hp, hpMax)
+	refs.StaminaFill.Size = UDim2.fromScale(math.clamp(stamina / staminaMax, 0, 1), 1)
+	refs.StaminaText.Text = string.format("⚡ Stamina %d%s", math.floor(stamina / staminaMax * 100), "%")
+	refs.Sprint.Button.Visible = player:GetAttribute("RideCanSprint") == true
+	refs.Fly.Button.Visible = player:GetAttribute("RideCanFly") == true
+	refs.Fly.Button.Text = if mode == "Fly" then "🪽\nLand" else "🪽\nFly"
+	refs.Special.Button.Text = "✨\n" .. tostring(player:GetAttribute("RideSpecial") or "Special")
+	for name, entry in refs do
+		if type(entry) == "table" and entry.Shade then
+			local cd = cooldowns[name]
+			local left = if cd then math.max(0, cd.Until - os.clock()) / cd.Length else 0
+			entry.Shade.Size = UDim2.fromScale(1, left)
+		end
+	end
+end
+
+return RideHud
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="143">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[--[[
@@ -17869,7 +19221,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="139">
+          <Item class="ModuleScript" referent="144">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[--[[
@@ -18005,7 +19357,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="140">
+          <Item class="ModuleScript" referent="145">
             <Properties>
               <string name="Name">Window</string>
               <string name="Source"><![CDATA[--[[
@@ -18136,7 +19488,7 @@ return Window
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="141">
+  <Item class="Workspace" referent="146">
     <Properties>
       <string name="Name">Workspace</string>
       <float name="Gravity">196.2</float>

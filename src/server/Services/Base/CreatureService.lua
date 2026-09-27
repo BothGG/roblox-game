@@ -38,9 +38,10 @@ local GameEvents = require(ServerModules.GameEvents)
 local CreatureService = {
 	Priority = 25,
 	Models = {} :: { [Player]: { [string]: Model } },
+	Out = {} :: { [Player]: { [string]: boolean } }, -- titans out of their pen (riding / following)
 }
 
-local Data, Base, Fx, Food, King
+local Data, Base, Fx, Food, King, Ride
 
 function CreatureService:Init(registry)
 	Data = registry.DataService
@@ -48,6 +49,7 @@ function CreatureService:Init(registry)
 	Fx = registry.FxService
 	Food = registry.FoodService
 	King = registry.KingService
+	Ride = registry.RideService
 
 	Data:AddSnapshotHook(function(player, snapshot)
 		snapshot.Income = player:GetAttribute("Income") or 0
@@ -114,6 +116,7 @@ function CreatureService:OnPlayerRemoving(player: Player)
 		end
 	end
 	self.Models[player] = nil
+	self.Out[player] = nil
 end
 
 function CreatureService:_updateLeaderstats(player: Player)
@@ -262,7 +265,45 @@ function CreatureService:_spawnModel(player: Player, uid: string)
 		end
 	end)
 
+	local ride = Instance.new("ProximityPrompt")
+	ride.Name = "RidePrompt"
+	ride.ActionText = "Ride"
+	ride.KeyboardKeyCode = Enum.KeyCode.R
+	ride.GamepadKeyCode = Enum.KeyCode.ButtonX
+	ride.HoldDuration = 0.3
+	ride.RequiresLineOfSight = false
+	ride.UIOffset = Vector2.new(0, 60)
+	ride:SetAttribute("OnlyUserId", player.UserId)
+	ride.Parent = root
+	ride.Triggered:Connect(function(who)
+		if who == player and Ride then
+			Ride:Mount(player, uid)
+		end
+	end)
+
+	if self.Out[player] and self.Out[player][uid] then
+		model.Parent = nil -- it's out riding / following
+	end
 	self:_rescale(player, uid)
+end
+
+-- A titan leaves its pen (ridden or following you) or comes back.
+-- It keeps earning income while it's out.
+function CreatureService:SetOut(player: Player, uid: string, out: boolean)
+	self.Out[player] = self.Out[player] or {}
+	self.Out[player][uid] = if out then true else nil
+	local model = self:GetModel(player, uid)
+	local plot = Base:GetPlot(player)
+	if model then
+		model.Parent = if out then nil else (plot and plot.CreatureFolder)
+		if not out then
+			self:_layout(player)
+		end
+	end
+end
+
+function CreatureService:IsOut(player: Player, uid: string): boolean
+	return self.Out[player] ~= nil and self.Out[player][uid] == true
 end
 
 function CreatureService:_rescale(player: Player, uid: string)
@@ -279,7 +320,7 @@ function CreatureService:_rescale(player: Player, uid: string)
 	local height = model:GetExtentsSize().Y
 	local tag = root:FindFirstChild("Tag") :: BillboardGui
 	tag.StudsOffsetWorldSpace = Vector3.new(0, height + 1.5, 0)
-	for _, name in { "FeedPrompt", "SellPrompt" } do
+	for _, name in { "FeedPrompt", "SellPrompt", "RidePrompt" } do
 		local prompt = root:FindFirstChild(name) :: ProximityPrompt
 		prompt.MaxActivationDistance = 10 + scale * 2
 	end
