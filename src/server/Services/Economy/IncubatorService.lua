@@ -174,7 +174,7 @@ function IncubatorService:_build(plot)
 		prompt.HoldDuration = 0.3
 		prompt.MaxActivationDistance = 12
 		prompt.RequiresLineOfSight = false
-		prompt.Enabled = false
+		prompt:SetAttribute("Off", true)
 		prompt:SetAttribute("OnlyUserId", -1)
 		prompt.Parent = base
 		prompt.Triggered:Connect(function(player)
@@ -234,8 +234,10 @@ function IncubatorService:OnPlayerRemoving(player: Player)
 		self:_clearModel(pad)
 		pad.Label.Text = ""
 		pad.Bar.Size = UDim2.fromScale(0, 1)
-		pad.Prompt.Enabled = false
+		pad.Prompt:SetAttribute("Off", true)
 		pad.Prompt:SetAttribute("OnlyUserId", -1)
+		pad.Base:SetAttribute("HasEgg", false)
+		pad.Base:SetAttribute("OwnerUserId", nil)
 	end
 end
 
@@ -355,12 +357,15 @@ function IncubatorService:Refresh(player: Player)
 	for slot, pad in pads do
 		local uid, egg = eggInSlot(data, slot)
 		pad.Prompt:SetAttribute("OnlyUserId", player.UserId)
+		pad.Base:SetAttribute("OwnerUserId", player.UserId)
+		pad.Base:SetAttribute("HasEgg", uid ~= nil and slot <= count)
+		pad.Base:SetAttribute("EggUid", if slot <= count then uid else nil)
 		if slot > count then
 			self:_clearModel(pad)
 			pad.Label.Text = "🔒 Buy at upgrade board"
 			pad.Label.TextColor3 = Color3.fromRGB(170, 170, 190)
 			pad.Bar.Parent.Visible = false
-			pad.Prompt.Enabled = false
+			pad.Prompt:SetAttribute("Off", true)
 			pad.Base.Transparency = 0.5
 		elseif not uid then
 			self:_clearModel(pad)
@@ -369,11 +374,11 @@ function IncubatorService:Refresh(player: Player)
 			pad.Label.TextColor3 = Color3.new(1, 1, 1)
 			pad.Bar.Parent.Visible = false
 			pad.Prompt.ActionText = "Place egg"
-			pad.Prompt.Enabled = stored > 0
+			pad.Prompt:SetAttribute("Off", stored <= 0)
 		else
 			pad.Base.Transparency = 0
 			pad.Bar.Parent.Visible = true
-			pad.Prompt.Enabled = false
+			pad.Prompt:SetAttribute("Off", true)
 			if pad.EggUid ~= uid then
 				self:_clearModel(pad)
 				local model = EggBuilder.Build(egg)

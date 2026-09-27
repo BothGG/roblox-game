@@ -172,8 +172,8 @@ function RideService:Mount(player: Player, uid: string)
 		)
 		return
 	end
-	if player:GetAttribute("Carrying") then
-		Net.Notify(player, "You can't ride while carrying stolen food!", RED)
+	if player:GetAttribute("Carrying") or player:GetAttribute("CarryingEgg") then
+		Net.Notify(player, "You can't ride while carrying something!", RED)
 		return
 	end
 	if self.Rides[player] then

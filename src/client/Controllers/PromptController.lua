@@ -4,6 +4,8 @@
 	Prompt attributes (set by the server):
 	  OnlyUserId    = only this player sees it (feed/sell your own titan)
 	  HideForUserId = everyone except this player (steal from others)
+	  Off           = true hides it for everyone (use this, not Enabled:
+	                  this controller sets Enabled on the client)
 ]]
 
 local Players = game:GetService("Players")
@@ -25,6 +27,9 @@ local function evaluate(prompt: ProximityPrompt)
 		visible = false
 	end
 	if hide ~= nil and hide == player.UserId then
+		visible = false
+	end
+	if prompt:GetAttribute("Off") == true then
 		visible = false
 	end
 	prompt.Enabled = visible

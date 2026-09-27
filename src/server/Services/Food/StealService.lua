@@ -87,7 +87,13 @@ end
 
 function StealService:TryStart(thief: Player, plot)
 	local victim = plot.Owner
-	if not victim or victim == thief or self.Carriers[thief] or thief:GetAttribute("InBattle") then
+	if
+		not victim
+		or victim == thief
+		or self.Carriers[thief]
+		or thief:GetAttribute("InBattle")
+		or thief:GetAttribute("CarryingEgg")
+	then
 		return
 	end
 	local victimData = Data:Get(victim)

@@ -211,6 +211,9 @@ function BattleService:_cannotFight(player: Player): string?
 	if player:GetAttribute("Carrying") then
 		return "is carrying stolen food"
 	end
+	if player:GetAttribute("CarryingEgg") then
+		return "is carrying an egg"
+	end
 	if self:IsFighting(player) then
 		return "is already fighting"
 	end

@@ -328,13 +328,18 @@ local function buildCarrying(gui: ScreenGui)
 	Theme.AutoScale(refs.Carrying)
 	local function update()
 		local foodId = player:GetAttribute("Carrying")
-		refs.Carrying.Visible = foodId ~= nil
+		local egg = player:GetAttribute("CarryingEgg")
+		refs.Carrying.Visible = foodId ~= nil or egg ~= nil
 		if foodId and Foods[foodId] then
 			refs.Carrying.Text = "😈 Carrying " .. Foods[foodId].Name .. "! Run to your base!"
+			Fx.Primitives.Pop(refs.Carrying, 0.3)
+		elseif egg then
+			refs.Carrying.Text = "🥚 Carrying a " .. tostring(egg) .. " egg! Run to your base!"
 			Fx.Primitives.Pop(refs.Carrying, 0.3)
 		end
 	end
 	player:GetAttributeChangedSignal("Carrying"):Connect(update)
+	player:GetAttributeChangedSignal("CarryingEgg"):Connect(update)
 	update()
 end
 
